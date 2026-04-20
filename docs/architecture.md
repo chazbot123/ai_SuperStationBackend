@@ -1,213 +1,448 @@
-# AI SuperWeb 架构文档
+# 目标项目架构文档
 
 > 版本：v1.1  
-> 日期：2026-04-20  
-> 定位：单机私有化部署 · 单企业多部门 · 后台账号体系复用小程序/H5 名片页
+> 日期：2026-04-18  
+> 定位：单机私有化部署 · 单企业多部门 · 完整后台 · 外部 AI/发布接口接入
 
 ---
 
-## 一、文档目标
-
-本次更新聚焦 3 条最新业务主线，并统一为 Markdown 文档版本：
-
-- 企业名片：补齐当前用户自有名片接口、名片展示接口、封面上传接口
-- 认证会话：明确登录创建 session、最多 2 台设备在线、支持会话列表与手动下线
-- 商品英文名：商品对象统一支持 `englishName / english_name`，列表、搜索、保存均纳入双语字段
-
----
-
-## 二、技术选型
+## 一、技术选型
 
 | 层级 | 技术 | 说明 |
 |------|------|------|
-| 前端 | React 18 + TypeScript + Vite | 当前后台 Demo 基础 |
-| 前端状态 | Zustand | 当前 Demo 已承接业务原型 |
-| 正式前端数据层 | TanStack Query + Zustand | 服务端数据与本地 UI 态分层 |
-| 前端路由 | React Router | 后台路由与权限页控制 |
-| 后端框架 | NestJS + TypeScript | 模块化单体 |
-| ORM | Prisma | PostgreSQL 类型安全建模 |
-| 数据库 | PostgreSQL 16 | 主业务库 |
-| 缓存/会话 | Redis 7 | session 辅助、缓存、队列 |
-| 对象存储 | MinIO | 商品图、名片封面、其他文件 |
-| 队列 | BullMQ | AI 与发布异步任务 |
-| 反向代理 | Nginx | SPA、API、文件访问统一入口 |
-| 部署 | Docker Compose | 单机交付 |
+| 前端 | React 18 + TypeScript + Vite | 当前原型基础 |
+| 前端状态 | TanStack Query + Zustand | 服务端数据用 Query，本地 UI 态用 Zustand |
+| 前端表单 | React Hook Form + Zod | 表单校验 |
+| 前端路由 | React Router v7 | 当前已有 |
+| 前端 UI | Tailwind CSS + 自建 UI 组件 | 当前已有 |
+| 前端扩展端 | 微信小程序 / H5 名片页 | 复用后台账号体系与企业名片数据 |
+| 后端框架 | NestJS + TypeScript | 模块化单体，适合多业务域 |
+| ORM | Prisma | 类型安全，适合 PostgreSQL |
+| 任务队列 | BullMQ | 基于 Redis，处理 AI/发布/异步任务 |
+| 数据库 | PostgreSQL 16 | 关系型主库 |
+| 缓存/队列 | Redis 7 | 缓存、队列、会话辅助 |
+| 文件存储 | MinIO | 本地 S3 兼容，存图片/视频/导出文件 |
+| 反向代理 | Nginx | 统一入口、静态资源、TLS |
+| 部署 | Docker Compose | 单机一键部署 |
 
 ---
 
-## 三、系统上下文
+## 二、系统总体架构图
 
 ```text
-Browser / 小程序 / H5
-        │
-        ▼
-      Nginx
-   ┌────┼────┐
-   │    │    │
-   ▼    ▼    ▼
-后台 SPA  API Server  文件访问
-             │
-   ┌─────────┼─────────┐
-   ▼         ▼         ▼
-PostgreSQL  Redis     MinIO
-             │
-             ▼
-           Worker
+┌──────────────────────────────────────────────────────────────┐
+│                         Browser                              │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ HTTPS
+┌──────────────────────────▼───────────────────────────────────┐
+│                         Nginx                                │
+│   /          → Frontend SPA (静态资源)                        │
+│   /api/*     → Backend API Server                            │
+│   /files/*   → MinIO Gateway (文件访问)                       │
+└────────┬─────────────────┬────────────────────────────────────┘
+         │                 │
+┌────────▼──────────┐  ┌───▼───────────────────────────────────┐
+│   Frontend SPA    │  │         Backend API Server             │
+│   (admin-web)     │  │            (NestJS)                    │
+│                   │  │  ┌────────────────────────────────┐    │
+│  - 登录/权限       │  │  │ Auth / User / Session / RBAC  │    │
+│  - 内容中心        │  │  │ Org / Agent / Content         │    │
+│  - 商品中心        │  │  │ Product / BusinessCard        │    │
+│  - 企业名片        │  │  │ Review / Rule / Publish       │    │
+│  - 发布中心        │  │  │ Asset / Audit / Settings      │    │
+│  - 审核中心        │  │  │ AI Gateway / Integration      │    │
+│  - 规则中心        │  │  └──────────────┬─────────────────┘    │
+│  - 代理商管理      │  │                 │                      │
+│  - 权限管理        │  └─────────────────┼──────────────────────┘
+│  - 审计日志        │                    │
+└───────────────────┘       ┌────────────┼────────────────────┐
+                             │            │                    │
+                ┌────────────▼───┐ ┌──────▼──────┐ ┌──────────▼──┐
+                │  PostgreSQL    │ │    Redis     │ │    MinIO    │
+                │  (主业务库)     │ │ (缓存/队列)  │ │  (文件存储) │
+                └────────────────┘ └──────┬──────┘ └─────────────┘
+                                           │
+                                   ┌───────▼────────┐
+                                   │  Job Worker     │
+                                   │  (BullMQ)       │
+                                   │                 │
+                                   │ - AI 生成任务    │
+                                   │ - 发布执行任务   │
+                                   │ - 重试补偿任务   │
+                                   │ - 审计归档任务   │
+                                   └───────┬────────┘
+                                           │
+                     ┌─────────────────────┼─────────────────────┐
+                     │                     │                     │
+           ┌─────────▼──────┐   ┌──────────▼─────┐   ┌──────────▼─────┐
+           │  External AI   │   │  External      │   │  Webhook /      │
+           │  APIs          │   │  Publish APIs  │   │  Callback       │
+           │  (DashScope,   │   │  (XHS/Douyin/  │   │  Handlers       │
+           │   OpenAI, etc) │   │   WeChat...)   │   │                 │
+           └────────────────┘   └────────────────┘   └─────────────────┘
 ```
-
-### 渠道说明
-
-- 后台 SPA：面向主公司与 1 级代理的管理后台
-- 小程序 / H5 / 前台名片页：复用后台账号体系与企业名片数据
-- 外部 AI / 发布平台：通过 API Server 或 Worker 统一接入
 
 ---
 
-## 四、核心模块划分
+## 三、部署拓扑图
 
-| 模块 | 责任 |
+```text
+┌─────────────────────────────────────────────────────┐
+│                   单台服务器                          │
+│                                                     │
+│  ┌─────────────────────────────────────────────┐   │
+│  │              Docker Compose                  │   │
+│  │                                             │   │
+│  │   ┌─────────┐    ┌──────────────────────┐   │   │
+│  │   │  nginx  │    │     admin-web        │   │   │
+│  │   │  :80    │───▶│  (静态资源 dist/)     │   │   │
+│  │   │  :443   │    └──────────────────────┘   │   │
+│  │   └────┬────┘                               │   │
+│  │        │           ┌──────────────────────┐ │   │
+│  │        └──────────▶│    api-server        │ │   │
+│  │                    │    NestJS :3000       │ │   │
+│  │                    └──────────┬───────────┘ │   │
+│  │                               │             │   │
+│  │              ┌────────────────┤             │   │
+│  │              │                │             │   │
+│  │   ┌──────────▼──┐  ┌──────────▼──┐         │   │
+│  │   │   worker    │  │  scheduler  │         │   │
+│  │   │  (BullMQ)   │  │  (cron)     │         │   │
+│  │   └──────────┬──┘  └─────────────┘         │   │
+│  │              │                              │   │
+│  │   ┌──────────▼──────────────────────────┐  │   │
+│  │   │          基础设施层                   │  │   │
+│  │   │  postgres:5432  redis:6379           │  │   │
+│  │   │  minio:9000     minio-console:9001   │  │   │
+│  │   └─────────────────────────────────────┘  │   │
+│  │                                             │   │
+│  │   ┌─────────────────────────────────────┐  │   │
+│  │   │          持久化卷                     │  │   │
+│  │   │  /data/postgres  /data/redis         │  │   │
+│  │   │  /data/minio     /data/logs          │  │   │
+│  │   └─────────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
+```
+
+### Docker Compose 容器清单
+
+| 容器名 | 镜像 | 端口 | 说明 |
+|--------|------|------|------|
+| nginx | nginx:alpine | 80, 443 | 统一入口反向代理 |
+| admin-web | node:20-alpine (build) | — | 前端静态文件，由 nginx 托管 |
+| api-server | node:20-alpine | 3000 (内部) | NestJS 主后端 |
+| worker | node:20-alpine | — | BullMQ 异步任务消费 |
+| postgres | postgres:16-alpine | 5432 (内部) | 业务主数据库 |
+| redis | redis:7-alpine | 6379 (内部) | 缓存 / 队列 / 会话辅助 |
+| minio | minio/minio | 9000, 9001 (内部) | 对象存储 |
+
+---
+
+## 四、后端模块关系图
+
+```text
+┌────────────────────────────────────────────────────────────────────┐
+│                       NestJS 模块化单体                            │
+│                                                                    │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐         │
+│  │  Auth    │  │   User   │  │   RBAC   │  │    Org     │         │
+│  │ 认证/会话 │  │ 用户管理  │  │ 角色/权限 │  │ 部门/组织   │         │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬──────┘         │
+│       └─────────────┴─────────────┴───────────────┘               │
+│                              │ 基础能力                             │
+│       ┌──────────────────────┼──────────────────────────────┐      │
+│       │                      │                              │      │
+│  ┌────▼─────┐  ┌─────────────▼──┐  ┌───────────────────────▼──┐   │
+│  │  Agent   │  │    Content     │  │    Product / BusinessCard │   │
+│  │ 代理商    │  │ 内容/文案/图片  │  │ 商品 / 企业名片 / 前台展示 │   │
+│  └────┬─────┘  └────────┬───────┘  └──────────────┬───────────┘   │
+│       │                 │                         │               │
+│  ┌────▼─────────────────▼─────────────────────────▼────────────┐  │
+│  │                      Review 审核中心                         │  │
+│  │         (统一处理内容审核 / 商品审核 / 规则审核)              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐         │
+│  │  Rule    │  │ Publish  │  │  Asset   │  │   Audit    │         │
+│  │ 规则中心  │  │ 发布中心  │  │ 文件素材  │  │ 审计日志    │         │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────────────┘         │
+│       │              │             │                               │
+│  ┌────▼──────────────▼─────────────▼────────────────────────────┐  │
+│  │                       基础设施层                              │  │
+│  │  AI Gateway  │  Queue  │  Storage  │  Cache  │  DB         │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### 模块职责说明
+
+| 模块 | 职责 |
 |------|------|
-| `auth` | 登录、登出、当前用户信息、session 管理、设备挤下线 |
-| `user` | 用户基础档案、账户状态 |
-| `rbac` | 角色、权限点、数据范围 |
-| `business-card` | 每账号一张名片、封面图、对外展示信息 |
-| `product` | 商品、英文名、特价、审核提交流转 |
-| `asset` | 图片/封面上传、文件元数据 |
-| `review` | 商品等对象的审核单与状态回写 |
-| `publish` | 内容/商品发布任务 |
-| `audit` | 登录、登出、会话下线、关键业务操作审计 |
+| `auth` | 登录、JWT/会话、登出、密码策略、设备会话限制 |
+| `user` | 用户档案、状态、绑定关系 |
+| `rbac` | 角色、权限点、角色-权限绑定、数据范围策略 |
+| `org` | 部门、组织树、岗位、用户-组织归属 |
+| `agent` | 一级代理档案、状态、代理-账号绑定、业务范围 |
+| `content` | 内容草稿、版本、AI生成、素材引用、提审 |
+| `product` | 商品信息、中文/英文名、图片、特价、状态机、提审 |
+| `business-card` | 企业名片一人一张、模板、封面图、前台展示数据聚合 |
+| `review` | 统一审核中心、审核单、审核节点、操作记录 |
+| `rule` | 关键词规则、黑白名单、规则版本、命中日志 |
+| `publish` | 发布计划、渠道适配、任务状态、重试、回执 |
+| `asset` | 文件上传、元数据、引用关系、访问签名 |
+| `ai` | AI Gateway，统一封装文案/图片/视频生成调用，也可承接商品英文名翻译/生成 |
+| `audit` | 审计日志、操作日志、安全事件 |
+| `settings` | 系统配置、集成配置、功能开关 |
 
-### 模块关系
+---
+
+## 五、权限模型
+
+采用三层权限：
 
 ```text
-Auth ────── User ────── RBAC
-  │            │
-  │            ├──── BusinessCard
-  │            └──── Product
-  │                    │
-  ├──── Session         ├──── Review
-  └──── Audit           └──── Asset
+┌─────────────────────────────────────────────────┐
+│               三层权限模型                        │
+│                                                 │
+│  Layer 1: 功能权限 (Permission)                  │
+│  ─────────────────────────────────              │
+│  控制"能做什么"                                   │
+│  例: content:create  product:submit_review      │
+│      review:approve  publish:execute            │
+│      rbac:user_manage  audit:export             │
+│      business_card:update                       │
+│                                                 │
+│  Layer 2: 数据范围权限 (Data Scope)               │
+│  ─────────────────────────────────              │
+│  控制"能看谁的数据"                               │
+│  SELF              仅本人                        │
+│  DEPARTMENT        本部门                        │
+│  DEPT_AND_CHILDREN 本部门及下级部门               │
+│  ASSIGNED_AGENTS   绑定的代理商范围               │
+│  ALL               全部                          │
+│                                                 │
+│  Layer 3: 流程权限 (Workflow Role)               │
+│  ─────────────────────────────────              │
+│  控制"能参与哪个审核步骤"                          │
+│  例: 提交人 / 初审人 / 终审人 / 管理员              │
+└─────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 五、关键业务对象
+## 六、核心业务流程
 
-### 1. 企业名片
+### 内容生产流程
 
-- 每个后台账号仅允许一张企业名片
-- 名片与账户 `userId` 强绑定，不支持脱离账户单独存在
-- 自有名片读写走 `/api/business-cards/me`
-- 对外展示走 `/api/business-cards/:userId`
-- 封面图通过 `/api/business-cards/me/cover` 上传，文件本体进入对象存储
+```text
+用户填写产品信息
+  → 调用 AI Gateway → 外部模型
+  → 内容草稿入库
+  → 用户编辑/确认
+  → 提交审核 → 生成 ReviewOrder
+  → 审核通过
+  → 可加入发布计划
+```
 
-### 2. 认证会话
+### 商品维护流程
 
-- `POST /api/auth/login` 登录成功后必须创建一条 session
-- 同一账号最多允许 2 台设备同时在线
-- 第 3 台设备登录时，自动挤掉最早在线设备
-- 不设置固定有效期主动过期，但仍保留手动登出与手动下线能力
-- 会话列表与手动下线分别由 `/api/auth/sessions`、`DELETE /api/auth/sessions/:id` 承接
+```text
+用户填写中文产品名
+  → 后端调用英文名推断/翻译能力
+  → 自动回填 english_name
+  → 用户可手动修正
+  → 保存商品草稿
+  → 提交审核
+  → 审核通过后前台展示中英文商品信息
+```
 
-### 3. 商品英文名
+### 企业名片流程
 
-- 商品主对象新增 `englishName`，兼容输入/输出别名 `english_name`
-- 中文产品名录入后可自动推断英文名，用户可二次手动调整
-- 列表、搜索、创建、编辑、保存全部需要支持英文名
-- 独立推断能力由 `/api/products/infer-english-name` 提供
+```text
+后台账号进入企业名片页
+  → 读取本人 business_card
+  → 若不存在则初始化一张默认名片
+  → 上传封面图 / 选择模板 / 编辑名片信息
+  → 保存时按 user_id 唯一更新
+  → 小程序 / H5 名片页复用后台账号体系登录并展示该名片
+```
+
+### 登录会话控制流程
+
+```text
+用户登录成功
+  → 创建一条 user_session
+  → 查询该账号当前有效设备数
+  → 若超过 2 台
+      → 按登录时间踢掉最早设备
+      → 将被踢设备 session 标记为 REPLACED
+  → 当前设备保持登录
+```
+
+### 发布任务流程
+
+```text
+用户选择内容 + 渠道 + 时间
+  → 创建 PublishJob (status: queued)
+  → 任务入 Redis Queue
+  → Worker 消费
+  → 调用渠道 Adapter
+  → 写回 PublishAttempt + 状态
+  → 失败 → 自动重试 (最多3次)
+  → 仍失败 → 状态 failed，人工处理
+```
+
+### 审核流程
+
+```text
+业务模块调用 ReviewService.submit(target)
+  → 生成 ReviewOrder + ReviewNode
+  → 分配审核人
+  → 审核人操作: approve / reject / return
+  → 结果回写业务对象状态
+  → 审计日志落库
+```
 
 ---
 
-## 六、典型流程
+## 七、目录结构
 
-### 1. 登录与设备挤下线
+### 前端 (admin-web)
 
 ```text
-用户登录
-  → 校验账号密码
-  → 创建新 session
-  → 查询当前账号在线 session 数
-  → 若超过 2 台，踢出最早 session
-  → 返回当前用户、角色、权限、数据范围
+frontend/
+  src/
+    app/                  # 路由 & 全局 Provider
+    features/             # 按业务域拆分
+      auth/
+      dashboard/
+      organization/
+      rbac/
+      agents/
+      content/
+      products/
+      business-cards/
+      publishing/
+      reviews/
+      rules/
+      assets/
+      audit/
+      settings/
+    shared/
+      api/                # axios client + 请求封装
+      components/         # 通用 UI 组件
+      hooks/
+      lib/
+      types/
+    main.tsx
+    index.css
 ```
 
-### 2. 企业名片维护
+### 后端 (api-server)
 
 ```text
-用户打开企业名片页
-  → GET /api/business-cards/me
-  → 若无记录则返回空白可初始化态
-  → 用户编辑并 PUT /api/business-cards/me
-  → 上传封面时 POST /api/business-cards/me/cover
-  → 小程序/H5 通过 GET /api/business-cards/:userId 展示
-```
-
-### 3. 商品创建与英文名补齐
-
-```text
-用户输入中文商品名
-  → 前端或后端调用英文名推断能力
-  → 自动回填 englishName
-  → 用户可手动调整
-  → POST /api/products 保存
-  → 列表与搜索统一支持 name + englishName
-```
-
----
-
-## 七、前端契约对齐
-
-根据当前项目 README 与本次需求，前端 Demo 需要与正式接口保持如下语义对齐：
-
-| 领域 | 前端方法 | 对应后端语义 |
-|------|----------|--------------|
-| 企业名片 | `ensureBusinessCard(userId)` | 首次访问时确保名片存在或初始化 |
-| 企业名片 | `updateBusinessCard(userId, payload)` | 更新本人名片 |
-| 企业名片 | `getBusinessCardByUserId(userId)` | 获取用户公开名片展示信息 |
-| 商品英文名 | `inferEnglishProductName(name)` | 根据中文名推断英文名 |
-| 商品创建 | `addProduct()` | 创建商品并自动带出英文名 |
-
-> 说明：本次检查中，README 已明确这些能力，但当前仓库源码未完整检索到上述同名实现，后续需要再做一次“Demo 命名与文档契约”对齐。
-
----
-
-## 八、建议目录结构
-
-```text
-src/
-  pages/
-    Login.tsx
-    Products.tsx
-    Personalization.tsx
-  store/
-    authStore.ts
-    appStore.ts
-
 server/
-  modules/
-    auth/
-    business-card/
-    product/
-    asset/
-    review/
-    audit/
+  src/
+    modules/
+      auth/
+        auth.module.ts
+        auth.controller.ts
+        auth.service.ts
+        session.service.ts
+        strategies/
+        guards/
+        dto/
+      user/
+      rbac/
+      org/
+      agent/
+      content/
+      product/
+      business-card/
+      review/
+      rule/
+      publish/
+        publish.module.ts
+        publish.service.ts
+        adapters/
+          xiaohongshu.adapter.ts
+          douyin.adapter.ts
+          wechat.adapter.ts
+      asset/
+      ai/
+        ai.module.ts
+        ai.service.ts
+        providers/
+          dashscope.provider.ts
+          openai.provider.ts
+      audit/
+      settings/
+    common/
+      db/
+      cache/
+      queue/
+      storage/
+      guards/
+      decorators/
+      filters/
+      interceptors/
+      utils/
+    main.ts
+    app.module.ts
+  prisma/
+    schema.prisma
+    migrations/
+```
+
+### 部署
+
+```text
+deploy/
+  docker-compose.yml
+  docker-compose.prod.yml
+  .env.example
+  nginx/
+    nginx.conf
+    conf.d/
+      default.conf
+  scripts/
+    init.sh
+    backup.sh
+    restore.sh
+    upgrade.sh
+  docs/
+    deployment.md
+    operations.md
 ```
 
 ---
 
-## 九、演进建议
+## 八、演进路线
 
-### 第一阶段
+### 第一阶段：后端骨架
+- 搭建 NestJS 工程、Prisma、Docker Compose
+- 完成 auth / user / rbac / org 模块
+- 同步落地 `user_sessions` 设备会话控制
+- 前端接真实登录与权限接口
 
-- 优先把 `business-card`、`auth session`、`product englishName` 3 条契约固化到正式后端
-- 前端把 Demo store 能力迁移为 API 调用
+### 第二阶段：核心业务后移
+- 商品、内容、代理、规则、审核迁入后端
+- 新增 `business_cards` 模块与前台展示接口
+- 商品中英文名逻辑迁入后端服务
+- 前端改为 TanStack Query 驱动
+- 去掉 localStorage 核心业务数据
 
-### 第二阶段
+### 第三阶段：异步能力落地
+- AI 生成任务化（BullMQ）
+- 发布任务化
+- 文件迁 MinIO
+- 审计日志后端落库
+- 商品英文名翻译/生成可配置走 AI Provider
 
-- 增加 session 审计、设备信息解析、手动下线通知
-- 补齐名片页小程序/H5 的缓存策略与 SEO/分享配置
-
-### 第三阶段
-
-- 商品英文名引入字典纠错、人工覆盖与审核留痕
-- 将名片封面、商品图上传统一收口到 `asset` 域
+### 第四阶段：交付完善
+- Docker Compose 一键部署
+- 初始化脚本、备份脚本
+- 健康检查接口
+- 运维文档
+- 小程序 / H5 名片页与后台账号登录打通
