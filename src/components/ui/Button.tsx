@@ -14,20 +14,20 @@ export default function Button({
   size?: Size;
 }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-md border text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-amber-400/30";
+    "inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-[6px] border px-4 text-sm font-normal text-zinc-50 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus:ring-2 focus:ring-slate-300/20";
   const variants: Record<Variant, string> = {
     primary:
-      "border-amber-400/40 bg-gradient-to-b from-amber-400 to-amber-500 text-zinc-950 hover:from-amber-300 hover:to-amber-500",
+      "border-orange-600/80 bg-orange-600 text-white hover:bg-orange-500 active:bg-orange-700",
     secondary:
-      "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10",
+      "border-zinc-500/70 bg-transparent text-zinc-100 hover:border-orange-500/60 hover:bg-orange-500/15 active:bg-orange-500/25",
     ghost:
-      "border-transparent bg-transparent text-zinc-100 hover:bg-white/10",
+      "border-transparent bg-transparent text-zinc-100 hover:bg-orange-500/15 active:bg-orange-500/25",
     danger:
-      "border-red-500/40 bg-gradient-to-b from-red-500 to-red-600 text-white hover:from-red-400 hover:to-red-600",
+      "border-red-700/80 bg-red-800 text-white hover:bg-red-700 active:bg-red-900",
   };
   const sizes: Record<Size, string> = {
-    sm: "h-8 px-3",
-    md: "h-10 px-4",
+    sm: "h-9 px-3 text-sm",
+    md: "h-10 px-4 text-sm",
   };
 
   return (

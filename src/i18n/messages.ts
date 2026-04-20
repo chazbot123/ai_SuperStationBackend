@@ -27,34 +27,16 @@ export const messages: Record<string, Record<LangKey, string>> = {
   "page.dashboard": { "zh-CN": "仪表盘", "en-US": "Dashboard" },
   "page.studio": { "zh-CN": "图片/文案生成", "en-US": "Copy & Images" },
   "page.publishing": { "zh-CN": "获客", "en-US": "Publishing" },
+  "page.products": { "zh-CN": "产品管理", "en-US": "Products" },
   "page.support": { "zh-CN": "AI客服（后台）", "en-US": "Support" },
   "page.videos": { "zh-CN": "视频生成", "en-US": "Video" },
   "page.assets": { "zh-CN": "数字仓库", "en-US": "Warehouse" },
   "page.users": { "zh-CN": "用户管理", "en-US": "Users" },
   "page.personalization": { "zh-CN": "界面设置", "en-US": "Appearance" },
+  "page.specialOffers": { "zh-CN": "特价商品", "en-US": "Special Offers" },
   "page.agents": { "zh-CN": "一级代理管理", "en-US": "Agents" },
   "page.rules": { "zh-CN": "规则配置", "en-US": "Rules" },
   "page.reviews": { "zh-CN": "审核队列", "en-US": "Reviews" },
-  "studio.list.title": { "zh-CN": "内容列表", "en-US": "Content List" },
-  "studio.editor.title": { "zh-CN": "编辑器", "en-US": "Editor" },
-  "studio.new": { "zh-CN": "新建", "en-US": "New" },
-  "studio.aiGenerate": { "zh-CN": "AI生成", "en-US": "Generate" },
-  "studio.syncToLeads": { "zh-CN": "同步到获客", "en-US": "Sync to Publishing" },
-  "studio.empty": { "zh-CN": "暂无内容", "en-US": "No content" },
-  "studio.selectHint": { "zh-CN": "请选择左侧内容开始编辑。", "en-US": "Select an item on the left to start editing." },
-  "studio.form.productName": { "zh-CN": "产品名称", "en-US": "Product name" },
-  "studio.form.sellingPoints": { "zh-CN": "卖点", "en-US": "Selling points" },
-  "studio.form.audience": { "zh-CN": "目标人群", "en-US": "Audience" },
-  "studio.form.style": { "zh-CN": "风格", "en-US": "Style" },
-  "studio.form.format": { "zh-CN": "输出格式", "en-US": "Format" },
-  "studio.form.imageSize": { "zh-CN": "图片尺寸", "en-US": "Image size" },
-  "studio.form.title": { "zh-CN": "标题", "en-US": "Title" },
-  "studio.form.state": { "zh-CN": "状态", "en-US": "Status" },
-  "studio.form.body": { "zh-CN": "正文", "en-US": "Body" },
-  "studio.form.images": { "zh-CN": "配图预览", "en-US": "Images" },
-  "studio.form.batch": { "zh-CN": "批量生成（CSV，每行：产品名,卖点,人群）", "en-US": "Batch (CSV per line: name, points, audience)" },
-  "studio.batch.parsePreview": { "zh-CN": "解析预览（占位）", "en-US": "Parse preview (Demo)" },
-  "studio.syncedHint": { "zh-CN": "已自动同步至「获客」模块", "en-US": "Synced to Publishing" },
   "publishing.pool.title": { "zh-CN": "内容池（图文/视频自动同步）", "en-US": "Content Pool (auto-synced)" },
   "publishing.bindPlatform": { "zh-CN": "平台绑定（占位）", "en-US": "Bind platforms (Demo)" },
   "publishing.publish": { "zh-CN": "一键发布", "en-US": "Publish" },
@@ -177,11 +159,46 @@ export const messages: Record<string, Record<LangKey, string>> = {
   "personalization.site.modules": { "zh-CN": "模块", "en-US": "Modules" },
   "personalization.site.preview": { "zh-CN": "预览", "en-US": "Preview" },
   "personalization.site.hint": { "zh-CN": "Demo：支持拖拽排序与模板切换；可后续接入更复杂的可视化编辑能力。", "en-US": "Demo: drag to reorder and switch templates. Visual editor can be added later." },
+  "personalization.site.specialOfferHint": { "zh-CN": "特价商品已拆分为独立模块，请前往「特价商品」页面单独配置。", "en-US": "Special offers have been extracted into a standalone module. Configure them on the Special Offers page." },
+  "personalization.site.specialOffer.title": { "zh-CN": "特价商品植入", "en-US": "Special Offer Placement" },
+  "personalization.site.specialOffer.sectionTitle": { "zh-CN": "专区标题", "en-US": "Section title" },
+  "personalization.site.specialOffer.sectionSubtitle": { "zh-CN": "专区副标题", "en-US": "Section subtitle" },
+  "personalization.site.specialOffer.cardName": { "zh-CN": "商品名称", "en-US": "Product name" },
+  "personalization.site.specialOffer.cardSummary": { "zh-CN": "卖点描述", "en-US": "Selling point" },
+  "personalization.site.specialOffer.cardTag": { "zh-CN": "角标", "en-US": "Badge" },
+  "personalization.site.specialOffer.cardPrice": { "zh-CN": "特价", "en-US": "Sale price" },
+  "personalization.site.specialOffer.cardOriginalPrice": { "zh-CN": "原价", "en-US": "Original price" },
+  "personalization.site.specialOffer.cardCta": { "zh-CN": "按钮文案", "en-US": "CTA text" },
+  "personalization.site.specialOffer.cardEnabled": { "zh-CN": "启用植入", "en-US": "Enable placement" },
+  "personalization.site.specialOffer.cardIndex": { "zh-CN": "特价位", "en-US": "Slot" },
+  "personalization.site.specialOffer.empty": { "zh-CN": "至少启用一个特价商品后，预览区会展示限时优惠卡片。", "en-US": "Enable at least one offer to show the promo cards in preview." },
   "personalization.avatar.title": { "zh-CN": "AI虚拟形象定制", "en-US": "Avatar Settings" },
   "personalization.avatar.pick": { "zh-CN": "选择形象", "en-US": "Pick avatar" },
   "personalization.avatar.upload": { "zh-CN": "上传自定义图片", "en-US": "Upload custom image" },
   "personalization.avatar.uploadHint": { "zh-CN": "支持 PNG/JPG；建议方形；Demo 使用本地预览占位。", "en-US": "PNG/JPG supported; square recommended; demo uses local preview." },
   "personalization.avatar.hint": { "zh-CN": "Demo：虚拟形象会联动到 AI 超级站预览区右下角桌宠。", "en-US": "Demo: avatar is linked to the site preview pet." },
+  "specialOffers.title": { "zh-CN": "特价商品模块", "en-US": "Special Offer Module" },
+  "specialOffers.preview": { "zh-CN": "模块预览", "en-US": "Module Preview" },
+  "specialOffers.switch": { "zh-CN": "启用特价商品模块", "en-US": "Enable special offer module" },
+  "specialOffers.hint": { "zh-CN": "该模块独立管理首页促销位，可单独控制是否展示并维护每个特价位内容。", "en-US": "This standalone module manages homepage promo slots, with independent visibility and offer content control." },
+  "specialOffers.sectionTitle": { "zh-CN": "专区标题", "en-US": "Section title" },
+  "specialOffers.sectionSubtitle": { "zh-CN": "专区副标题", "en-US": "Section subtitle" },
+  "specialOffers.cardName": { "zh-CN": "商品名称", "en-US": "Product name" },
+  "specialOffers.cardSummary": { "zh-CN": "卖点描述", "en-US": "Selling point" },
+  "specialOffers.cardTag": { "zh-CN": "角标", "en-US": "Badge" },
+  "specialOffers.cardPrice": { "zh-CN": "特价", "en-US": "Sale price" },
+  "specialOffers.cardOriginalPrice": { "zh-CN": "原价", "en-US": "Original price" },
+  "specialOffers.cardCta": { "zh-CN": "按钮文案", "en-US": "CTA text" },
+  "specialOffers.cardEnabled": { "zh-CN": "启用特价位", "en-US": "Enable slot" },
+  "specialOffers.cardIndex": { "zh-CN": "特价位", "en-US": "Slot" },
+  "specialOffers.count": { "zh-CN": "当前特价位：{count} 个", "en-US": "{count} slots" },
+  "specialOffers.add": { "zh-CN": "新增特价位", "en-US": "Add slot" },
+  "specialOffers.remove": { "zh-CN": "删除特价位", "en-US": "Remove slot" },
+  "specialOffers.noSlots": { "zh-CN": "当前没有特价位，请先新增一个特价位。", "en-US": "No slots yet. Add one to start configuring offers." },
+  "specialOffers.empty": { "zh-CN": "至少启用一个特价商品后，右侧才会显示模块预览。", "en-US": "Enable at least one offer to render the module preview." },
+  "specialOffers.disabled": { "zh-CN": "当前模块已关闭，站点中不会展示特价商品区域。", "en-US": "The module is disabled, so the site will not render the special offers section." },
+  "specialOffers.badge": { "zh-CN": "限时植入", "en-US": "Limited Placement" },
+  "specialOffers.slotLabel": { "zh-CN": "首页促销位", "en-US": "Homepage promo slot" },
   "agents.title": { "zh-CN": "一级代理管理", "en-US": "Agents" },
   "agents.create": { "zh-CN": "创建一级代理", "en-US": "Create agent" },
   "agents.empty": { "zh-CN": "暂无数据", "en-US": "No data" },
@@ -227,22 +244,9 @@ export const messages: Record<string, Record<LangKey, string>> = {
   ,"login.quick": { "zh-CN": "快速登录（Demo）", "en-US": "Quick login (Demo)" }
   ,"login.error": { "zh-CN": "登录失败", "en-US": "Login failed" }
   ,"login.presetHint": { "zh-CN": "预置账号：{list}", "en-US": "Preset accounts: {list}" }
-  ,"studio.status.draft": { "zh-CN": "草稿", "en-US": "Draft" }
-  ,"studio.status.submitted": { "zh-CN": "已提交", "en-US": "Submitted" }
-  ,"studio.status.rejected": { "zh-CN": "已驳回", "en-US": "Rejected" }
-  ,"studio.tab.draft": { "zh-CN": "草稿", "en-US": "Draft" }
-  ,"studio.tab.submitted": { "zh-CN": "已提交", "en-US": "Submitted" }
-  ,"studio.tab.rejected": { "zh-CN": "驳回", "en-US": "Rejected" }
-  ,"studio.style.xhs": { "zh-CN": "小红书风", "en-US": "Xiaohongshu" }
-  ,"studio.style.douyin": { "zh-CN": "抖音风", "en-US": "Douyin" }
-  ,"studio.style.wechat": { "zh-CN": "微信公众号风", "en-US": "WeChat Official" }
-  ,"studio.format.text": { "zh-CN": "纯文本", "en-US": "Text" }
-  ,"studio.format.html": { "zh-CN": "带标签HTML", "en-US": "HTML" }
-  ,"studio.size.xhs": { "zh-CN": "小红书封面（3:4）", "en-US": "Cover 3:4" }
-  ,"studio.size.douyin": { "zh-CN": "抖音竖屏（9:16）", "en-US": "Vertical 9:16" }
 };
 
 export function formatMessage(template: string, vars?: Record<string, string | number>) {
   if (!vars) return template;
-  return Object.keys(vars).reduce((acc, k) => acc.replaceAll(`{${k}}`, String(vars[k])), template);
+  return Object.keys(vars).reduce((acc, k) => acc.replace(new RegExp(`\\{${k}\\}`, "g"), String(vars[k])), template);
 }

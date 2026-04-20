@@ -2,8 +2,9 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { newId, nowIso } from "@/utils/id";
 
-export type PlatformKey = "xiaohongshu" | "douyin" | "wechat_mp" | "taobao";
-export type ContentType = "copy" | "video";
+export type PlatformKey = "xiaohongshu" | "douyin" | "wechat_mp" | "taobao" | "super_site" | "jd" | "pdd";
+export type ContentType = "copy" | "video" | "product";
+export type ReviewStatus = "draft" | "submitted" | "approved" | "rejected";
 
 export type CardSkinKey = "black_gold" | "iridescent" | "geo_green" | "night_gold";
 export type VirtualAvatarKey = "cat" | "dog" | "dragon" | "dilireba" | "robot" | "custom";
@@ -19,8 +20,19 @@ export type ContentItem = {
   platformStyle: PlatformKey;
   images: string[];
   videoUrl?: string;
+  requestedPlatforms?: PlatformKey[];
   createdAt: string;
   syncedToLeads: boolean;
+  reviewStatus: ReviewStatus;
+  submittedById?: string;
+  submittedByName?: string;
+  submittedByRoleKey?: string;
+  submittedAt?: string;
+  reviewedById?: string;
+  reviewedByName?: string;
+  reviewedByRoleKey?: string;
+  reviewedAt?: string;
+  rejectReason?: string | null;
 };
 
 export type PublishJob = {
@@ -60,27 +72,110 @@ export type UserProfile = {
   createdAt: string;
 };
 
+export type SiteModule = {
+  key: string;
+  label: string;
+  enabled: boolean;
+};
+
+export type SpecialOfferItem = {
+  id: string;
+  name: string;
+  summary: string;
+  tag: string;
+  priceText: string;
+  originalPriceText: string;
+  ctaText: string;
+  images: string[];
+  enabled: boolean;
+};
+
+export type ProductStatus = "draft" | "submitted" | "live" | "rejected" | "offline";
+
+export type ProductItem = {
+  id: string;
+  ownerUserId: string;
+  ownerName: string;
+  ownerRoleKey: string;
+  name: string;
+  summary: string;
+  priceText: string;
+  specialOfferEnabled?: boolean;
+  originalPriceText?: string;
+  specialPriceText?: string;
+  specialTag?: string;
+  images: string[];
+  status: ProductStatus;
+  rejectReason?: string | null;
+  submittedAt?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Settings = {
   enterpriseName: string;
   cardSkin: CardSkinKey;
   virtualAvatar: VirtualAvatarKey;
   virtualAvatarCustomUrl: string | null;
   siteTemplate: SiteTemplateKey;
-  siteModules: { key: string; label: string; enabled: boolean }[];
+  siteModules: SiteModule[];
+  specialOfferTitle: string;
+  specialOfferSubtitle: string;
+  specialOffers: SpecialOfferItem[];
 };
 
 type AppState = {
   contents: ContentItem[];
+  products: ProductItem[];
   publishJobs: PublishJob[];
   purchases: PurchaseRecord[];
   metrics: WarehouseMetric[];
   users: UserProfile[];
   settings: Settings;
 
-  addContent: (input: Omit<ContentItem, "id" | "createdAt" | "syncedToLeads">) => ContentItem;
+  addContent: (
+    input: Omit<
+      ContentItem,
+      | "id"
+      | "createdAt"
+      | "syncedToLeads"
+      | "reviewStatus"
+      | "submittedById"
+      | "submittedByName"
+      | "submittedByRoleKey"
+      | "submittedAt"
+      | "reviewedById"
+      | "reviewedByName"
+      | "reviewedByRoleKey"
+      | "reviewedAt"
+      | "rejectReason"
+    > & {
+      syncedToLeads?: boolean;
+      reviewStatus?: ReviewStatus;
+      submittedById?: string;
+      submittedByName?: string;
+      submittedByRoleKey?: string;
+      submittedAt?: string;
+      reviewedById?: string;
+      reviewedByName?: string;
+      reviewedByRoleKey?: string;
+      reviewedAt?: string;
+      rejectReason?: string | null;
+    }
+  ) => ContentItem;
   markContentSynced: (contentId: string) => void;
+  updateContent: (contentId: string, patch: Partial<ContentItem>) => void;
   createPublishJob: (input: { contentId: string; platforms: PlatformKey[]; scheduledAt: string | null }) => PublishJob;
   updatePublishJob: (jobId: string, patch: Partial<PublishJob>) => void;
+
+  addProduct: (
+    input: Omit<ProductItem, "id" | "createdAt" | "updatedAt">
+  ) => ProductItem;
+  updateProduct: (productId: string, patch: Partial<ProductItem>) => void;
+  submitProductReview: (productId: string) => void;
+  approveProduct: (productId: string) => void;
+  rejectProduct: (productId: string, reason: string) => void;
 
   addUser: (input: Omit<UserProfile, "id" | "createdAt">) => UserProfile;
   updateUser: (id: string, patch: Partial<UserProfile>) => void;
@@ -93,11 +188,115 @@ type AppState = {
   setSiteTemplate: (tpl: SiteTemplateKey) => void;
   toggleSiteModule: (key: string) => void;
   reorderSiteModules: (fromIndex: number, toIndex: number) => void;
+  setSpecialOfferTitle: (title: string) => void;
+  setSpecialOfferSubtitle: (subtitle: string) => void;
+  addSpecialOffer: () => void;
+  updateSpecialOffer: (id: string, patch: Partial<SpecialOfferItem>) => void;
+  removeSpecialOffer: (id: string) => void;
 
   seedIfEmpty: () => void;
 };
 
-function seed(): Pick<AppState, "contents" | "publishJobs" | "purchases" | "metrics" | "users" | "settings"> {
+function defaultSiteModules(): SiteModule[] {
+  return [
+    { key: "ai_attract", label: "AI招商", enabled: true },
+    { key: "ai_leads", label: "AI拓客", enabled: true },
+    { key: "special_offer", label: "特价商品", enabled: true },
+    { key: "ai_kf", label: "AI客服", enabled: true },
+    { key: "ai_video", label: "AI视频", enabled: true },
+  ];
+}
+
+function defaultSpecialOffers(): SpecialOfferItem[] {
+  return [
+    {
+      id: "offer-starter",
+      name: "爆款引流套餐",
+      summary: "限时植入首页首屏，适合拉新转化",
+      tag: "今日特价",
+      priceText: "¥199",
+      originalPriceText: "¥399",
+      ctaText: "立即抢购",
+      images: [],
+      enabled: true,
+    },
+    {
+      id: "offer-pro",
+      name: "企业获客升级版",
+      summary: "含 AI 文案、线索承接与客服分发",
+      tag: "组合优惠",
+      priceText: "¥699",
+      originalPriceText: "¥999",
+      ctaText: "查看详情",
+      images: [],
+      enabled: true,
+    },
+    {
+      id: "offer-addon",
+      name: "视频种草加购包",
+      summary: "搭配短视频素材与直播话术使用",
+      tag: "加价购",
+      priceText: "¥99",
+      originalPriceText: "¥159",
+      ctaText: "加入购物车",
+      images: [],
+      enabled: false,
+    },
+  ];
+}
+
+function buildSpecialOffer(index: number, patch?: Partial<SpecialOfferItem>): SpecialOfferItem {
+  return {
+    id: patch?.id ?? newId("offer"),
+    name: patch?.name ?? `特价商品 ${index + 1}`,
+    summary: patch?.summary ?? "请补充该特价位的核心卖点与优惠信息",
+    tag: patch?.tag ?? "限时特惠",
+    priceText: patch?.priceText ?? "¥0",
+    originalPriceText: patch?.originalPriceText ?? "¥0",
+    ctaText: patch?.ctaText ?? "立即查看",
+    images: patch?.images ?? [],
+    enabled: patch?.enabled ?? true,
+  };
+}
+
+function defaultSettings(): Settings {
+  return {
+    enterpriseName: "示例科技",
+    cardSkin: "black_gold",
+    virtualAvatar: "cat",
+    virtualAvatarCustomUrl: null,
+    siteTemplate: "standard",
+    siteModules: defaultSiteModules(),
+    specialOfferTitle: "特价商品专区",
+    specialOfferSubtitle: "支持首页插入限时优惠、秒杀引导与爆款推荐",
+    specialOffers: defaultSpecialOffers(),
+  };
+}
+
+function mergeSettings(settings?: Partial<Settings> | null): Settings {
+  const defaults = defaultSettings();
+  const savedModules = settings?.siteModules ?? [];
+  const savedOffers = settings?.specialOffers ?? [];
+  const hasSavedOffers = Array.isArray(settings?.specialOffers);
+
+  const siteModules = [
+    ...savedModules,
+    ...defaults.siteModules.filter((module) => !savedModules.some((saved) => saved.key === module.key)),
+  ];
+
+  const specialOffers = hasSavedOffers
+    ? savedOffers.map((offer, index) => buildSpecialOffer(index, { ...defaults.specialOffers[index], ...offer }))
+    : defaults.specialOffers;
+
+  return {
+    ...defaults,
+    ...settings,
+    siteModules,
+    specialOffers,
+  };
+}
+
+function seed(): Pick<AppState, "contents" | "products" | "publishJobs" | "purchases" | "metrics" | "users" | "settings"> {
   const now = Date.now();
   const contents: ContentItem[] = [
     {
@@ -109,6 +308,8 @@ function seed(): Pick<AppState, "contents" | "publishJobs" | "purchases" | "metr
       images: ["https://picsum.photos/seed/xhs_1/600/800"],
       createdAt: new Date(now - 2 * 3600 * 1000).toISOString(),
       syncedToLeads: true,
+      reviewStatus: "approved",
+      rejectReason: null,
     },
     {
       id: newId("c"),
@@ -120,6 +321,8 @@ function seed(): Pick<AppState, "contents" | "publishJobs" | "purchases" | "metr
       videoUrl: "https://example.com/demo-video.mp4",
       createdAt: new Date(now - 5 * 3600 * 1000).toISOString(),
       syncedToLeads: true,
+      reviewStatus: "approved",
+      rejectReason: null,
     },
   ];
   const publishJobs: PublishJob[] = [
@@ -131,6 +334,56 @@ function seed(): Pick<AppState, "contents" | "publishJobs" | "purchases" | "metr
       status: "queued",
       lastError: null,
       createdAt: new Date(now - 10 * 60 * 1000).toISOString(),
+    },
+  ];
+  const products: ProductItem[] = [
+    {
+      id: "prod_main_001",
+      ownerUserId: "acc_main_company",
+      ownerName: "主公司",
+      ownerRoleKey: "main_company",
+      name: "AI电热采暖系统",
+      summary: "适用于家庭与商用场景的节能采暖方案",
+      priceText: "¥ 2999",
+      images: ["https://picsum.photos/seed/product_main_1/800/800"],
+      status: "live",
+      rejectReason: null,
+      submittedAt: null,
+      reviewedAt: new Date(now - 6 * 24 * 3600 * 1000).toISOString(),
+      createdAt: new Date(now - 9 * 24 * 3600 * 1000).toISOString(),
+      updatedAt: new Date(now - 6 * 24 * 3600 * 1000).toISOString(),
+    },
+    {
+      id: "prod_agent_001",
+      ownerUserId: "acc_agent_a001",
+      ownerName: "一级代理 A001",
+      ownerRoleKey: "level1_agent",
+      name: "石墨烯节能墙暖",
+      summary: "适合招商和门店展示的轻量化取暖商品",
+      priceText: "¥ 1299",
+      images: ["https://picsum.photos/seed/product_agent_1/800/800"],
+      status: "submitted",
+      rejectReason: null,
+      submittedAt: new Date(now - 2 * 3600 * 1000).toISOString(),
+      reviewedAt: null,
+      createdAt: new Date(now - 2 * 24 * 3600 * 1000).toISOString(),
+      updatedAt: new Date(now - 2 * 3600 * 1000).toISOString(),
+    },
+    {
+      id: "prod_agent_002",
+      ownerUserId: "acc_agent_a001",
+      ownerName: "一级代理 A001",
+      ownerRoleKey: "level1_agent",
+      name: "模块化地暖控制器",
+      summary: "已上架商品示例，前台应展示",
+      priceText: "¥ 899",
+      images: ["https://picsum.photos/seed/product_agent_2/800/800"],
+      status: "live",
+      rejectReason: null,
+      submittedAt: new Date(now - 5 * 24 * 3600 * 1000).toISOString(),
+      reviewedAt: new Date(now - 4 * 24 * 3600 * 1000).toISOString(),
+      createdAt: new Date(now - 7 * 24 * 3600 * 1000).toISOString(),
+      updatedAt: new Date(now - 4 * 24 * 3600 * 1000).toISOString(),
     },
   ];
   const purchases: PurchaseRecord[] = [
@@ -166,38 +419,29 @@ function seed(): Pick<AppState, "contents" | "publishJobs" | "purchases" | "metr
       createdAt: new Date(now - 2 * 24 * 3600 * 1000).toISOString(),
     },
   ];
-  const settings: Settings = {
-    enterpriseName: "示例科技",
-    cardSkin: "black_gold",
-    virtualAvatar: "cat",
-    virtualAvatarCustomUrl: null,
-    siteTemplate: "standard",
-    siteModules: [
-      { key: "ai_attract", label: "AI招商", enabled: true },
-      { key: "ai_leads", label: "AI拓客", enabled: true },
-      { key: "ai_kf", label: "AI客服", enabled: true },
-      { key: "ai_video", label: "AI视频", enabled: true },
-    ],
-  };
-  return { contents, publishJobs, purchases, metrics, users, settings };
+  const settings = defaultSettings();
+  return { contents, products, publishJobs, purchases, metrics, users, settings };
 }
 
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       contents: [],
+      products: [],
       publishJobs: [],
       purchases: [],
       metrics: [],
       users: [],
-      settings: seed().settings,
+      settings: defaultSettings(),
 
       addContent: (input) => {
         const item: ContentItem = {
           ...input,
           id: newId("c"),
           createdAt: nowIso(),
-          syncedToLeads: false,
+          syncedToLeads: input.syncedToLeads ?? false,
+          reviewStatus: input.reviewStatus ?? "approved",
+          rejectReason: input.rejectReason ?? null,
         };
         set({ contents: [item, ...get().contents] });
         return item;
@@ -206,6 +450,9 @@ export const useAppStore = create<AppState>()(
         set({
           contents: get().contents.map((c) => (c.id === contentId ? { ...c, syncedToLeads: true } : c)),
         });
+      },
+      updateContent: (contentId, patch) => {
+        set({ contents: get().contents.map((c) => (c.id === contentId ? { ...c, ...patch } : c)) });
       },
       createPublishJob: ({ contentId, platforms, scheduledAt }) => {
         const job: PublishJob = {
@@ -222,6 +469,51 @@ export const useAppStore = create<AppState>()(
       },
       updatePublishJob: (jobId, patch) => {
         set({ publishJobs: get().publishJobs.map((j) => (j.id === jobId ? { ...j, ...patch } : j)) });
+      },
+
+      addProduct: (input) => {
+        const item: ProductItem = {
+          ...input,
+          id: newId("prod"),
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        };
+        set({ products: [item, ...get().products] });
+        return item;
+      },
+      updateProduct: (productId, patch) => {
+        set({
+          products: get().products.map((p) =>
+            p.id === productId ? { ...p, ...patch, updatedAt: nowIso() } : p
+          ),
+        });
+      },
+      submitProductReview: (productId) => {
+        set({
+          products: get().products.map((p) =>
+            p.id === productId
+              ? { ...p, status: "submitted", submittedAt: nowIso(), rejectReason: null, updatedAt: nowIso() }
+              : p
+          ),
+        });
+      },
+      approveProduct: (productId) => {
+        set({
+          products: get().products.map((p) =>
+            p.id === productId
+              ? { ...p, status: "live", reviewedAt: nowIso(), rejectReason: null, updatedAt: nowIso() }
+              : p
+          ),
+        });
+      },
+      rejectProduct: (productId, reason) => {
+        set({
+          products: get().products.map((p) =>
+            p.id === productId
+              ? { ...p, status: "rejected", reviewedAt: nowIso(), rejectReason: reason || "未填写驳回原因", updatedAt: nowIso() }
+              : p
+          ),
+        });
       },
 
       addUser: (input) => {
@@ -255,14 +547,53 @@ export const useAppStore = create<AppState>()(
         list.splice(toIndex, 0, m);
         set({ settings: { ...get().settings, siteModules: list } });
       },
+      setSpecialOfferTitle: (title) => set({ settings: { ...get().settings, specialOfferTitle: title } }),
+      setSpecialOfferSubtitle: (subtitle) => set({ settings: { ...get().settings, specialOfferSubtitle: subtitle } }),
+      addSpecialOffer: () => {
+        const offers = get().settings.specialOffers;
+        set({
+          settings: {
+            ...get().settings,
+            specialOffers: [...offers, buildSpecialOffer(offers.length)],
+          },
+        });
+      },
+      updateSpecialOffer: (id, patch) => {
+        set({
+          settings: {
+            ...get().settings,
+            specialOffers: get().settings.specialOffers.map((offer) =>
+              offer.id === id ? { ...offer, ...patch, id: offer.id } : offer
+            ),
+          },
+        });
+      },
+      removeSpecialOffer: (id) => {
+        set({
+          settings: {
+            ...get().settings,
+            specialOffers: get().settings.specialOffers.filter((offer) => offer.id !== id),
+          },
+        });
+      },
 
       seedIfEmpty: () => {
         const s = get();
-        if (s.contents.length || s.publishJobs.length || s.purchases.length || s.metrics.length || s.users.length) return;
+        if (s.contents.length || s.products.length || s.publishJobs.length || s.purchases.length || s.metrics.length || s.users.length) return;
         const initial = seed();
         set(initial);
       },
     }),
-    { name: "aiadmin_app_v1" }
+    {
+      name: "aiadmin_app_v1",
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState as Partial<AppState>) ?? {};
+        return {
+          ...currentState,
+          ...persisted,
+          settings: mergeSettings(persisted.settings),
+        };
+      },
+    }
   )
 );

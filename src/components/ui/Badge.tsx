@@ -9,11 +9,11 @@ export default function Badge({
   ...props
 }: HTMLAttributes<HTMLSpanElement> & { variant?: Variant }) {
   const variants: Record<Variant, string> = {
-    gray: "border-white/10 bg-white/5 text-zinc-200",
-    blue: "border-blue-400/30 bg-blue-500/10 text-blue-200",
-    green: "border-emerald-400/30 bg-emerald-500/10 text-emerald-200",
-    red: "border-red-400/30 bg-red-500/10 text-red-200",
-    amber: "border-amber-400/30 bg-amber-500/10 text-amber-200",
+    gray: "border-zinc-600/70 bg-zinc-700 text-zinc-100",
+    blue: "border-orange-600/70 bg-orange-700 text-zinc-50",
+    green: "border-emerald-700/80 bg-emerald-800 text-zinc-50",
+    red: "border-red-700/80 bg-red-800 text-zinc-50",
+    amber: "border-orange-600/80 bg-orange-600 text-zinc-50",
   };
   return (
     <span

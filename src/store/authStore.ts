@@ -14,11 +14,13 @@ const seed = createDemoSeed();
 
 function userFromPreset(roleKey: RoleKey): AuthUser {
   const account = seed.accounts.find((a) => a.roleKey === roleKey);
-  const id = account?.id ?? `acc_${roleKey}`;
-  const email = account?.email ?? `${roleKey}@demo.local`;
-  const displayName = account?.displayName ?? roleKey;
-  const agentId = account?.agentId;
-  return { id, email, displayName, roleKey, agentId };
+  return {
+    id: account?.id ?? `acc_${roleKey}`,
+    email: account?.email ?? `${roleKey}@demo.local`,
+    displayName: account?.displayName ?? roleKey,
+    roleKey,
+    agentId: account?.agentId,
+  };
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -32,10 +34,10 @@ export const useAuthStore = create<AuthState>()(
           (a) => a.email.toLowerCase() === normalized && a.status === "active"
         );
         if (!account) {
-          return { ok: false, message: "账号不存在或已停用（Demo：请使用预置账号）" };
+          return { ok: false, message: "账号不存在或已停用（Demo 请使用预置账号）" };
         }
         if (!password.trim()) {
-          return { ok: false, message: "请输入密码（Demo：任意非空即可）" };
+          return { ok: false, message: "请输入密码（Demo 任意非空即可）" };
         }
         set({
           user: {
@@ -53,4 +55,3 @@ export const useAuthStore = create<AuthState>()(
     { name: "aiadmin_auth_v1" }
   )
 );
-

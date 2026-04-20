@@ -18,7 +18,7 @@ function toNumOrNull(v: string) {
 export default function KeywordRules() {
   usePageMeta("关键词规则");
   const user = useAuthStore((s) => s.user);
-  const canEdit = user?.roleKey === "super_admin" || user?.roleKey === "operator";
+  const canEdit = user?.roleKey === "main_company";
 
   const rules = useDataStore((s) => s.rules);
   const createRule = useDataStore((s) => s.createRule);

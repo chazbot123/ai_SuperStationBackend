@@ -18,7 +18,7 @@ export default function Agents() {
   const createAgent = useDataStore((s) => s.createAgent);
   const updateAgent = useDataStore((s) => s.updateAgent);
 
-  const canEdit = user?.roleKey === "super_admin" || user?.roleKey === "operator";
+  const canEdit = user?.roleKey === "main_company";
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "disabled">("all");
   const [open, setOpen] = useState(false);
@@ -28,7 +28,7 @@ export default function Agents() {
   const agentList = useMemo(() => {
     const roleKey = user?.roleKey;
     const agentId = user?.agentId;
-    const base = roleKey === "agent_l1" && agentId ? agents.filter((a) => a.id === agentId) : agents;
+    const base = roleKey === "level1_agent" && agentId ? agents.filter((a) => a.id === agentId) : agents;
     return base
       .filter((a) => (status === "all" ? true : a.status === status))
       .filter((a) => {

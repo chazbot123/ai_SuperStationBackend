@@ -60,7 +60,7 @@ export const useRbacStore = create<RbacState>()(
           email: e,
           displayName: n,
           roleKey,
-          agentId: roleKey === "agent_l1" ? agentId : undefined,
+          agentId: roleKey === "level1_agent" ? agentId : undefined,
           status: "active",
           createdAt: nowIso(),
         };
@@ -75,4 +75,3 @@ export const useRbacStore = create<RbacState>()(
     { name: "aiadmin_rbac_v1" }
   )
 );
-

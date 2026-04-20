@@ -5,8 +5,9 @@ export function hasPageAccess(matrix: PermissionMatrix, roleKey: RoleKey, pageKe
 }
 
 export function canEdit(roleKey: RoleKey, pageKey: PageKey) {
-  if (roleKey === "super_admin") return true;
-  if (roleKey === "operator") return pageKey !== "rbac";
-  if (roleKey === "agent_l1") return pageKey === "keywordReviews";
+  if (roleKey === "main_company") return true;
+  if (roleKey === "level1_agent") {
+    return pageKey === "studio" || pageKey === "videos" || pageKey === "publishing" || pageKey === "products";
+  }
   return false;
 }

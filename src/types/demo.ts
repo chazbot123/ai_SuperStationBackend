@@ -1,17 +1,10 @@
-export type RoleKey =
-  | "super_admin"
-  | "tenant_admin"
-  | "operator"
-  | "creator"
-  | "support"
-  | "agent_l1"
-  | "agent_l2"
-  | "viewer";
+export type RoleKey = "main_company" | "level1_agent";
 
 export type PageKey =
   | "dashboard"
   | "studio"
   | "publishing"
+  | "products"
   | "assets"
   | "videos"
   | "support"

@@ -20,7 +20,7 @@ export default function AgentDetail() {
   const submissions = useDataStore((s) => s.submissions);
   const updateAgent = useDataStore((s) => s.updateAgent);
 
-  const canEdit = user?.roleKey === "super_admin" || user?.roleKey === "operator";
+  const canEdit = user?.roleKey === "main_company";
   const agent = agents.find((a) => a.id === id);
 
   usePageMeta(agent ? `代理详情 - ${agent.code}` : "代理详情");

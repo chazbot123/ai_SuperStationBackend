@@ -29,8 +29,8 @@ export default function KeywordReviews() {
   const createSubmission = useDataStore((s) => s.createSubmission);
   const reviewSubmission = useDataStore((s) => s.reviewSubmission);
 
-  const isReviewer = user?.roleKey === "super_admin" || user?.roleKey === "operator";
-  const isAgent = user?.roleKey === "agent_l1";
+  const isReviewer = user?.roleKey === "main_company";
+  const isAgent = user?.roleKey === "level1_agent";
 
   const [filterStatus, setFilterStatus] = useState<"all" | KeywordReviewStatus>("all");
   const [filterAgentId, setFilterAgentId] = useState("all");

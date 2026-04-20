@@ -2,11 +2,11 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 function escapeXml(s: string) {
   return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 function svgPlaceholderDataUri(label: string, w: number, h: number, index: number) {
@@ -15,8 +15,34 @@ function svgPlaceholderDataUri(label: string, w: number, h: number, index: numbe
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function fallbackUrls(prompt: string, sizePreset: string) {
-  const [w, h] = sizePreset === "9_16" ? [540, 960] : [600, 800];
+function svgReferencePlaceholderDataUri(label: string, referenceImage: string, w: number, h: number, index: number) {
+  const title = escapeXml((label || "未命名产品").trim().slice(0, 24) || "未命名产品");
+  const safeRef = escapeXml(referenceImage);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#1f2937"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/><rect x="20" y="20" width="${w - 40}" height="${h - 40}" rx="20" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.12)"/><image href="${safeRef}" x="44" y="96" width="${w - 88}" height="${Math.min(h - 208, 420)}" preserveAspectRatio="xMidYMid slice" clip-path="inset(0 round 16px)"/><text x="44" y="60" fill="#ffffff" font-size="28" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial">参考图生成占位</text><text x="44" y="88" fill="rgba(255,255,255,0.78)" font-size="18" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial">${title}</text><text x="44" y="${h - 74}" fill="rgba(255,255,255,0.72)" font-size="16" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial">已读取客户上传图片作为参考图</text><text x="44" y="${h - 48}" fill="rgba(255,255,255,0.5)" font-size="14" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial">#${index + 1}</text></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function pickDimensions(sizePreset: string, resolution: string) {
+  const factor = resolution === "4k" ? 2 : resolution === "2k" ? 1.5 : 1;
+  const base =
+    sizePreset === "1_1"
+      ? [1024, 1024]
+      : sizePreset === "4_5"
+      ? [1080, 1350]
+      : sizePreset === "9_16"
+      ? [1080, 1920]
+      : sizePreset === "16_9"
+      ? [1920, 1080]
+      : [1080, 1440];
+  return [Math.round(base[0] * factor), Math.round(base[1] * factor)] as const;
+}
+
+function fallbackUrls(prompt: string, sizePreset: string, resolution: string, referenceImages?: string[]) {
+  const [w, h] = pickDimensions(sizePreset, resolution);
+  const refs = (referenceImages ?? []).filter(Boolean);
+  if (refs.length > 0) {
+    return Array.from({ length: 3 }).map((_, i) => svgReferencePlaceholderDataUri(prompt, refs[i % refs.length]!, w, h, i));
+  }
   return Array.from({ length: 3 }).map((_, i) => svgPlaceholderDataUri(prompt, w, h, i));
 }
 
@@ -37,9 +63,9 @@ async function fetchAsDataUrl(url: string, timeoutMs: number) {
   }
 }
 
-function pickDashScopeSize(sizePreset: string) {
-  if (sizePreset === "9_16") return "720*1280";
-  return "768*1152";
+function pickDashScopeSize(sizePreset: string, resolution: string) {
+  const [w, h] = pickDimensions(sizePreset, resolution);
+  return `${w}*${h}`;
 }
 
 function extractHttpUrls(input: unknown) {
@@ -81,12 +107,13 @@ async function dashscopeWan26Generate(opts: {
   model: string;
   prompt: string;
   sizePreset: string;
+  resolution: string;
   count: number;
 }) {
-  const { apiKey, model, prompt, sizePreset, count } = opts;
+  const { apiKey, model, prompt, sizePreset, resolution, count } = opts;
   // 阿里云模型要求 seed 不能超过 2147483647（Int32 范围）
   const seedBase = Math.floor(Math.random() * 2000000000);
-  const preferredSize = pickDashScopeSize(sizePreset);
+  const preferredSize = pickDashScopeSize(sizePreset, resolution);
   const fallbackSizes = ["1024*1024", preferredSize].filter((v, i, a) => a.indexOf(v) === i);
   const urls: string[] = [];
   const debug: Array<{ ok: boolean; status?: number; data?: unknown }> = [];
@@ -216,6 +243,66 @@ async function dashscopeWan26Generate(opts: {
   return { urls, debug: debug[0] ?? null };
 }
 
+async function dashscopeReferenceGenerate(opts: {
+  apiKey: string;
+  model: string;
+  prompt: string;
+  sizePreset: string;
+  resolution: string;
+  count: number;
+  referenceImages: string[];
+}) {
+  const { apiKey, model, prompt, sizePreset, resolution, count, referenceImages } = opts;
+  const size = pickDashScopeSize(sizePreset, resolution);
+
+  const r = await fetch("https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: {
+        messages: [
+          {
+            role: "user",
+            content: [
+              ...referenceImages.slice(0, 3).map((image) => ({ image })),
+              {
+                text: `请基于参考图生成新的商品营销图片，保留主体商品特征与整体风格一致性，并结合以下要求：${prompt}`,
+              },
+            ],
+          },
+        ],
+      },
+      parameters: {
+        n: Math.max(1, Math.min(count, 6)),
+        negative_prompt: "低清晰度，模糊，变形，多余文字，水印，logo",
+        prompt_extend: true,
+        watermark: false,
+        size,
+      },
+    }),
+  });
+
+  const text = await r.text();
+  let j: unknown = {};
+  try {
+    j = JSON.parse(text) as unknown;
+  } catch {
+    j = { raw: text };
+  }
+
+  const urls = extractHttpUrls(j);
+  return {
+    ok: r.ok,
+    status: r.status,
+    data: j,
+    urls,
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method Not Allowed" });
@@ -224,11 +311,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const prompt = String(body.prompt ?? "demo");
   const sizePreset = String(body.sizePreset ?? "3_4");
+  const resolution = String(body.resolution ?? "1k");
+  const referenceImages = Array.isArray(body.referenceImages)
+    ? body.referenceImages.filter((item): item is string => typeof item === "string" && item.length > 0).slice(0, 3)
+    : [];
 
   const apiKey = process.env.DASHSCOPE_API_KEY || process.env.ALIYUN_API_KEY;
   const model = process.env.DASHSCOPE_IMAGE_MODEL || "qwen-image-max";
+  const editModel = process.env.DASHSCOPE_IMAGE_EDIT_MODEL || "qwen-image-2.0-pro";
 
   if (apiKey) {
+    if (referenceImages.length > 0) {
+      try {
+        const result = await dashscopeReferenceGenerate({
+          apiKey,
+          model: editModel,
+          prompt,
+          sizePreset,
+          resolution,
+          count: 3,
+          referenceImages,
+        });
+        if (result.ok && result.urls.length > 0) {
+          res.status(200).json({ urls: result.urls.slice(0, 3), provider: "dashscope_reference", model: editModel });
+          return;
+        }
+        res.status(200).json({
+          urls: fallbackUrls(prompt, sizePreset, resolution, referenceImages),
+          provider: "dashscope_reference_error",
+          model: editModel,
+          dashscopeCreate: { ok: result.ok, status: result.status, data: result.data },
+        });
+        return;
+      } catch (e) {
+        res.status(200).json({
+          urls: fallbackUrls(prompt, sizePreset, resolution, referenceImages),
+          provider: "dashscope_reference_error",
+          model: editModel,
+          dashscopeCreate: {
+            ok: false,
+            data: { message: e instanceof Error ? e.message : String(e ?? "reference_generate_failed") },
+          },
+        });
+        return;
+      }
+    }
+
     if (isWan26Model(model)) {
       try {
         console.log(`Using DashScope wan2.6 endpoint for model: ${model}`);
@@ -237,6 +365,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           model,
           prompt,
           sizePreset,
+          resolution,
           count: 3,
         });
         if (urls.length) {
@@ -244,7 +373,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
         }
         res.status(200).json({
-          urls: fallbackUrls(prompt, sizePreset),
+          urls: fallbackUrls(prompt, sizePreset, resolution, referenceImages),
           provider: "dashscope_error",
           model,
           dashscopeCreate: debug,
@@ -252,7 +381,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       } catch (e) {
         res.status(200).json({
-          urls: fallbackUrls(prompt, sizePreset),
+          urls: fallbackUrls(prompt, sizePreset, resolution, referenceImages),
           provider: "dashscope_error",
           model,
           dashscopeCreate: {
@@ -264,7 +393,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
     try {
-      const size = pickDashScopeSize(sizePreset);
+      const size = pickDashScopeSize(sizePreset, resolution);
       // 阿里云旧协议（或部分模型）同样可能限制 seed 范围
       const seedBase = Math.floor(Math.random() * 2000000000);
       const urls: string[] = [];
@@ -333,7 +462,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const sample = createDebug.find((x) => x.ok) ?? createDebug[0];
         res.status(200).json({
-          urls: fallbackUrls(prompt, sizePreset),
+          urls: fallbackUrls(prompt, sizePreset, resolution, referenceImages),
           provider: "dashscope_error",
           model,
           dashscopeCreate: sample ?? null,
@@ -389,7 +518,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       console.log("DashScope generation failed or returned no URLs, falling back...");
       res.status(200).json({
-        urls: fallbackUrls(prompt, sizePreset),
+        urls: fallbackUrls(prompt, sizePreset, resolution, referenceImages),
         provider: "dashscope_error",
         model,
         dashscopeCreate: createDebug[0] ?? null,
@@ -401,7 +530,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const [w, h] = sizePreset === "9_16" ? [720, 1280] : [768, 1152];
+    const [w, h] = pickDimensions(sizePreset, resolution);
     const seedBase = Date.now();
     const englishPrompt = encodeURIComponent(
       `high quality product photography of ${prompt}, commercial lighting, clean background, 8k resolution, masterpiece`
@@ -413,12 +542,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     const dataUrls = await Promise.all(rawUrls.map(async (u) => fetchAsDataUrl(u, 15000)));
-    const urls = dataUrls.map((u, i) => u || fallbackUrls(prompt, sizePreset)[i] || fallbackUrls(prompt, sizePreset)[0]);
+    const fallback = fallbackUrls(prompt, sizePreset, resolution, referenceImages);
+    const urls = dataUrls.map((u, i) => u || fallback[i] || fallback[0]);
 
     res.status(200).json({ urls, provider: "pollinations", model: "stable-diffusion" });
     return;
   } catch (error) {
     console.error("Image generation error:", error);
-    res.status(200).json({ urls: fallbackUrls(prompt, sizePreset), provider: "fallback" });
+    res.status(200).json({ urls: fallbackUrls(prompt, sizePreset, resolution, referenceImages), provider: "fallback" });
   }
 }
