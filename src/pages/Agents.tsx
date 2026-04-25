@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -7,36 +7,198 @@ import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
 import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import { usePageMeta } from "@/hooks/usePageMeta";
+import { requestJson } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
-import { useDataStore } from "@/store/dataStore";
+
+type AgentStatus = "active" | "disabled";
+
+type AgentItem = {
+  id: string;
+  code: string;
+  name: string;
+  status: AgentStatus;
+  ruleId: string | null;
+  createdAt: string;
+  user: {
+    id: string;
+    username: string;
+    displayName: string;
+  } | null;
+};
+
+type RuleItem = {
+  id: string;
+  name: string;
+};
+
+type ListAgentsResponse = {
+  items: AgentItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+  };
+};
+
+type ListRulesResponse = {
+  items: RuleItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+  };
+};
+
+const initialForm = {
+  code: "",
+  name: "",
+  ruleId: "",
+};
 
 export default function Agents() {
   usePageMeta("一级代理管理");
+
   const user = useAuthStore((s) => s.user);
-  const agents = useDataStore((s) => s.agents);
-  const rules = useDataStore((s) => s.rules);
-  const createAgent = useDataStore((s) => s.createAgent);
-  const updateAgent = useDataStore((s) => s.updateAgent);
-
+  const accessToken = useAuthStore((s) => s.accessToken);
   const canEdit = user?.roleKey === "main_company";
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"all" | "active" | "disabled">("all");
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ code: "", name: "", ruleId: "" });
-  const [err, setErr] = useState<string | null>(null);
 
-  const agentList = useMemo(() => {
-    const roleKey = user?.roleKey;
-    const agentId = user?.agentId;
-    const base = roleKey === "level1_agent" && agentId ? agents.filter((a) => a.id === agentId) : agents;
-    return base
-      .filter((a) => (status === "all" ? true : a.status === status))
-      .filter((a) => {
-        const s = q.trim().toLowerCase();
-        if (!s) return true;
-        return a.code.toLowerCase().includes(s) || a.name.toLowerCase().includes(s);
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState<"all" | AgentStatus>("all");
+  const [agents, setAgents] = useState<AgentItem[]>([]);
+  const [rules, setRules] = useState<RuleItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(initialForm);
+
+  const authorizationHeaders = useMemo(
+    () =>
+      accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    [accessToken]
+  );
+
+  const loadAgents = async () => {
+    if (!authorizationHeaders) {
+      setAgents([]);
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const params = new URLSearchParams({ page: "1", limit: "100" });
+      const trimmedQuery = q.trim();
+
+      if (trimmedQuery) {
+        params.set("q", trimmedQuery);
+      }
+
+      if (status !== "all") {
+        params.set("status", status);
+      }
+
+      const response = await requestJson<ListAgentsResponse>(`/api/agents?${params.toString()}`, {
+        headers: authorizationHeaders,
       });
-  }, [agents, q, status, user?.agentId, user?.roleKey]);
+      setAgents(response.items);
+      setError(null);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "加载代理失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadRules = async () => {
+    if (!authorizationHeaders) {
+      setRules([]);
+      return;
+    }
+
+    try {
+      const response = await requestJson<ListRulesResponse>("/api/rules?page=1&limit=100", {
+        headers: authorizationHeaders,
+      });
+      setRules(response.items);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "加载规则失败");
+    }
+  };
+
+  useEffect(() => {
+    if (!accessToken) {
+      setAgents([]);
+      setRules([]);
+      return;
+    }
+
+    void loadAgents();
+    void loadRules();
+  }, [accessToken]);
+
+  const createAgent = async () => {
+    if (!authorizationHeaders) {
+      setError("登录状态已失效");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      await requestJson<AgentItem>("/api/agents", {
+        method: "POST",
+        headers: {
+          ...authorizationHeaders,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: form.code.trim(),
+          name: form.name.trim(),
+          ruleId: form.ruleId || undefined,
+        }),
+      });
+
+      setForm(initialForm);
+      setOpen(false);
+      setError(null);
+      await loadAgents();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "创建代理失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const updateAgent = async (id: string, patch: { status?: AgentStatus }) => {
+    if (!authorizationHeaders) {
+      setError("登录状态已失效");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      await requestJson<AgentItem>(`/api/agents/${id}`, {
+        method: "PATCH",
+        headers: {
+          ...authorizationHeaders,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(patch),
+      });
+      setError(null);
+      await loadAgents();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "更新代理失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -50,7 +212,9 @@ export default function Agents() {
               value={status}
               onChange={(e) => {
                 const next = e.target.value;
-                if (next === "all" || next === "active" || next === "disabled") setStatus(next);
+                if (next === "all" || next === "active" || next === "disabled") {
+                  setStatus(next);
+                }
               }}
             >
               <option value="all">全部状态</option>
@@ -58,11 +222,16 @@ export default function Agents() {
               <option value="disabled">停用</option>
             </Select>
           </div>
+          <Button variant="secondary" onClick={() => void loadAgents()} disabled={loading || !authorizationHeaders}>
+            {loading ? "加载中..." : "搜索"}
+          </Button>
         </div>
-        <Button variant="primary" onClick={() => setOpen(true)} disabled={!canEdit}>
+        <Button variant="primary" onClick={() => setOpen(true)} disabled={!canEdit || submitting}>
           创建一级代理
         </Button>
       </div>
+
+      {error ? <div className="text-sm text-red-300">{error}</div> : null}
 
       <TableWrap>
         <Table>
@@ -72,50 +241,49 @@ export default function Agents() {
               <Th>名称</Th>
               <Th>状态</Th>
               <Th>分配规则</Th>
+              <Th>绑定账号</Th>
               <Th>创建时间</Th>
               <Th className="text-right">操作</Th>
             </tr>
           </thead>
           <tbody>
-            {agentList.length === 0 ? (
+            {agents.length === 0 ? (
               <Tr>
-                <Td colSpan={6} className="py-8 text-center text-zinc-400">
-                  暂无数据
+                <Td colSpan={7} className="py-8 text-center text-zinc-400">
+                  {loading ? "加载中..." : "暂无数据"}
                 </Td>
               </Tr>
             ) : (
-              agentList.map((a) => {
-                const rule = rules.find((r) => r.id === a.ruleId);
+              agents.map((agent) => {
+                const rule = rules.find((item) => item.id === agent.ruleId);
                 return (
-                  <Tr key={a.id}>
-                    <Td className="font-medium">{a.code}</Td>
-                    <Td>{a.name}</Td>
+                  <Tr key={agent.id}>
+                    <Td className="font-medium">{agent.code}</Td>
+                    <Td>{agent.name}</Td>
                     <Td>
-                      {a.status === "active" ? (
-                        <Badge variant="green">启用</Badge>
-                      ) : (
-                        <Badge variant="red">停用</Badge>
-                      )}
+                      {agent.status === "active" ? <Badge variant="green">启用</Badge> : <Badge variant="red">停用</Badge>}
                     </Td>
                     <Td className="text-zinc-300">{rule?.name ?? "未分配"}</Td>
-                    <Td className="text-zinc-400">{new Date(a.createdAt).toLocaleDateString()}</Td>
+                    <Td className="text-zinc-300">{agent.user?.displayName ?? agent.user?.username ?? "未绑定"}</Td>
+                    <Td className="text-zinc-400">{new Date(agent.createdAt).toLocaleDateString()}</Td>
                     <Td className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Link to={`/agents/${a.id}`}>
+                        <Link to={`/agents/${agent.id}`}>
                           <Button size="sm" variant="secondary">
                             详情
                           </Button>
                         </Link>
                         <Button
                           size="sm"
-                          variant={a.status === "active" ? "danger" : "secondary"}
-                          disabled={!canEdit}
-                          onClick={() => {
-                            const next = a.status === "active" ? "disabled" : "active";
-                            updateAgent(a.id, { status: next });
-                          }}
+                          variant={agent.status === "active" ? "danger" : "secondary"}
+                          disabled={!canEdit || submitting}
+                          onClick={() =>
+                            void updateAgent(agent.id, {
+                              status: agent.status === "active" ? "disabled" : "active",
+                            })
+                          }
                         >
-                          {a.status === "active" ? "停用" : "启用"}
+                          {agent.status === "active" ? "停用" : "启用"}
                         </Button>
                       </div>
                     </Td>
@@ -132,7 +300,7 @@ export default function Agents() {
         title="创建一级代理"
         onClose={() => {
           setOpen(false);
-          setErr(null);
+          setForm(initialForm);
         }}
         footer={
           <div className="flex justify-end gap-2">
@@ -140,58 +308,37 @@ export default function Agents() {
               variant="secondary"
               onClick={() => {
                 setOpen(false);
-                setErr(null);
+                setForm(initialForm);
               }}
             >
               取消
             </Button>
-            <Button
-              onClick={() => {
-                const res = createAgent({
-                  code: form.code,
-                  name: form.name,
-                  ruleId: form.ruleId ? form.ruleId : null,
-                });
-                if (!res.ok) {
-                  setErr(res.message ?? "创建失败");
-                  return;
-                }
-                setErr(null);
-                setForm({ code: "", name: "", ruleId: "" });
-                setOpen(false);
-              }}
-            >
-              保存
+            <Button onClick={() => void createAgent()} disabled={submitting}>
+              {submitting ? "保存中..." : "保存"}
             </Button>
           </div>
         }
       >
         <div className="space-y-3">
-          {err ? (
-            <div className="rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {err}
-            </div>
-          ) : null}
           <div>
             <div className="mb-1 text-xs font-medium text-zinc-300">代理编号</div>
-            <Input value={form.code} onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))} placeholder="A001" />
+            <Input value={form.code} onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))} placeholder="A001" />
           </div>
           <div>
             <div className="mb-1 text-xs font-medium text-zinc-300">代理名称</div>
-            <Input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} placeholder="华南代理" />
+            <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="华南代理" />
           </div>
           <div>
             <div className="mb-1 text-xs font-medium text-zinc-300">分配关键词规则</div>
-            <Select value={form.ruleId} onChange={(e) => setForm((p) => ({ ...p, ruleId: e.target.value }))}>
+            <Select value={form.ruleId} onChange={(e) => setForm((prev) => ({ ...prev, ruleId: e.target.value }))}>
               <option value="">不分配</option>
-              {rules.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
+              {rules.map((rule) => (
+                <option key={rule.id} value={rule.id}>
+                  {rule.name}
                 </option>
               ))}
             </Select>
           </div>
-          <div className="text-xs text-zinc-400">创建后可在详情页继续绑定账号与调整规则（Demo占位）。</div>
         </div>
       </Modal>
     </div>

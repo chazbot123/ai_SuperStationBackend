@@ -1,4 +1,4 @@
-export type RoleKey = "main_company" | "level1_agent";
+export type RoleKey = string;
 
 export type PageKey =
   | "dashboard"
@@ -19,10 +19,11 @@ export type KeywordReviewStatus = "draft" | "submitted" | "approved" | "rejected
 
 export interface AuthUser {
   id: string;
-  email: string;
+  username: string;
   displayName: string;
+  companyName?: string | null;
   roleKey: RoleKey;
-  agentId?: string;
+  agentId?: string | null;
 }
 
 export interface AgentL1 {
@@ -63,21 +64,21 @@ export interface KeywordItem {
   keyword: string;
 }
 
-export type AccountStatus = "active" | "disabled";
-
 export interface Account {
   id: string;
   email: string;
   displayName: string;
   roleKey: RoleKey;
   agentId?: string;
-  status: AccountStatus;
+  status: "active" | "disabled";
   createdAt: string;
 }
 
 export interface Role {
   key: RoleKey;
   name: string;
+  description: string;
+  isSystem: boolean;
 }
 
-export type PermissionMatrix = Record<RoleKey, Record<PageKey, boolean>>;
+export type PermissionMatrix = Record<string, Partial<Record<PageKey, boolean>>>;

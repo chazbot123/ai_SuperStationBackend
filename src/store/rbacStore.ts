@@ -1,77 +1,115 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import type { Account, PageKey, PermissionMatrix, Role, RoleKey } from "@/types/demo";
-import { createDemoSeed } from "@/utils/demoSeed";
-import { newId, nowIso } from "@/utils/id";
+import { requestJson } from "@/lib/api";
+import type { PageKey, PermissionMatrix, Role, RoleKey } from "@/types/demo";
+import { useAuthStore } from "@/store/authStore";
+
+type RbacPayload = {
+  roles: Role[];
+  permissionMatrix: PermissionMatrix;
+};
 
 type RbacState = {
   roles: Role[];
-  accounts: Account[];
   permissionMatrix: PermissionMatrix;
-
-  setRoleName: (roleKey: RoleKey, name: string) => void;
-  setPermission: (roleKey: RoleKey, pageKey: PageKey, value: boolean) => void;
-
-  createAccount: (input: { email: string; displayName: string; roleKey: RoleKey; agentId?: string }) => {
-    ok: boolean;
-    message?: string;
-  };
-  updateAccount: (id: string, patch: Partial<Pick<Account, "displayName" | "roleKey" | "status" | "agentId">>) => void;
+  loading: boolean;
+  initialized: boolean;
+  error: string | null;
+  load: () => Promise<void>;
+  createRole: (input: { key: string; name: string; description: string }) => Promise<void>;
+  updateRole: (roleKey: RoleKey, input: { name: string; description: string }) => Promise<void>;
+  removeRole: (roleKey: RoleKey) => Promise<void>;
+  setPermission: (roleKey: RoleKey, pageKey: PageKey, value: boolean) => Promise<void>;
+  reset: () => void;
 };
 
-const seed = createDemoSeed();
+const emptyRoles: Role[] = [
+  { key: "main_company", name: "主公司", description: "全局后台管理权限", isSystem: true },
+];
 
-export const useRbacStore = create<RbacState>()(
-  persist(
-    (set, get) => ({
-      roles: seed.roles,
-      accounts: seed.accounts,
-      permissionMatrix: seed.permissionMatrix,
+function getAuthHeaders() {
+  const accessToken = useAuthStore.getState().accessToken;
+  if (!accessToken) {
+    throw new Error("登录状态已失效");
+  }
 
-      setRoleName: (roleKey, name) => {
-        const nextName = name.trim();
-        if (!nextName) return;
-        set({ roles: get().roles.map((r) => (r.key === roleKey ? { ...r, name: nextName } : r)) });
-      },
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+}
 
-      setPermission: (roleKey, pageKey, value) => {
-        const matrix = get().permissionMatrix;
-        const role = matrix[roleKey];
-        set({
-          permissionMatrix: {
-            ...matrix,
-            [roleKey]: {
-              ...role,
-              [pageKey]: value,
-            },
-          },
-        });
-      },
+export const useRbacStore = create<RbacState>((set) => ({
+  roles: emptyRoles,
+  permissionMatrix: {},
+  loading: false,
+  initialized: false,
+  error: null,
+  load: async () => {
+    set({ loading: true });
 
-      createAccount: ({ email, displayName, roleKey, agentId }) => {
-        const e = email.trim().toLowerCase();
-        const n = displayName.trim();
-        if (!e || !n) return { ok: false, message: "邮箱与姓名为必填" };
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return { ok: false, message: "邮箱格式不正确" };
-        if (get().accounts.some((a) => a.email.toLowerCase() === e)) return { ok: false, message: "邮箱已存在" };
+    try {
+      const payload = await requestJson<RbacPayload>("/api/rbac", {
+        headers: {
+          Authorization: getAuthHeaders().Authorization,
+        },
+      });
+      set({
+        roles: payload.roles,
+        permissionMatrix: payload.permissionMatrix,
+        loading: false,
+        initialized: true,
+        error: null,
+      });
+    } catch (error) {
+      set({
+        loading: false,
+        initialized: true,
+        error: error instanceof Error ? error.message : "加载 RBAC 失败",
+      });
+    }
+  },
+  createRole: async (input) => {
+    const payload = await requestJson<RbacPayload>("/api/rbac/roles", {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(input),
+    });
+    set({ roles: payload.roles, permissionMatrix: payload.permissionMatrix, error: null });
+  },
+  updateRole: async (roleKey, input) => {
+    const payload = await requestJson<RbacPayload>(`/api/rbac/roles/${encodeURIComponent(roleKey)}`, {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(input),
+    });
+    set({ roles: payload.roles, permissionMatrix: payload.permissionMatrix, error: null });
+  },
+  removeRole: async (roleKey) => {
+    const payload = await requestJson<RbacPayload>(`/api/rbac/roles/${encodeURIComponent(roleKey)}`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    set({ roles: payload.roles, permissionMatrix: payload.permissionMatrix, error: null });
+  },
 
-        const acc: Account = {
-          id: newId("acc"),
-          email: e,
-          displayName: n,
-          roleKey,
-          agentId: roleKey === "level1_agent" ? agentId : undefined,
-          status: "active",
-          createdAt: nowIso(),
-        };
-        set({ accounts: [acc, ...get().accounts] });
-        return { ok: true };
-      },
+  setPermission: async (roleKey, pageKey, value) => {
+    const payload = await requestJson<RbacPayload>("/api/rbac/permissions", {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        items: [{ roleKey, pageKey, allowed: value }],
+      }),
+    });
 
-      updateAccount: (id, patch) => {
-        set({ accounts: get().accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
-      },
-    }),
-    { name: "aiadmin_rbac_v1" }
-  )
-);
+    set({ roles: payload.roles, permissionMatrix: payload.permissionMatrix, error: null });
+  },
+  reset: () => {
+    set({
+      roles: emptyRoles,
+      permissionMatrix: {},
+      loading: false,
+      initialized: false,
+      error: null,
+    });
+  },
+}));

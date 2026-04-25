@@ -15,12 +15,12 @@ import Reviews from "@/pages/Reviews";
 import Rules from "@/pages/Rules";
 import SpecialOffers from "@/pages/SpecialOffers";
 import Studio from "@/pages/Studio";
-import StudioHome from "@/pages/StudioHome";
+import StudioDrafts from "@/pages/StudioDrafts";
 import StudioImages from "@/pages/StudioImages";
 import Support from "@/pages/Support";
 import VideoAvatarAds from "@/pages/VideoAvatarAds";
+import VideoDrafts from "@/pages/VideoDrafts";
 import VideoProductBuild from "@/pages/VideoProductBuild";
-import Videos from "@/pages/Videos";
 import { useEffect } from "react";
 import { useAppStore } from "@/store/appStore";
 
@@ -37,7 +37,8 @@ export default function App() {
         <Route element={<RequireAuth />}>
           <Route element={<AppShell />}>
             <Route index element={<RequirePageAccess pageKey="dashboard"><Dashboard /></RequirePageAccess>} />
-            <Route path="studio" element={<RequirePageAccess pageKey="studio"><StudioHome /></RequirePageAccess>} />
+            <Route path="studio" element={<Navigate to="/studio/drafts" replace />} />
+            <Route path="studio/drafts" element={<RequirePageAccess pageKey="studio"><StudioDrafts /></RequirePageAccess>} />
             <Route path="studio/social" element={<RequirePageAccess pageKey="studio"><Studio /></RequirePageAccess>} />
             <Route path="studio/product-images" element={<RequirePageAccess pageKey="studio"><StudioImages /></RequirePageAccess>} />
             <Route path="studio/images" element={<Navigate to="/studio/product-images" replace />} />
@@ -45,7 +46,8 @@ export default function App() {
             <Route path="products" element={<RequirePageAccess pageKey="products"><Products /></RequirePageAccess>} />
             <Route path="products/special-offers" element={<RequirePageAccess pageKey="products"><SpecialOffers /></RequirePageAccess>} />
             <Route path="assets" element={<RequirePageAccess pageKey="assets"><Assets /></RequirePageAccess>} />
-            <Route path="videos" element={<RequirePageAccess pageKey="videos"><Videos /></RequirePageAccess>} />
+            <Route path="videos" element={<Navigate to="/videos/drafts" replace />} />
+            <Route path="videos/drafts" element={<RequirePageAccess pageKey="videos"><VideoDrafts /></RequirePageAccess>} />
             <Route path="videos/avatar-ads" element={<RequirePageAccess pageKey="videos"><VideoAvatarAds /></RequirePageAccess>} />
             <Route path="videos/product-build" element={<RequirePageAccess pageKey="videos"><VideoProductBuild /></RequirePageAccess>} />
             <Route path="support" element={<RequirePageAccess pageKey="support"><Support /></RequirePageAccess>} />

@@ -1,16 +1,31 @@
+import { useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
 import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { useAuthStore } from "@/store/authStore";
 import { useAppStore } from "@/store/appStore";
+import { useProductsStore } from "@/store/productsStore";
 
 export default function Dashboard() {
   usePageMeta("仪表盘");
   const user = useAuthStore((s) => s.user);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const contents = useAppStore((s) => s.contents);
-  const products = useAppStore((s) => s.products);
   const jobs = useAppStore((s) => s.publishJobs);
+  const products = useProductsStore((s) => s.items);
+  const productsInitialized = useProductsStore((s) => s.initialized);
+  const productsError = useProductsStore((s) => s.error);
+  const loadProducts = useProductsStore((s) => s.load);
+
+  useEffect(() => {
+    if (!accessToken || user?.roleKey !== "main_company") return;
+    if (!productsInitialized || productsError) {
+      void loadProducts();
+    }
+  }, [accessToken, loadProducts, productsError, productsInitialized, user?.roleKey]);
 
   if (user?.roleKey !== "main_company") {
     return (
@@ -52,6 +67,35 @@ export default function Dashboard() {
         <MetricCard title="已上架商品数" value={liveProducts} hint="前台当前可展示商品" />
         <MetricCard title="草稿商品数" value={draftProducts} hint="尚未提审的商品" />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>功能总览</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <FeatureGroup
+            title="当前已实现"
+            items={[
+              { label: "用户/角色/权限", to: "/rbac", hint: "真实后端接口已接通" },
+              { label: "代理管理", to: "/agents", hint: "列表、详情、创建、更新已接通" },
+              { label: "产品管理", to: "/products", hint: "列表、编辑、提审、上下架已切到真实后端接口" },
+            ]}
+            variant="green"
+          />
+          <FeatureGroup
+            title="Demo 展示"
+            items={[
+              { label: "图片/文案生成", to: "/studio", hint: "当前主要展示前端 Demo 流程" },
+              { label: "视频生成", to: "/videos", hint: "当前主要展示前端 Demo 流程" },
+              { label: "审核中心", to: "/reviews", hint: "当前主要展示前端 Demo 审核流" },
+              { label: "获客内容池", to: "/publishing", hint: "当前主要展示前端 Demo 流程" },
+              { label: "模型配置", to: "/rules", hint: "当前主要展示前端 Demo 配置页" },
+              { label: "知识库 / AI客服 / 前台配置", to: "/assets", hint: "相关页面当前均以 Demo 展示为主" },
+            ]}
+            variant="gray"
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -128,6 +172,36 @@ function MetricCard(props: { title: string; value: number; hint: string }) {
         <div className="text-xs text-zinc-400">{props.hint}</div>
       </CardContent>
     </Card>
+  );
+}
+
+function FeatureGroup(props: {
+  title: string;
+  variant: "green" | "gray";
+  items: { label: string; to: string; hint: string }[];
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-sm font-semibold text-zinc-100">{props.title}</div>
+        <Badge variant={props.variant}>{props.variant === "green" ? "已实现" : "Demo"}</Badge>
+      </div>
+      <div className="space-y-3">
+        {props.items.map((item) => (
+          <div key={`${props.title}-${item.label}`} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-zinc-100">{item.label}</div>
+                <div className="mt-1 text-xs leading-5 text-zinc-400">{item.hint}</div>
+              </div>
+              <Link to={item.to}>
+                <Button size="sm" variant="secondary">进入</Button>
+              </Link>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

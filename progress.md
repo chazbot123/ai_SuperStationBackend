@@ -1,0 +1,55 @@
+# 进度记录
+
+## 2026-04-24
+- 已恢复上下文并核对仓库规则
+- 已确认根因：`Studio` 只存本地结果，`AiService` 仍存在 fallback/demo 返回
+- 已建立项目根计划文件，后续按后端、前端、校验三阶段推进
+- 已完成后端：社媒结果表收口、`social-posts` 接口、真实错误返回
+- 已完成前端：`Studio` 历史加载、生成入库、审核/同步接线、素材分区展示
+- 已执行 `npm run prisma:generate`、前后端 `npm run build`，均通过
+- 已按最新要求把模型配置改为“请求地址直填”，不再自动拼后缀
+- 图片异步任务查询改为可配置 `taskQueryUrlTemplate`，不再写死官方地址
+- 已补回模型配置“测试连接”按钮，并改为真实请求上游接口
+- 已将模型配置改为“服务商选择 + 自动填官方地址/默认模型”
+- 已将图文生成与测试连接改为按 `providerKey + modelType` 自动匹配协议
+- 已完成本轮前后端构建校验，均通过
+- 已将官方服务商字段从完整 `requestUrl` 收口为 `Base URL`
+- 已按豆包官方文档将默认 `Base URL` 改为 `https://ark.cn-beijing.volces.com/api/v3`
+- 已恢复后端按服务商协议自动拼接路径
+- 已定位本轮 `Internal server error`：数据库缺少 `SocialGeneratedPost` 表，Prisma 落库时报 `P2021`
+- 已用 `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script` 确认仅新增社媒表相关结构
+- 已执行 `prisma db push` 同步数据库，并验证 `SocialGeneratedPost` 表已存在且 Prisma `count()` 可正常访问
+- 已再次执行后端 `npm run build`，通过
+- 已完成 `Studio` 生成任务进度卡：点击生成后，结果列表立即插入占位记录并显示阶段进度与进度条
+- 已完成前端构建与诊断校验：`src/pages/Studio.tsx` 无诊断错误，前端 `npm run build` 通过
+- 已按最新要求调整豆包图片正式生成的 `1k` 尺寸映射：保留测试连接为 `2k`，仅让正式生成在选择 `1k` 时也能使用合法尺寸
+- 已完成后端构建与诊断校验：`server/src/modules/ai/ai.service.ts` 无诊断错误，后端 `npm run build` 通过
+- 已完成素材预览区统一改造：新增 `AssetPreviewStrip`，并接入 `Studio`、`StudioImages`、`VideoGenerationWorkspace`
+- 已支持所有参考图预览区右上角删除按钮，素材统一改为横向小长方形展示；前端 `npm run build` 通过
+- 已完成 `图片/文案生成` 父子导航：侧边栏进入 `studio` 后展示 `草稿箱 / 社媒图文生成 / 商品图与详情图生成`
+- 已新增 `StudioDrafts` 草稿箱页，并让商品图与详情图生成结果持久化到 `studioProductDraftStore` 供聚合查看
+- 已完成新增路由、侧边栏、草稿箱页面的诊断与前端构建校验，均通过
+- 已完成 `图片/文案生成` 父导航箭头交互：支持手动展开/收起，箭头旋转并带下拉动画
+- 已新增 `docs/project-notes.md` 记录导航交互与 Studio 模块注意事项，前端 `npm run build` 通过
+- 已移除 `社媒图文生成` 与 `商品图与详情图生成` 页内结果模块，结果统一进入 `草稿箱`
+- 已为草稿箱增加来源筛选、预览/审核/同步操作，并新增未预览红点计数与生成后飞入草稿箱动效
+- 本轮修复了 `StudioImages` 缺失 `Input` 导入导致的构建失败，前端 `npm run build` 再次通过
+- 已新增 `studioDraftTaskStore`，草稿箱现可显示两个生成模块的“正在执行任务”与阶段进度
+- 已增强草稿箱飞行动画：生成成功后先自动展开子菜单，再显示更明显的 `🖼️` 飞入草稿箱效果；前端 `npm run build` 通过
+- 已恢复知识库模块上下文：确认 `/assets` 仍为 demo 页面，当前后端尚无真实上传、解析、切片、检索链路
+- 已确定本轮方案方向：知识库管理面向 AI 客服语义检索，先采用 `PostgreSQL + pgvector + MinIO`
+- 已新增 `docs/knowledge-base-pgvector-design.md`，整理表结构设计、上传/解析/切片流程、检索接口和 AI 客服对接方式
+- 已完成第一版后端骨架：新增知识库 Prisma 模型、`KnowledgeModule`，并实现上传/列表/详情/删除接口
+- 已执行 `npm run prisma:generate` 与后端 `npm run build`，均通过
+- `prisma db push` 当前未完成，原因是数据库宿主机尚未安装 `pgvector` 扩展，错误为 `extension "vector" is not available`
+- 已按最新要求把 `pgvector` 直接接入原 `docker-compose.yml` 的同一个 `postgres` 容器
+- 已启动 `pgvector/pgvector:pg16` 镜像、启用 `vector` 扩展，并成功执行 `npm exec prisma db push`
+- 已再次执行 `npm run prisma:generate` 和后端 `npm run build`，均通过
+- 已完成知识库管理页前端接线：新增 `src/lib/knowledge.ts`，`Assets.tsx` 现已支持真实上传、列表、详情、删除
+- 已执行前端诊断与 `npm run build`，通过；当前检索测试台仍保留占位逻辑
+- 已完成知识库最小索引链路：`txt / md` 上传后自动解析、切片并写入 `KnowledgeDocumentChunk`
+- 已新增知识库检索接口 `/api/knowledge/retrieval/search`，前端测试台现已展示真实命中片段与结果摘要
+- 前后端本轮构建均通过
+- 已确认下一阶段知识库扩展范围：接入 `pdf / docx / pptx / 图片 OCR`，其中图片按“可检索”实现，不做仅展示分支
+- 已完成知识库多文件类型接入：后端新增 `KnowledgeParserService`，支持 `pdf / docx / pptx / png / jpg / jpeg / webp` 解析；前端上传入口已同步放开这些类型；前后端构建通过
+- 已完成扫描版 PDF OCR 兜底：PDF 先提取文字层，若文字过少则自动逐页截图并执行 OCR；后端 `npm run build` 通过

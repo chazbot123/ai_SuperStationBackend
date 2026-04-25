@@ -16,7 +16,7 @@ export default function VideoAvatarAds() {
       enableVoiceSelection
       defaultVoice="女声·亲和"
       voiceOptions={["女声·亲和", "男声·稳重", "中性·专业"]}
-      historyTitle="生成结果"
+      draftSource="avatar_video"
     />
   );
 }

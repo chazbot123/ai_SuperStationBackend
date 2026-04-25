@@ -13,8 +13,8 @@ export function createDemoSeed() {
   const iso = (d: Date) => d.toISOString();
 
   const roles: Role[] = [
-    { key: "main_company", name: "主公司" },
-    { key: "level1_agent", name: "1级代理" },
+    { key: "main_company", name: "主公司", description: "全局后台管理权限", isSystem: true },
+    { key: "level1_agent", name: "1级代理", description: "代理账号，可访问代理侧页面", isSystem: true },
   ];
 
   const rules: KeywordRule[] = [
@@ -110,6 +110,34 @@ export function createDemoSeed() {
       products: true,
       assets: false,
       videos: true,
+      support: false,
+      personalization: false,
+      agents: false,
+      rules: false,
+      reviews: false,
+      rbac: false,
+    },
+    department_admin: {
+      dashboard: false,
+      studio: true,
+      publishing: true,
+      products: true,
+      assets: false,
+      videos: true,
+      support: false,
+      personalization: false,
+      agents: false,
+      rules: false,
+      reviews: false,
+      rbac: false,
+    },
+    employee: {
+      dashboard: false,
+      studio: true,
+      publishing: false,
+      products: false,
+      assets: false,
+      videos: false,
       support: false,
       personalization: false,
       agents: false,

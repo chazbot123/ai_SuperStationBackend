@@ -12,7 +12,7 @@ export default function VideoProductBuild() {
       scriptTitle="【产品视频脚本 Demo】"
       controlMode="duration"
       defaultDurationSec={30}
-      historyTitle="生成结果"
+      draftSource="product_video"
     />
   );
 }

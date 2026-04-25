@@ -1,77 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
+import { getProviderPreset, getProviderPresets, type ModelType } from "@/config/modelProviderPresets";
 import { usePageMeta } from "@/hooks/usePageMeta";
+import {
+  activateModelConfig,
+  listActiveModelConfigs,
+  listSavedModelConfigs,
+  testModelConnection,
+  type SavedProviderModelConfigItem,
+} from "@/lib/ai";
 import { useAuthStore } from "@/store/authStore";
-
-type ModelType = "text" | "image" | "video";
-
-type ModelConfig = {
-  type: ModelType;
-  title: string;
-  desc: string;
-  enabled: boolean;
-  providerName: string;
-  baseUrl: string;
-  apiKey: string;
-  modelName: string;
-  timeoutSeconds: string;
-  maxRetries: string;
-  responseFormat: string;
-  remark: string;
-  scopes: string[];
-};
-
-const initialConfigs: ModelConfig[] = [
-  {
-    type: "text",
-    title: "文字模型",
-    desc: "用于图文文案、视频脚本、AI 客服问答和知识库 RAG 回答。",
-    enabled: true,
-    providerName: "DashScope",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    apiKey: "sk-****-text-demo",
-    modelName: "qwen-plus",
-    timeoutSeconds: "60",
-    maxRetries: "2",
-    responseFormat: "json",
-    remark: "默认文字模型，同时服务内容生成和客服模块。",
-    scopes: ["图文文案", "视频脚本", "AI 客服", "RAG 回答"],
-  },
-  {
-    type: "image",
-    title: "图片模型",
-    desc: "用于社媒图文、商品图与详情图生成。",
-    enabled: true,
-    providerName: "DashScope",
-    baseUrl: "https://dashscope.aliyuncs.com/api/v1/services/aigc",
-    apiKey: "sk-****-image-demo",
-    modelName: "qwen-image-max",
-    timeoutSeconds: "90",
-    maxRetries: "2",
-    responseFormat: "json",
-    remark: "用于文生图、图生图和商品图结果生成。",
-    scopes: ["社媒图文", "商品图", "详情图"],
-  },
-  {
-    type: "video",
-    title: "视频模型",
-    desc: "用于产品视频和真人口播视频任务生成。",
-    enabled: true,
-    providerName: "DashScope",
-    baseUrl: "https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation",
-    apiKey: "sk-****-video-demo",
-    modelName: "wanx-video-v1",
-    timeoutSeconds: "120",
-    maxRetries: "1",
-    responseFormat: "json",
-    remark: "用于产品视频、真人口播视频。",
-    scopes: ["产品视频", "真人口播视频"],
-  },
-];
+import { useModelConfigStore, type ModelConfig } from "@/store/modelConfigStore";
 
 function modelBadge(type: ModelType) {
   if (type === "text") return <Badge variant="blue">文字模型</Badge>;
@@ -83,13 +26,63 @@ export default function Rules() {
   usePageMeta("模型配置");
 
   const user = useAuthStore((s) => s.user);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const canEdit = user?.roleKey === "main_company";
-  const [configs, setConfigs] = useState(initialConfigs);
+  const configs = useModelConfigStore((s) => s.configs);
+  const updateConfig = useModelConfigStore((s) => s.updateConfig);
+  const replaceConfig = useModelConfigStore((s) => s.replaceConfig);
   const [activeType, setActiveType] = useState<ModelType>("text");
-  const [testingType, setTestingType] = useState<ModelType | null>(null);
   const [savedHint, setSavedHint] = useState<string | null>(null);
+  const [testHint, setTestHint] = useState<string | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedConfigs, setSavedConfigs] = useState<
+    Partial<Record<ModelType, Partial<Record<ModelConfig["providerKey"], SavedProviderModelConfigItem>>>>
+  >({});
 
   const active = configs.find((item) => item.type === activeType) ?? configs[0];
+  const providerOptions = getProviderPresets(activeType);
+
+  useEffect(() => {
+    if (!accessToken || !canEdit) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [activeItems, savedItems] = await Promise.all([
+          listActiveModelConfigs(accessToken),
+          listSavedModelConfigs(accessToken),
+        ]);
+        if (cancelled) return;
+        const nextSaved: Partial<
+          Record<ModelType, Partial<Record<ModelConfig["providerKey"], SavedProviderModelConfigItem>>>
+        > = {};
+        for (const item of savedItems) {
+          nextSaved[item.type] = nextSaved[item.type] ?? {};
+          nextSaved[item.type]![item.providerKey] = item;
+        }
+        setSavedConfigs(nextSaved);
+        for (const item of activeItems) {
+          replaceConfig(item.type, item);
+        }
+      } catch {
+        // keep local config when redis has no active settings or is temporarily unavailable
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, canEdit, replaceConfig]);
+
+  useEffect(() => {
+    const saved = savedConfigs[activeType]?.[active.providerKey];
+    if (saved) {
+      replaceConfig(activeType, saved);
+    }
+  }, [active.providerKey, activeType, replaceConfig, savedConfigs]);
 
   if (!canEdit) {
     return (
@@ -100,8 +93,74 @@ export default function Rules() {
   }
 
   const updateActive = (patch: Partial<ModelConfig>) => {
-    setConfigs((prev) => prev.map((item) => (item.type === activeType ? { ...item, ...patch } : item)));
+    updateConfig(activeType, patch);
     setSavedHint(null);
+    setTestHint(null);
+  };
+
+  const handleProviderChange = (providerKey: string) => {
+    const preset = getProviderPreset(activeType, providerKey as ModelConfig["providerKey"]);
+    if (!preset) return;
+
+    const saved = savedConfigs[activeType]?.[preset.key];
+    if (saved) {
+      replaceConfig(activeType, saved);
+      return;
+    }
+
+    updateActive({
+      providerKey: preset.key,
+      providerName: preset.providerName,
+      baseUrl: preset.baseUrl,
+      taskQueryUrlTemplate: preset.taskQueryUrlTemplate,
+      modelName: preset.defaultModelName,
+    });
+  };
+
+  const handleTestConnection = async () => {
+    if (!accessToken || isTesting) return;
+
+    setIsTesting(true);
+    setTestHint("测试中...");
+    try {
+      const result = await testModelConnection({
+        type: activeType,
+        modelConfig: active,
+        accessToken,
+      });
+      setTestHint(result.message);
+    } catch (error) {
+      setTestHint(error instanceof Error ? error.message : "测试连接失败");
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleSaveAndUse = async () => {
+    if (!accessToken || isSaving) return;
+
+    setIsSaving(true);
+    setSavedHint("保存中...");
+    try {
+      const saved = await activateModelConfig({
+        type: activeType,
+        modelConfig: active,
+        accessToken,
+      });
+      setSavedConfigs((current) => ({
+        ...current,
+        [saved.type]: {
+          ...(current[saved.type] ?? {}),
+          [saved.providerKey]: saved,
+        },
+      }));
+      replaceConfig(saved.type, saved);
+      setSavedHint(`${active.title}已保存并生效`);
+    } catch (error) {
+      setSavedHint(error instanceof Error ? error.message : "保存失败");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -117,14 +176,6 @@ export default function Rules() {
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="gray">仅主公司可维护</Badge>
-              <Button
-                onClick={() => {
-                  setSavedHint("配置已保存（Demo）");
-                  window.setTimeout(() => setSavedHint(null), 2000);
-                }}
-              >
-                保存全部配置
-              </Button>
             </div>
           </div>
         </CardHeader>
@@ -160,9 +211,18 @@ export default function Rules() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
         <Card className="xl:col-span-8">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <CardTitle>{active.title} 参数</CardTitle>
-              {savedHint ? <span className="text-xs text-emerald-300">{savedHint}</span> : null}
+              <div className="flex items-center gap-3">
+                {savedHint ? <span className="text-xs text-emerald-300">{savedHint}</span> : null}
+                {testHint ? <span className="text-xs text-amber-300">{testHint}</span> : null}
+                <Button type="button" size="sm" onClick={handleSaveAndUse} disabled={isSaving}>
+                  {isSaving ? "保存中..." : "保存并使用"}
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={handleTestConnection} disabled={isTesting}>
+                  {isTesting ? "测试中..." : "测试连接"}
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -179,6 +239,17 @@ export default function Rules() {
               </label>
 
               <label className="space-y-1">
+                <span className="text-xs font-medium text-zinc-300">服务商</span>
+                <Select value={active.providerKey} onChange={(e) => handleProviderChange(e.target.value)}>
+                  {providerOptions.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.label}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+
+              <label className="space-y-1">
                 <span className="text-xs font-medium text-zinc-300">服务商名称</span>
                 <Input value={active.providerName} onChange={(e) => updateActive({ providerName: e.target.value })} />
               </label>
@@ -187,6 +258,17 @@ export default function Rules() {
                 <span className="text-xs font-medium text-zinc-300">Base URL</span>
                 <Input value={active.baseUrl} onChange={(e) => updateActive({ baseUrl: e.target.value })} />
               </label>
+
+              {(active.type === "image" || active.type === "video") ? (
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-xs font-medium text-zinc-300">任务查询地址模板</span>
+                  <Input
+                    value={active.taskQueryUrlTemplate ?? ""}
+                    onChange={(e) => updateActive({ taskQueryUrlTemplate: e.target.value })}
+                    placeholder="可选，异步任务时使用，例如 https://example.com/tasks/{taskId}"
+                  />
+                </label>
+              ) : null}
 
               <label className="space-y-1 md:col-span-2">
                 <span className="text-xs font-medium text-zinc-300">API Key</span>
@@ -222,25 +304,6 @@ export default function Rules() {
               </label>
             </div>
 
-            <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-              <div>
-                <div className="text-sm font-medium text-zinc-100">连接测试</div>
-                <div className="mt-1 text-xs text-zinc-400">用于模拟 `POST /api/admin/model-configs/:type/test` 的后台联调入口。</div>
-              </div>
-              <Button
-                variant="secondary"
-                disabled={testingType === active.type}
-                onClick={() => {
-                  setTestingType(active.type);
-                  window.setTimeout(() => {
-                    setTestingType(null);
-                    setSavedHint(`${active.title} 测试连接成功（Demo）`);
-                  }, 900);
-                }}
-              >
-                {testingType === active.type ? "连接中..." : "测试连接"}
-              </Button>
-            </div>
           </CardContent>
         </Card>
 
@@ -263,10 +326,11 @@ export default function Rules() {
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-zinc-300">
               说明：
               <div className="mt-2 space-y-2 text-zinc-400">
-                <div>1. 文字模型同时服务内容生成、AI 客服与知识库 RAG，不单独拆客服模型。</div>
-                <div>2. 图片模型用于社媒图文和商品图生成。</div>
-                <div>3. 视频模型用于产品视频和真人口播视频。</div>
-                <div>4. 当前页面先用本地状态模拟，后续统一接入模型配置表和保存接口。</div>
+                <div>1. 先选服务商，系统会自动填官方 Base URL 和默认模型。</div>
+                <div>2. 官方服务商按 Base URL 自动拼协议路径，自定义场景可手动调整。</div>
+                <div>3. 图片和视频如为异步任务，可额外填写任务查询地址模板。</div>
+                <div>4. 测试连接会真实请求上游接口，可能创建测试任务或产生计费。</div>
+                <div>5. 图文生成和测试连接都会按服务商协议自动匹配。</div>
               </div>
             </div>
           </CardContent>

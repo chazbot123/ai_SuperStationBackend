@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import Tabs from "@/components/ui/Tabs";
@@ -7,16 +7,32 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { useAppStore } from "@/store/appStore";
+import { useAuthStore } from "@/store/authStore";
+import { useProductsStore } from "@/store/productsStore";
 
 export default function Reviews() {
   usePageMeta("审核中心");
+  const accessToken = useAuthStore((s) => s.accessToken);
   const contents = useAppStore((s) => s.contents);
-  const products = useAppStore((s) => s.products);
   const updateContent = useAppStore((s) => s.updateContent);
-  const approveProduct = useAppStore((s) => s.approveProduct);
-  const rejectProduct = useAppStore((s) => s.rejectProduct);
+  const products = useProductsStore((s) => s.items);
+  const loadingProducts = useProductsStore((s) => s.loading);
+  const initializedProducts = useProductsStore((s) => s.initialized);
+  const productsError = useProductsStore((s) => s.error);
+  const loadProducts = useProductsStore((s) => s.load);
+  const approveProduct = useProductsStore((s) => s.approveProduct);
+  const rejectProduct = useProductsStore((s) => s.rejectProduct);
   const [tab, setTab] = useState("materials");
   const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    if (!initializedProducts || productsError) {
+      void loadProducts();
+    }
+  }, [accessToken, initializedProducts, loadProducts, productsError]);
 
   const materialItems = useMemo(
     () => contents.filter((item) => item.reviewStatus === "submitted"),
@@ -111,6 +127,8 @@ export default function Reviews() {
             <CardTitle>产品审核</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {productsError ? <div className="text-sm text-red-300">{productsError}</div> : null}
+            {error ? <div className="text-sm text-red-300">{error}</div> : null}
             <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="统一驳回原因（可选）" />
             <TableWrap>
               <Table>
@@ -124,7 +142,13 @@ export default function Reviews() {
                   </tr>
                 </thead>
                 <tbody>
-                  {productItems.length === 0 ? (
+                  {loadingProducts && !initializedProducts ? (
+                    <Tr>
+                      <Td colSpan={5} className="py-10 text-center text-zinc-400">
+                        正在加载待审核商品
+                      </Td>
+                    </Tr>
+                  ) : productItems.length === 0 ? (
                     <Tr>
                       <Td colSpan={5} className="py-10 text-center text-zinc-400">
                         暂无待审核商品
@@ -142,10 +166,39 @@ export default function Reviews() {
                         <Td><Badge variant="amber">待审核</Badge></Td>
                         <Td className="text-right">
                           <div className="flex justify-end gap-2">
-                            <Button size="sm" onClick={() => approveProduct(item.id)}>
+                            <Button
+                              size="sm"
+                              disabled={submitting}
+                              onClick={async () => {
+                                setSubmitting(true);
+                                try {
+                                  await approveProduct(item.id);
+                                  setError(null);
+                                } catch (requestError) {
+                                  setError(requestError instanceof Error ? requestError.message : "审核通过失败");
+                                } finally {
+                                  setSubmitting(false);
+                                }
+                              }}
+                            >
                               通过并上架
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => rejectProduct(item.id, reason)}>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={submitting}
+                              onClick={async () => {
+                                setSubmitting(true);
+                                try {
+                                  await rejectProduct(item.id, reason);
+                                  setError(null);
+                                } catch (requestError) {
+                                  setError(requestError instanceof Error ? requestError.message : "驳回商品失败");
+                                } finally {
+                                  setSubmitting(false);
+                                }
+                              }}
+                            >
                               驳回
                             </Button>
                           </div>

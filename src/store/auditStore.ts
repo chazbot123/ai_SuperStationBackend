@@ -15,7 +15,7 @@ export interface AuditLog {
   id: string;
   time: string;
   userId: string;
-  userEmail: string;
+  username: string;
   userRole: string;
   action: AuditAction;
   resourceType: string;
@@ -44,7 +44,7 @@ export const useAuditStore = create<AuditState>()(
           id: newId("log"),
           time: nowIso(),
           userId: user?.id ?? "anonymous",
-          userEmail: user?.email ?? "anonymous",
+          username: user?.username ?? "anonymous",
           userRole: user?.roleKey ?? "unknown",
           action,
           resourceType,

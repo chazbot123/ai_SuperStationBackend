@@ -1,0 +1,51 @@
+# 调研记录
+
+## 2026-04-24
+- `src/pages/Studio.tsx` 当前只把生成结果写入前端内存 `generatedResults`
+- `server/src/modules/ai/ai.service.ts` 在无 key、调用失败、结果为空等场景会回退假文案和假图片
+- `server/prisma/schema.prisma` 已新增 `SocialGeneratedPost` 草稿模型，但仍带 `referenceImages` 字段，与最新需求不一致
+- 当前审核按钮和“同步到获客”逻辑都在 `Studio` 本地 state 上，后续需要改成后端驱动
+- 已改为 `SocialGeneratedPost.images: String[]`，只存生成结果，不存参考图
+- 已新增后端接口：列表、生成、提审、标记同步
+- `Studio` 已改为进入页面拉取历史、生成后直接入库
+- 模型配置已从 `baseUrl` 改为完整 `requestUrl`
+- 图片/视频支持可选 `taskQueryUrlTemplate`，用于第三方或官方异步任务查询
+- 测试连接已恢复，但改为真实调用当前配置地址，不再做假测试
+- 模型配置现已增加 `providerKey`，前端可按服务商模板自动填官方地址和默认模型
+- 当前协议分发已明确支持：文字 `Qwen/Doubao/OpenAI/Gemini`，图片 `Qwen/OpenAI/Gemini`，视频测试 `Qwen/Vidu`
+- 官方服务商字段已由完整 `requestUrl` 收口为 `Base URL`
+- 豆包文本默认 `Base URL` 已修正为 `https://ark.cn-beijing.volces.com/api/v3`
+- 后端会按服务商协议自动拼具体路径，如豆包文本自动拼 `/chat/completions`
+- 本次 `Internal server error` 的直接根因是数据库里缺少 `public.SocialGeneratedPost` 表，不是图文生成接口本身先失败
+- 已通过 `prisma migrate diff` 确认待同步变更仅包含新增 `SocialGeneratedPost` 表、枚举、索引和外键
+- 执行 `prisma db push` 后，Prisma 已可正常访问 `socialGeneratedPost`，`count()` 返回 `0`
+- `Studio` 结果列表现已支持前端生成中占位项：点击生成后会先插入一条任务记录，再按 `queued -> copy -> images -> saving` 展示进度
+- 生成中的任务项会自动滚动到结果区，并在成功后被真实结果替换；失败时保留失败记录和错误文案
+- 豆包图片正式生成需支持 UI 仍可选择 `1k`；后端通过把 `1k` 映射为满足 `3686400` 最低像素要求的合法尺寸来兼容，测试连接逻辑保持不变
+- 已新增通用素材条组件 `AssetPreviewStrip`，统一 `Studio`、`StudioImages`、`VideoGenerationWorkspace` 的参考素材展示
+- 参考素材现统一为横向小长方形列表，支持右上角删除按钮；图片/视频点击仍保留预览能力
+- 当前路由已存在 `/studio/social` 与 `/studio/product-images`，本次只需补父导航子菜单和草稿箱聚合页，无需重做既有子模块路由
+- `草稿箱` 采用聚合方案：社媒图文结果读取后端 `SocialGeneratedPost`，商品图与详情图结果读取前端持久化 store
+- `Sidebar` 中父导航含子项时，现已采用右侧箭头 + 旋转反馈 + 子菜单展开/收起动画的交互模式
+- 项目注意事项已新增 `docs/project-notes.md`，用于记录这类稳定 UI 约定
+- 两个生成页的结果区已移除，草稿箱接管预览、提交审核、同步获客、同步产品等结果操作
+- 新增 `studioDraftInboxStore` 记录草稿箱未预览项；生成成功后通过 `studio:draft-fly` 事件驱动素材飞入草稿箱的全局动画
+- 新增 `studioDraftTaskStore` 作为草稿箱任务态来源，两个生成页在执行期间会持续更新阶段进度，完成后移除任务态
+- 飞行动画增强为：自动展开草稿箱子菜单后再飞向 `草稿箱` 入口，尺寸、透明度和发光效果更明显
+- `src/pages/Assets.tsx` 当前仍是纯前端 demo，核心语义包含知识文件列表、索引状态和检索测试台，后端真实知识库链路尚未实现
+- 当前项目基础设施已具备 `PostgreSQL` 与 `MinIO`，适合先用 `pgvector` 承担向量检索，避免第一版直接引入独立向量数据库
+- AI 客服目标场景已明确为“用户上传非结构化文件做知识库 + 语义检索问答”，因此知识库模块应设计为文件存储、文本解析、切片、embedding、TopK 检索和来源片段回传的完整链路
+- 已补知识库 Prisma 模型和 `knowledge` 后端模块骨架，支持上传、列表、详情、删除接口
+- 本机 PostgreSQL 当前未安装 `pgvector` 扩展；`npm exec prisma db push` 报错 `extension "vector" is not available`
+- 已将 `docker-compose.yml` 中原 `postgres` 服务镜像改为 `pgvector/pgvector:pg16`，仍复用同一个 PostgreSQL 容器与数据目录
+- 已在现有 `ai-superweb-postgres` 容器中执行 `CREATE EXTENSION IF NOT EXISTS vector;`
+- `npm exec prisma db push` 已成功，知识库相关表结构已同步进当前数据库
+- `src/pages/Assets.tsx` 已改为真实接线：上传文件、列表、详情、删除均走 `/api/knowledge/documents` 接口
+- 检索测试台当前仍为占位区，下一阶段需要补真实解析、切片、embedding 和向量检索接口
+- 已为知识库补上最小索引链路：上传文档后会立即执行解析、切片和向量入库
+- 当前真实索引优先支持 `txt / md`；`pdf / docx / pptx` 会明确标记为失败，不做假成功
+- 当前向量实现为本地哈希 embedding，用于先打通 `pgvector` 入库和检索链路；后续可替换为真实 embedding 模型
+- `/api/knowledge/retrieval/search` 已可返回真实命中片段，`Assets` 页面检索测试台已接入该接口
+- 当前新增知识库文件类型的实现方向已确认：`pdf` 用文本解析库提取全文，`docx` 用 `mammoth` 提取原始文本，`pptx` 用 `jszip` 读取 OpenXML 并抽取幻灯片文字，图片按 OCR 可检索实现
+- 图片功能按 OCR 可检索处理，目标是上传 `png / jpg / jpeg / webp` 后进入统一切片与向量检索链路，不单独做“仅展示不检索”分支
+- 扫描版 PDF 现采用双阶段解析：先尝试提取 PDF 文字层；若有效文字过少，则自动逐页截图并执行 OCR，再进入统一切片与检索链路

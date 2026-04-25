@@ -1,9 +1,11 @@
 # 数据库表设计 + 接口模块划分
 
-> 版本：v1.1  
-> 日期：2026-04-18  
+> 版本：v1.2  
+> 日期：2026-04-21  
 > 数据库：PostgreSQL 16  
-> ORM：Prisma
+> ORM：Prisma 7（必须使用 driver adapter，见 `server/prisma.config.ts`）
+
+> **阅读约定**：标注 ✅ 的表和接口为当前已实现并落库的内容；其余为规划设计，尚未落地。
 
 ---
 
@@ -27,9 +29,12 @@ deleted_at  DateTime?  -- 软删除，null 表示未删除
 
 ## 1. 身份与组织域
 
-### users — 用户表
+### users — 用户表 ✅
+
+> **当前实现**：使用 `username` 登录（非 `email`）；角色通过 `role` 单字段枚举控制，暂无 RBAC 关联表；无 `status` 字段和软删除。
 
 ```prisma
+// 目标设计（规划中，未落库）
 model User {
   id           String      @id @default(cuid())
   email        String      @unique
@@ -48,15 +53,40 @@ model User {
   auditLogs    AuditLog[]
 }
 
+// 当前实际 schema（已落库）
+model User {
+  id           String      @id @default(cuid())
+  username     String      @unique   // 登录凭证，非 email
+  passwordHash String
+  displayName  String
+  companyName  String?
+  role         UserRole    @default(employee)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  sessions     UserSession[]
+  businessCard BusinessCard?
+  products     Product[]   @relation("ProductCreator")
+}
+
+enum UserRole {
+  main_company
+  level1_agent
+  department_admin
+  employee
+}
+```
+
 enum UserStatus {
   ACTIVE
   DISABLED
 }
-```
 
-### user_sessions — 用户会话表
+### user_sessions — 用户会话表 ✅
+
+> **当前实现**：无 `tokenId`、无 `deviceType`；状态枚举为小写 `active / revoked / squeezed`；按 `loggedInAt` 排序和挤设备。
 
 ```prisma
+// 目标设计（规划中，未落库）
 model UserSession {
   id                  String         @id @default(cuid())
   userId              String
@@ -91,6 +121,29 @@ enum SessionStatus {
   ACTIVE
   LOGGED_OUT
   REPLACED
+}
+
+// 当前实际 schema（已落库）
+model UserSession {
+  id           String        @id @default(cuid())
+  userId       String
+  deviceId     String
+  deviceName   String?
+  ipAddress    String?
+  userAgent    String?
+  status       SessionStatus @default(active)
+  loggedInAt   DateTime      @default(now())
+  revokedAt    DateTime?
+  replacedById String?
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, loggedInAt])
+}
+
+enum SessionStatus {
+  active
+  revoked
+  squeezed
 }
 ```
 
@@ -221,9 +274,33 @@ enum DataScope {
 
 ## 2. 代理商域
 
-### agents — 代理商表
+### agents — 代理商表 ✅
+
+> **当前实现**：字段为 `code / name / status / ruleId / userId / createdAt / updatedAt`；当前仅实现一级代理基础管理，`ruleId` 先以字符串占位保存，未落库规则表关联。
+> **当前接口**：`GET /api/agents`、`POST /api/agents`、`GET /api/agents/:id`、`PATCH /api/agents/:id`。
 
 ```prisma
+// 当前实际 schema（已落库）
+model Agent {
+  id        String      @id @default(cuid())
+  code      String      @unique
+  name      String
+  status    AgentStatus @default(active)
+  ruleId    String?
+  userId    String?     @unique
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+enum AgentStatus {
+  active
+  disabled
+}
+```
+
+```prisma
+// 目标设计（规划中，未落库）
 model Agent {
   id          String              @id @default(cuid())
   code        String              @unique
@@ -389,20 +466,33 @@ model ContentAsset {
 
 ## 4. 商品域
 
-### products — 商品主表
+### products — 商品主表 ✅
+
+> **当前实现**：字段为 `id / creatorId / name / englishName / description / createdAt / updatedAt`；无审核状态、无软删除；`englishName` 在创建/更新时自动从中文名推导，也可手动指定。
 
 ```prisma
+// 当前实际 schema（已落库）
+model Product {
+  id          String   @id @default(cuid())
+  creatorId   String
+  name        String
+  englishName String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  creator     User     @relation("ProductCreator", fields: [creatorId], references: [id])
+}
+```
+
+```prisma
+// 目标设计（规划中，未落库）
 model Product {
   id                  String          @id @default(cuid())
-  ownerUserId         String
+  creatorId           String
   name                String
   englishName         String
-  summary             String          @db.Text
-  priceText           String
-  originalPriceText   String?
-  specialPriceText    String?
-  specialTag          String?
-  specialOfferEnabled Boolean         @default(false)
+  description         String?
   status              ProductStatus   @default(DRAFT)
   rejectReason        String?
   submittedAt         DateTime?
@@ -411,6 +501,7 @@ model Product {
   updatedAt           DateTime        @updatedAt
   deletedAt           DateTime?
 
+  creator             User            @relation("ProductCreator", fields: [creatorId], references: [id])
   images              ProductImage[]
   statusLogs          ProductStatusLog[]
   reviewOrders        ReviewOrder[]
@@ -427,7 +518,7 @@ enum ProductStatus {
 }
 ```
 
-### product_images — 商品图片表
+### product_images — 商品图片表（规划中，未落库）
 
 ```prisma
 model ProductImage {
@@ -442,7 +533,7 @@ model ProductImage {
 }
 ```
 
-### product_status_logs — 商品状态变更日志
+### product_status_logs — 商品状态变更日志（规划中，未落库）
 
 ```prisma
 model ProductStatusLog {
@@ -458,31 +549,30 @@ model ProductStatusLog {
 }
 ```
 
-### business_cards — 企业名片表
+### business_cards — 企业名片表 ✅
+
+> **当前实现**：字段为 `companyName / jobTitle / phone / email / businessScope / coverImageUrl / templateKey`；无 `coverFileId`；模板枚举为 `classic_blue / dark_grid / light_modern`。
 
 ```prisma
 model BusinessCard {
-  id            String                   @id @default(cuid())
-  userId         String                   @unique
-  companyName    String
-  position       String
-  phone          String
-  email          String
-  business       String                   @db.Text
-  templateKey    BusinessCardTemplateKey  @default(DEFAULT)
-  coverFileId    String?
-  coverUrl       String?
-  createdAt      DateTime                 @default(now())
-  updatedAt      DateTime                 @updatedAt
-  deletedAt      DateTime?
-
-  user           User                     @relation(fields: [userId], references: [id])
+  id            String                  @id @default(cuid())
+  userId        String                  @unique
+  companyName   String
+  jobTitle      String
+  phone         String
+  email         String
+  businessScope String
+  coverImageUrl String?
+  templateKey   BusinessCardTemplateKey @default(classic_blue)
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  user          User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 enum BusinessCardTemplateKey {
-  DEFAULT
-  DARK
-  LIGHT
+  classic_blue
+  dark_grid
+  light_modern
 }
 ```
 
@@ -880,63 +970,173 @@ enum JobStatus {
 
 ---
 
-## 1. Auth 模块
+## 1. Auth 模块 ✅
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
 | POST | `/api/auth/login` | 账号密码登录；创建会话；超过 2 台设备时挤掉最早设备 | 公开 |
+| GET | `/api/auth/me` | 获取当前登录用户信息 | 登录 |
 | POST | `/api/auth/logout` | 当前设备退出登录 | 登录 |
-| GET | `/api/auth/me` | 获取当前用户信息 + 角色 + 权限 + 数据范围 | 登录 |
-| PUT | `/api/auth/password` | 修改密码 | 登录 |
-| GET | `/api/auth/sessions` | 当前账号在线设备列表 | 登录 |
-| DELETE | `/api/auth/sessions/:id` | 手动下线某台设备 | 登录 |
+| PUT | `/api/auth/password` | 修改当前用户密码；成功后当前账号全部在线会话失效 | 登录 |
+| GET | `/api/auth/sessions` | 当前账号设备会话列表 | 登录 |
+
+### 当前前端已对齐部分
+
+- 登录页已接真实 `/api/auth/login`
+- 登录后已接真实 `/api/auth/me`
+- 顶部退出按钮已接真实 `/api/auth/logout`
+- 顶部已提供“修改密码”按钮，调用 `/api/auth/password`
+- 当前前端已支持 `main_company / level1_agent / department_admin / employee` 四种角色映射
+
+### 当前仍未对齐部分
+
+- 设备会话列表接口 `/api/auth/sessions` 已实现，但 demo 页面还未提供对应展示入口
 
 ### POST `/api/auth/login` 请求体
 
+> **当前实现**：以 `username` 登录（非 `email`）；`deviceId` / `deviceName` 为必填，用于设备会话管理。
+
 ```json
-{ "email": "admin@example.com", "password": "xxx" }
+{
+  "username": "demo_admin",
+  "password": "xxx",
+  "deviceId": "browser-uuid-xxx",
+  "deviceName": "Chrome on Mac"
+}
 ```
+
+> **当前实现**：密码已接入 bcrypt 校验；历史明文数据在用户成功登录后会自动迁移为 bcrypt 哈希。
 
 ### GET `/api/auth/me` 返回
 
 ```json
 {
   "id": "...",
-  "email": "...",
-  "displayName": "...",
-  "roles": ["main_company"],
-  "permissions": ["content:create", "review:approve"],
-  "dataScope": "ALL"
+  "username": "demo_admin",
+  "displayName": "管理员",
+  "companyName": "智邻科技",
+  "role": "main_company",
+  "agentId": null,
+  "createdAt": "2026-04-21T10:00:00.000Z",
+  "updatedAt": "2026-04-21T10:00:00.000Z"
+}
+```
+
+### PUT `/api/auth/password` 请求体
+
+```json
+{
+  "oldPassword": "123456",
+  "newPassword": "new-password"
+}
+```
+
+### GET `/api/auth/sessions` 返回示例
+
+```json
+[
+  {
+    "id": "session_xxx",
+    "deviceId": "browser-uuid-xxx",
+    "deviceName": "Chrome on Mac",
+    "status": "active",
+    "loggedInAt": "2026-04-21T10:00:00.000Z",
+    "revokedAt": null,
+    "replacedById": null
+  }
+]
+```
+
+---
+
+## 2. User 模块 ✅
+
+> **Demo 对照**：`src/pages/Rbac.tsx` 的“用户管理”已切到真实 `/api/users`。当前页面字段已改为 `username / password / displayName / companyName / role`，不再使用 demo 里的 `email / status` 口径。
+>
+> **权限边界**：主公司可管理全部用户；非主公司角色不能进入用户管理页，仅允许通过接口查看自己的用户详情，并仅可修改自己的密码。
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/users` | 用户列表；支持 `?q=` 搜索用户名/显示名/公司名；分页 `?page=&limit=` | 主公司 |
+| POST | `/api/users` | 创建用户；密码落库前自动转 bcrypt 哈希 | 主公司 |
+| GET | `/api/users/:id` | 用户详情；主公司可查看任意账号，其他角色仅可查看自己 | 登录 |
+| PATCH | `/api/users/:id` | 更新用户；主公司可更新显示名、密码、公司名、角色，其他角色仅可修改自己的密码 | 登录 |
+| DELETE | `/api/users/:id` | 删除用户；会先清理该用户会话 | 主公司 |
+
+### 当前前端已对齐部分
+
+- 用户管理列表：真实读取 `/api/users`
+- 新增用户：真实调用 `POST /api/users`
+- 用户详情：真实调用 `GET /api/users/:id`
+- 用户编辑：真实调用 `PATCH /api/users/:id`
+- 主公司可在用户管理中直接修改任意账号密码
+- 删除用户：真实调用 `DELETE /api/users/:id`
+- 搜索字段：按后端真实口径使用 `username / displayName / companyName`
+
+### 当前仍未对齐部分
+
+- 无用户级剩余缺口；`Rbac` 页中的“角色管理”“权限矩阵”已独立归入后端 `RBAC` 模块，不再归类为 `users` 模块未对齐项
+
+### GET `/api/users` 查询参数
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| `q` | string | 否 | — | 用户名 / 显示名 / 公司名模糊搜索 |
+| `page` | int | 否 | 1 | 页码，最小 1 |
+| `limit` | int | 否 | 20 | 每页数，最大 100 |
+
+### POST `/api/users` 请求体
+
+```json
+{
+  "username": "demo_user",
+  "password": "123456",
+  "displayName": "演示员工",
+  "companyName": "智邻科技",
+  "role": "employee"
+}
+```
+
+### PATCH `/api/users/:id` 请求体
+
+```json
+{
+  "displayName": "新显示名",
+  "password": "new-password",
+  "companyName": "新公司名",
+  "role": "department_admin"
 }
 ```
 
 ---
 
-## 2. User 模块
+## 3. RBAC 模块 ✅
+
+> **当前实现口径**：已落地的是面向 demo 页 `src/pages/Rbac.tsx` 的简化 RBAC 接口，不是本节原先规划的完整 `roles / permissions / data-scope` 体系。
+>
+> **当前前端状态**：角色管理与权限矩阵已接真实后端 `/api/rbac` 系列接口；后端模块也已注册到 `AppModule`。
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | `/api/users` | 用户列表 | `rbac:user_read` |
-| POST | `/api/users` | 创建用户 | `rbac:user_manage` |
-| GET | `/api/users/:id` | 用户详情 | `rbac:user_read` |
-| PUT | `/api/users/:id` | 更新用户 | `rbac:user_manage` |
-| PUT | `/api/users/:id/status` | 启用 / 禁用 | `rbac:user_manage` |
-| DELETE | `/api/users/:id` | 软删除用户 | `rbac:user_manage` |
+| GET | `/api/rbac` | 获取角色列表与页面权限矩阵 | 登录 |
+| PATCH | `/api/rbac/roles` | 更新角色名称 | 主公司 |
+| PATCH | `/api/rbac/permissions` | 更新页面权限矩阵 | 主公司 |
 
----
+### 当前前端已对齐部分
 
-## 3. RBAC 模块
+- `Rbac` 页“角色管理”已接真实 `/api/rbac/roles`
+- `Rbac` 页“权限矩阵”已接真实 `/api/rbac/permissions`
+- 页面访问控制 `RequirePageAccess` 已使用真实权限矩阵结果
 
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| GET | `/api/roles` | 角色列表 | `rbac:role_read` |
-| POST | `/api/roles` | 创建角色 | `rbac:role_manage` |
-| PUT | `/api/roles/:id` | 更新角色 | `rbac:role_manage` |
-| GET | `/api/roles/:id/permissions` | 角色权限列表 | `rbac:role_read` |
-| PUT | `/api/roles/:id/permissions` | 设置角色权限 | `rbac:role_manage` |
-| GET | `/api/permissions` | 全部权限点 | `rbac:role_read` |
-| PUT | `/api/users/:id/roles` | 分配用户角色 | `rbac:user_manage` |
-| PUT | `/api/roles/:id/data-scope` | 设置角色数据范围 | `rbac:role_manage` |
+### 当前实现范围
+
+- 角色键固定为：`main_company / level1_agent / department_admin / employee`
+- 权限粒度当前只覆盖页面级访问控制
+- 后端会在首次读取时自动补齐默认角色与默认页面权限
+
+### 当前仍未实现部分
+
+- 文档原规划中的 `/api/roles`、`/api/permissions`、用户多角色分配、数据范围策略接口尚未落地
 
 ---
 
@@ -954,84 +1154,146 @@ enum JobStatus {
 
 ---
 
-## 5. Agent 模块
+## 5. Agent 模块 ✅
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | `/api/agents` | 代理商列表 | `agent:read` |
-| POST | `/api/agents` | 创建代理商 | `agent:manage` |
-| GET | `/api/agents/:id` | 代理商详情 | `agent:read` |
-| PUT | `/api/agents/:id` | 更新代理商 | `agent:manage` |
-| PUT | `/api/agents/:id/status` | 状态变更 | `agent:manage` |
-| GET | `/api/agents/:id/keywords` | 代理关键词提审列表 | `agent:read` |
-| POST | `/api/agents/:id/account-binding` | 绑定账号 | `agent:manage` |
+| GET | `/api/agents` | 代理列表；支持 `?q=` 搜索编号/名称，支持 `?status=` 过滤；分页 `?page=&limit=` | 登录 |
+| POST | `/api/agents` | 创建代理；仅主公司可创建 | 登录 |
+| GET | `/api/agents/:id` | 代理详情；主公司可查看全部，其他角色仅可查看绑定到自己的代理 | 登录 |
+| PATCH | `/api/agents/:id` | 更新代理名称、状态、规则；仅主公司可更新 | 登录 |
 
----
+> **权限说明**：`main_company` 可查看全部代理并执行创建、更新；非主公司角色仅可查看 `userId = me` 的代理。
 
-## 6. Content 模块
+### GET `/api/agents` 查询参数
 
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| GET | `/api/contents` | 内容列表 | `content:read` |
-| POST | `/api/contents` | 创建内容草稿 | `content:create` |
-| GET | `/api/contents/:id` | 内容详情 | `content:read` |
-| PUT | `/api/contents/:id` | 更新内容 | `content:update` |
-| DELETE | `/api/contents/:id` | 删除内容 | `content:delete` |
-| POST | `/api/contents/:id/submit` | 提交审核 | `content:submit_review` |
-| GET | `/api/contents/:id/versions` | 版本列表 | `content:read` |
-| POST | `/api/contents/:id/versions` | 保存新版本 | `content:update` |
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| `q` | string | 否 | — | 代理编号 / 名称模糊搜索 |
+| `status` | `active \| disabled` | 否 | — | 按代理状态过滤 |
+| `page` | int | 否 | 1 | 页码，最小 1 |
+| `limit` | int | 否 | 20 | 每页数，最大 100 |
 
----
-
-## 7. AI 模块
-
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| POST | `/api/ai/copy/generate` | 生成文案（异步任务） | `content:create` |
-| POST | `/api/ai/images/generate` | 生成图片（异步任务） | `content:create` |
-| POST | `/api/ai/video/submit` | 提交视频生成任务 | `content:create` |
-| POST | `/api/products/infer-english-name` | 根据中文产品名生成英文名 | `product:create` |
-| GET | `/api/ai/jobs/:id` | 查询生成任务状态 | `content:read` |
-| GET | `/api/ai/providers` | 查询可用模型供应商 | `settings:read` |
-
-### POST `/api/ai/copy/generate` 请求体
+### POST `/api/agents` 请求体
 
 ```json
 {
-  "productName": "AI助手",
-  "sellingPoints": "更智能、更高效",
-  "audience": "企业运营",
-  "platformStyle": "XIAOHONGSHU",
-  "format": "text"
+  "code": "A001",
+  "name": "杭州一级代理",
+  "ruleId": "rule_demo_001"
 }
 ```
 
-### 返回（异步任务模式）
+> `ruleId` 可选，当前仅按字符串保存。
+
+### PATCH `/api/agents/:id` 请求体
 
 ```json
 {
-  "jobId": "job_xxx",
-  "status": "PENDING"
+  "name": "杭州一级代理-新名称",
+  "status": "active",
+  "ruleId": "rule_demo_002"
 }
 ```
 
 ---
 
-## 8. Product 模块
+## 6. AI 内容生成模块（Demo 主语义）
 
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| GET | `/api/products` | 商品列表，支持中英文名搜索 | `product:read` |
-| POST | `/api/products` | 创建商品，支持 `englishName` / `english_name` | `product:create` |
-| GET | `/api/products/:id` | 商品详情 | `product:read` |
-| PUT | `/api/products/:id` | 更新商品，支持中英文名 | `product:update` |
-| DELETE | `/api/products/:id` | 删除商品 | `product:delete` |
-| POST | `/api/products/:id/submit` | 提交审核 | `product:submit_review` |
-| PUT | `/api/products/:id/special-offer` | 更新特价配置 | `product:update` |
+> **说明**：以下内容以后台 demo 页面为准，对应 `studio / studio/product-images / videos / videos/product-build / videos/avatar-ads`。当前后端未实现该模块的真实落库与接口，仍以 demo 本地状态流为主。
+
+### 6.1 社媒图文生成
+
+- 页面：`/studio/social`
+- 用途：生成社媒图文内容，支持提示词、素材上传、结果预览、提交审核、同步获客
+- 当前状态：仅 demo 页面与本地状态，后端未实现
+
+### 6.2 商品图与详情图生成
+
+- 页面：`/studio/product-images`
+- 用途：生成商品主图、场景图、详情图，可提交审核并同步到获客/商品下游
+- 当前状态：仅 demo 页面与本地状态，后端未实现
+
+### 6.3 视频生成
+
+- 页面：`/videos`
+- 子页面：`/videos/product-build`、`/videos/avatar-ads`
+- 用途：产品视频生成、真人口播视频生成
+- 当前状态：仅 demo 页面与本地状态，后端未实现
 
 ---
 
-## 9. Business Card 模块
+## 7. Product 模块（Demo 主语义）
+
+> **demo 主语义**：商品管理中心。支持商品基础信息、图片、价格、特价配置、提交审核、审核上架、下架。
+>
+> **当前后端现状**：已覆盖产品管理 demo 主链路，包括价格、图片、特价字段、提审、审核、上架/下架；独立审核中心模块仍以 demo 页面组织为主。
+
+### Demo 页面语义
+
+- 页面：`/products`
+- 字段：`name / englishName / summary / priceText / images / specialOfferEnabled / originalPriceText / specialPriceText / specialTag`
+- 状态：`draft / submitted / live / rejected / offline`
+- 权限语义：主公司可看全部商品并审核；一级代理管理自己的商品并提交审核
+
+### 当前已实现接口 ✅
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/products` | 商品列表；支持 `?q=` 搜索中文名/英文名/摘要/描述；分页 `?page=&limit=` | 登录 |
+| POST | `/api/products` | 创建商品；支持摘要、价格、特价字段、图片列表；`englishName` 可选 | 登录 |
+| GET | `/api/products/:id` | 商品详情 | 登录 |
+| PATCH | `/api/products/:id` | 更新商品；非主公司角色仅可编辑自己名下的草稿/驳回商品 | 登录 |
+| DELETE | `/api/products/:id` | 删除商品；非主公司角色仅可删除自己名下的草稿/驳回/已下架商品 | 登录 |
+| POST | `/api/products/:id/submit` | 一级代理提交商品审核 | 登录 |
+| POST | `/api/products/:id/publish` | 主公司上架草稿或已下架商品 | 主公司 |
+| POST | `/api/products/:id/unpublish` | 主公司下架已上架商品 | 主公司 |
+| POST | `/api/products/:id/approve` | 主公司审核通过并上架待审核商品 | 主公司 |
+| POST | `/api/products/:id/reject` | 主公司驳回待审核商品 | 主公司 |
+| POST | `/api/products/infer-english-name` | 根据中文名推导英文名（不落库） | 登录 |
+
+> **权限说明**：`main_company` 角色可查看全部商品并执行审核与上下架；其他角色只能操作自己创建的商品（`creatorId = me`），且不能直接上架。
+
+### GET `/api/products` 查询参数
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| `q` | string | 否 | — | 中英文名/描述模糊搜索 |
+| `page` | int | 否 | 1 | 页码，最小 1 |
+| `limit` | int | 否 | 20 | 每页数，最大 100 |
+
+### POST `/api/products` 请求体
+
+```json
+{
+  "name": "智能音箱",
+  "englishName": "smart-speaker",
+  "summary": "适合家庭场景的智能语音设备",
+  "priceText": "¥599",
+  "specialOfferEnabled": true,
+  "originalPriceText": "¥799",
+  "specialPriceText": "¥599",
+  "specialTag": "限时特价",
+  "images": ["data:image/png;base64,..."],
+  "description": "支持语音控制的智能家居设备"
+}
+```
+
+> `englishName` / `description` / 特价字段 / 图片字段均可选。省略 `englishName` 时自动推导（转 kebab-case）。
+
+### POST `/api/products/infer-english-name` 请求体
+
+```json
+{ "name": "智能音箱" }
+```
+
+返回：`{ "englishName": "zhi-neng-yin-xiang" }`
+
+---
+
+## 8. Business Card 模块 ✅
+
+> **说明**：企业名片是独立模块，不并入“前台配置中心”。
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
@@ -1042,89 +1304,172 @@ enum JobStatus {
 
 ---
 
-## 10. Review 模块
+## 9. Review 模块（Demo 主语义）
+
+> **说明**：以后台 demo 页面 `/reviews` 为准。当前后端未实现真实审核中心接口。
+
+### Demo 页面语义
+
+- 页面：`/reviews`
+- 模块名：审核中心
+- 审核范围：
+  - 素材审核
+  - 产品审核
+- 当前状态：仅 demo 页面与本地状态，后端未实现
+
+---
+
+## 10. 模型配置模块（Demo 主语义）
+
+> **说明**：以后台 demo 页面 `/rules` 为准。这里的“规则”实际指模型配置，不是关键词规则。当前后端未实现该模块。
+
+### Demo 页面语义
+
+- 页面：`/rules`
+- 模块名：模型配置
+- 配置范围：
+  - 文字模型
+  - 图片模型
+  - 视频模型
+- 典型字段：
+  - `providerName`
+  - `baseUrl`
+  - `apiKey`
+  - `modelName`
+  - `timeoutSeconds`
+  - `maxRetries`
+  - `responseFormat`
+- 典型用途：
+  - 图文文案
+  - 商品图生成
+  - 视频生成
+  - AI 客服
+  - RAG 回答
+- 当前状态：仅 demo 页面与本地状态，后端未实现
+
+---
+
+## 11. Keyword Rule 模块 ✅
+
+> **说明**：这是当前后端实际已实现的规则模块，用于关键词提交约束；它不再代表后台菜单 `/rules` 的主语义。
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | `/api/reviews` | 审核单列表 | `review:read` |
-| GET | `/api/reviews/:id` | 审核单详情 | `review:read` |
-| POST | `/api/reviews/:id/approve` | 审核通过 | `review:approve` |
-| POST | `/api/reviews/:id/reject` | 审核驳回 | `review:reject` |
-| POST | `/api/reviews/:id/return` | 退回修改 | `review:reject` |
-| POST | `/api/reviews/:id/withdraw` | 提交人撤回 | `review:withdraw` |
-| GET | `/api/reviews/:id/actions` | 操作历史 | `review:read` |
+| GET | `/api/rules` | 规则列表；支持 `?q=` 搜索规则名；分页 `?page=&limit=` | 登录 |
+| POST | `/api/rules` | 创建关键词规则；仅主公司可创建 | 登录 |
+| GET | `/api/rules/:id` | 关键词规则详情 | 登录 |
+| PATCH | `/api/rules/:id` | 更新关键词规则；仅主公司可更新 | 登录 |
 
-### POST `/api/reviews/:id/reject` 请求体
+> **权限说明**：当前最小实现仅支持 `main_company` 创建、更新规则；已登录用户可查看规则列表与详情。
+
+### GET `/api/rules` 查询参数
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| `q` | string | 否 | — | 规则名模糊搜索 |
+| `page` | int | 否 | 1 | 页码，最小 1 |
+| `limit` | int | 否 | 20 | 每页数，最大 100 |
+
+### POST `/api/rules` 请求体
 
 ```json
-{ "comment": "关键词不符合规则，请修改第3条" }
+{
+  "name": "标准关键词规则",
+  "minCount": 3,
+  "maxCount": 10,
+  "minLen": 2,
+  "maxLen": 20,
+  "dedupeRequired": true,
+  "sensitiveFilterEnabled": true,
+  "submitRateLimitPerDay": 50
+}
+```
+
+### PATCH `/api/rules/:id` 请求体
+
+```json
+{
+  "name": "标准关键词规则-新版",
+  "maxCount": 12,
+  "dedupeRequired": false,
+  "submitRateLimitPerDay": 80
+}
 ```
 
 ---
 
-## 11. Rule 模块
+## 12. 知识库 / RAG 模块（Demo 主语义）
 
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| GET | `/api/rules` | 规则列表 | `rule:read` |
-| POST | `/api/rules` | 创建规则 | `rule:manage` |
-| GET | `/api/rules/:id` | 规则详情 | `rule:read` |
-| PUT | `/api/rules/:id` | 更新规则 | `rule:manage` |
-| PUT | `/api/rules/:id/status` | 启用 / 禁用 | `rule:manage` |
-| GET | `/api/rules/:id/versions` | 规则历史版本 | `rule:read` |
-| GET | `/api/rules/:id/hit-logs` | 命中日志 | `rule:read` |
+> **说明**：以后台 demo 页面 `/assets` 为准。当前后端未实现该模块，现有文档不再将 `/assets` 主语义描述为通用文件资产库。
 
----
+### Demo 页面语义
 
-## 12. Keyword Submission 模块
-
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| GET | `/api/keyword-submissions` | 提审单列表 | `review:read` |
-| POST | `/api/keyword-submissions` | 代理商提交关键词 | `agent:submit` |
-| GET | `/api/keyword-submissions/:id` | 提审单详情 | `review:read` |
-| POST | `/api/keyword-submissions/:id/approve` | 审核通过 | `review:approve` |
-| POST | `/api/keyword-submissions/:id/reject` | 审核驳回 | `review:reject` |
+- 页面：`/assets`
+- 模块名：知识库管理
+- 主要能力：
+  - 本地知识库目录绑定
+  - 知识文件列表
+  - 切片数与索引状态
+  - 检索测试台
+- 当前状态：仅 demo 页面与本地状态，后端未实现
 
 ---
 
-## 13. Publish 模块
+## 13. 获客内容池 / Publish 模块（Demo 主语义）
 
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| GET | `/api/publish/jobs` | 发布任务列表 | `publish:read` |
-| POST | `/api/publish/jobs` | 创建发布任务 | `publish:create` |
-| GET | `/api/publish/jobs/:id` | 任务详情 | `publish:read` |
-| POST | `/api/publish/jobs/:id/cancel` | 取消任务 | `publish:manage` |
-| POST | `/api/publish/jobs/:id/retry` | 手动重试 | `publish:manage` |
-| GET | `/api/publish/jobs/:id/attempts` | 尝试记录 | `publish:read` |
-| GET | `/api/publish/channels` | 渠道列表 | `publish:read` |
-| PUT | `/api/publish/channels/:id` | 更新渠道配置 | `settings:manage` |
+> **说明**：以后台 demo 页面 `/publishing` 为准。当前后端未实现该模块。
 
----
+### Demo 页面语义
 
-## 14. Asset 模块
-
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| POST | `/api/assets/upload` | 上传文件（multipart） | 登录 |
-| GET | `/api/assets` | 文件列表 | `asset:read` |
-| GET | `/api/assets/:id` | 文件详情 | `asset:read` |
-| DELETE | `/api/assets/:id` | 删除文件 | `asset:delete` |
-| GET | `/api/assets/:id/url` | 获取访问签名 URL | `asset:read` |
+- 页面：`/publishing`
+- 模块名：获客内容池
+- 主要能力：
+  - 审核通过内容列表
+  - 一键发布到平台草稿箱
+  - 发布记录
+  - 上传超级站
+- 当前状态：仅 demo 页面与本地状态，后端未实现
 
 ---
 
-## 15. Audit 模块
+## 14. AI 客服 / 工单中心（Demo 主语义）
 
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| GET | `/api/audit/logs` | 审计日志列表 | `audit:read` |
-| GET | `/api/audit/logs/export` | 导出审计日志 | `audit:export` |
+> **说明**：以后台 demo 页面 `/support` 为准。当前后端未实现该模块。
+
+### Demo 页面语义
+
+- 页面：`/support`
+- 模块名：AI 客服 / 工单中心
+- 主要能力：
+  - 工单列表与状态流转
+  - 对话线程
+  - AI 回复置信度展示
+  - 转人工占位
+  - 联系方式查看审计
+- 当前状态：仅 demo 页面与本地状态，后端未实现
 
 ---
 
-## 16. Settings 模块
+## 15. 前台配置中心（Demo 主语义，低优先级）
+
+> **说明**：以后台 demo 页面 `/personalization` 为准。该模块当前开发优先级较低；企业名片不归此模块。当前后端未实现。
+
+### Demo 页面语义
+
+- 页面：`/personalization`
+- 模块名：前台配置中心
+- 主要能力：
+  - 站点模板与模块布局
+  - 运营指标配置
+  - 行业与招商信息配置
+  - AI 形象配置
+- 当前状态：仅 demo 页面与本地状态，后端未实现
+
+---
+
+## 16. Settings 模块（规划中）
+
+> **说明**：保留为系统级设置与集成配置的规划入口，不等同于当前 demo 中的“前台配置中心”页面。
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
@@ -1208,8 +1553,8 @@ User ──────────── UserRole ─── Role ─── Role
 
 - 每个后台账号最多同时在线 `2` 台设备
 - 第 `3` 台设备登录时，自动挤掉最早登录设备
-- 被挤下线设备的 `user_sessions.status` 标记为 `REPLACED`
-- 登录时间不主动过期，但会通过 `lastActiveAt` 记录活跃时间
+- 被挤下线设备的 `user_sessions.status` 标记为 `squeezed`
+- 当前实际 schema 使用 `loggedInAt` 记录登录时间，`revokedAt` 记录主动下线时间；未实现 `lastActiveAt`
 
 ### 5. 企业名片约束
 

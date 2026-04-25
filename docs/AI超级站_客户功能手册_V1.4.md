@@ -43,8 +43,10 @@ AI 超级站是一套企业站点与内容运营系统，支持前台展示、�
 - 管理知识库
 - 管理模型
 - 管理账号角色权限
+- 修改任意后台账号密码
 - 管理企业名片配置结果
-- 查看与管理设备会话
+- 修改自己的密码
+- 查看设备会话接口能力（当前页面入口待补充）
 
 ### 2.2 1级代理
 
@@ -64,6 +66,7 @@ AI 超级站是一套企业站点与内容运营系统，支持前台展示、�
 - 1级代理不能审核素材
 - 1级代理不能审核商品
 - 1级代理不能管理前台配置、模型配置、知识库和账号角色权限
+- 1级代理不能修改其他账号密码
 
 ---
 
@@ -420,21 +423,48 @@ AI 超级站是一套企业站点与内容运营系统，支持前台展示、�
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
+- `PUT /api/auth/password`
 - `GET /api/auth/sessions`
-- `DELETE /api/auth/sessions/:id`
 
-### 15.2 商品
+说明：
+
+- 顶部已提供“修改密码”入口，当前登录用户可修改自己的密码
+- 修改自己的密码后，当前在线会话会失效，需要重新登录
+- `GET /api/auth/sessions` 已有后端接口，当前 demo 页面暂未提供设备会话列表入口
+
+### 15.2 用户与权限
+
+- `GET /api/users`
+- `POST /api/users`
+- `GET /api/users/:id`
+- `PATCH /api/users/:id`
+- `DELETE /api/users/:id`
+- `GET /api/rbac`
+- `PATCH /api/rbac/roles`
+- `PATCH /api/rbac/permissions`
+
+说明：
+
+- 主公司可在“用户管理”中新增、编辑、删除用户
+- 主公司可在“用户管理”中直接重置任意账号密码
+- 非主公司角色不进入用户管理页，只能修改自己的密码
+- `Rbac` 页中的“角色管理”“权限矩阵”当前已接真实后端简化接口
+
+### 15.3 商品
 
 - `GET /api/products`
 - `POST /api/products`
 - `GET /api/products/:id`
-- `PUT /api/products/:id`
+- `PATCH /api/products/:id`
 - `DELETE /api/products/:id`
 - `POST /api/products/:id/submit`
-- `PUT /api/products/:id/special-offer`
+- `POST /api/products/:id/publish`
+- `POST /api/products/:id/unpublish`
+- `POST /api/products/:id/approve`
+- `POST /api/products/:id/reject`
 - `POST /api/products/infer-english-name`
 
-### 15.3 企业名片
+### 15.4 企业名片
 
 - `GET /api/business-cards/me`
 - `PUT /api/business-cards/me`
@@ -447,10 +477,14 @@ AI 超级站是一套企业站点与内容运营系统，支持前台展示、�
 
 当前 Demo 已完成：
 
+- 登录、登出、当前用户信息、个人改密
+- 用户管理真实接口接入
+- 角色管理与权限矩阵真实接口接入
+- 主公司在用户管理中直接修改任意账号密码
 - 企业名片页面、菜单、路由接入
 - 企业名片表单字段、模板选择、封面上传、预览、保存逻辑
 - 商品英文名字段、自动回填、列表展示、搜索支持
-- 页面权限 `business_cards` 接入
+- 页面权限矩阵接入
 - Store 测试通过
 - `npm run build` 通过
 

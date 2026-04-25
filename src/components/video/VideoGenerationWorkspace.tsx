@@ -1,31 +1,18 @@
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { Link } from "react-router-dom";
-import { FileText, MessageSquareText, Sparkles, UploadCloud, Video as VideoIcon } from "lucide-react";
+import { MessageSquareText, Sparkles, UploadCloud } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
+import AssetPreviewStrip from "@/components/ui/AssetPreviewStrip";
 import { cn } from "@/lib/utils";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { useAppStore } from "@/store/appStore";
 import { useAuthStore } from "@/store/authStore";
-
-type ReviewStage = "draft" | "submitted" | "approved";
-type VideoStatus = "ready" | "processing";
-
-type VideoItem = {
-  id: string;
-  title: string;
-  durationText: string;
-  status: VideoStatus;
-  createdAt: string;
-  generatedScript: string;
-  videoUrl: string;
-  reviewStage: ReviewStage;
-  synced: boolean;
-};
+import { useVideoDraftStore, type VideoDraftItem, type VideoDraftSource } from "@/store/videoDraftStore";
 
 type UploadAsset = {
   id: string;
@@ -50,7 +37,7 @@ type WorkspaceProps = {
   enableVoiceSelection?: boolean;
   defaultVoice?: string;
   voiceOptions?: string[];
-  historyTitle?: string;
+  draftSource: VideoDraftSource;
 };
 
 const DEMO_VIDEO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
@@ -79,6 +66,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   const user = useAuthStore((s) => s.user);
   const addContent = useAppStore((s) => s.addContent);
   const markContentSynced = useAppStore((s) => s.markContentSynced);
+  const prependDraft = useVideoDraftStore((s) => s.prependItem);
   const isAgent = user?.roleKey === "level1_agent";
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -92,19 +80,11 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   const [ratio, setRatio] = useState("9:16");
   const [resolution, setResolution] = useState("1080p");
   const [assets, setAssets] = useState<UploadAsset[]>([]);
-  const [generatedHistory, setGeneratedHistory] = useState<VideoItem[]>([]);
-  const [historyQuery, setHistoryQuery] = useState("");
   const [showAssetMenu, setShowAssetMenu] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [assetHint, setAssetHint] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<UploadAsset | null>(null);
-  const [previewGenerated, setPreviewGenerated] = useState<VideoItem | null>(null);
-
-  const filteredHistory = useMemo(() => {
-    const q = historyQuery.trim().toLowerCase();
-    return generatedHistory.filter((item) => !q || item.title.toLowerCase().includes(q));
-  }, [generatedHistory, historyQuery]);
 
   async function readFileAsDataUrl(file: File) {
     return new Promise<string>((resolve, reject) => {
@@ -137,6 +117,10 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     await appendFiles(Array.from(event.target.files ?? []));
     event.target.value = "";
     setShowAssetMenu(false);
+  }
+
+  function removeAsset(id: string) {
+    setAssets((prev) => prev.filter((item) => item.id !== id));
   }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
@@ -181,8 +165,9 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       .filter(Boolean)
       .join("\n");
 
-    const next: VideoItem = {
+    const next: VideoDraftItem = {
       id: makeId("video"),
+      source: props.draftSource,
       title: `${props.cardTitle}｜${prompt.slice(0, 16) || "新视频任务"}`,
       durationText: formatDurationText(durationSec),
       status: "ready",
@@ -190,41 +175,12 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       generatedScript: nextScript,
       videoUrl: firstVideo,
       reviewStage: isAgent ? "draft" : "approved",
-      synced: false,
+      syncedToLeads: false,
     };
 
-    setGeneratedHistory((prev) => [next, ...prev]);
-    setAssetHint("已生成到结果列表，可逐条预览、提交审核或同步获客。");
+    prependDraft(next);
+    setAssetHint("已生成到视频草稿箱，可统一预览、提交审核或同步获客。");
     setIsGenerating(false);
-  }
-
-  function submitReview(id: string) {
-    setGeneratedHistory((prev) => prev.map((item) => (item.id === id ? { ...item, reviewStage: "submitted" } : item)));
-    setAssetHint("已提交审核，等待主公司处理。");
-  }
-
-  function syncToLeads(id: string) {
-    const item = generatedHistory.find((entry) => entry.id === id);
-    if (!item) return;
-    if (item.reviewStage !== "approved") {
-      setAssetHint("只有审核通过后才能同步到获客。");
-      return;
-    }
-
-    const content = addContent({
-      type: "video",
-      title: item.title,
-      body: item.generatedScript,
-      platformStyle: "douyin",
-      images: [],
-      videoUrl: item.videoUrl,
-      syncedToLeads: true,
-      reviewStatus: "approved",
-    });
-    markContentSynced(content.id);
-
-    setGeneratedHistory((prev) => prev.map((entry) => (entry.id === id ? { ...entry, synced: true } : entry)));
-    setAssetHint("已同步到获客内容池。");
   }
 
   return (
@@ -339,38 +295,31 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                     </div>
                   ) : null}
                 </div>
-                <div className="text-xs text-zinc-400">每条结果单独提交审核，审核通过后才显示同步按钮。</div>
+              <div className="text-xs text-zinc-400">生成结果统一进入视频草稿箱，审核与同步操作在草稿箱处理。</div>
               </div>
               {assetHint ? <div className="mt-3 text-xs text-zinc-400">{assetHint}</div> : null}
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {assets.length === 0 ? (
-                  <div className="col-span-full rounded-2xl border border-dashed border-white/10 bg-black/20 p-4 text-center text-xs text-zinc-500">暂无已导入素材</div>
-                ) : null}
-                {assets.map((asset) => {
-                  if ((asset.kind === "image" || asset.kind === "video") && asset.previewUrl) {
-                    return (
-                      <button key={asset.id} type="button" className="overflow-hidden rounded-2xl border border-white/10 bg-black/20 text-left transition hover:border-amber-400/30" onClick={() => setPreviewAsset(asset)}>
-                        {asset.kind === "image" ? (
-                          <img src={asset.previewUrl} alt={asset.name} className="h-32 w-full object-cover" />
-                        ) : (
-                          <div className="flex h-32 items-center justify-center bg-white/5">
-                            <VideoIcon className="h-8 w-8 text-amber-300" />
-                          </div>
-                        )}
-                        <div className="truncate px-3 py-2 text-xs text-zinc-300">{asset.name}</div>
-                      </button>
-                    );
-                  }
-                  return (
-                    <div key={asset.id} className="flex min-h-24 items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-xs text-zinc-300">
-                      <FileText className="h-4 w-4 shrink-0 text-amber-300" />
-                      <div className="min-w-0">
-                        <div className="truncate font-medium text-zinc-100">{asset.name}</div>
-                        <div className="truncate text-zinc-500">文档附件</div>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="mt-3 space-y-3">
+                <div className="space-y-2">
+                  <div className="text-xs font-medium text-zinc-400">
+                    图片与视频素材（{assets.filter((asset) => (asset.kind === "image" || asset.kind === "video") && asset.previewUrl).length}）
+                  </div>
+                  <AssetPreviewStrip
+                    items={assets.filter((asset) => (asset.kind === "image" || asset.kind === "video") && asset.previewUrl)}
+                    emptyText="暂无图片或视频素材"
+                    onPreview={(asset) => setPreviewAsset(asset as UploadAsset)}
+                    onRemove={removeAsset}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs font-medium text-zinc-400">
+                    文档素材（{assets.filter((asset) => asset.kind === "file").length}）
+                  </div>
+                  <AssetPreviewStrip
+                    items={assets.filter((asset) => asset.kind === "file")}
+                    emptyText="暂无文档素材"
+                    onRemove={removeAsset}
+                  />
+                </div>
               </div>
             </div>
             <div className="mt-4 flex justify-end">
@@ -385,64 +334,10 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle>{props.historyTitle ?? "生成结果"}</CardTitle>
-            <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-              <Input value={historyQuery} onChange={(e) => setHistoryQuery(e.target.value)} placeholder="搜索标题" />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {filteredHistory.length === 0 ? (
-              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-8 text-center text-sm text-zinc-400">暂无生成结果，请先点击“发送并生成”</div>
-            ) : (
-              filteredHistory.map((item) => (
-                <div key={item.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-zinc-100">{item.title}</div>
-                      <div className="mt-1 text-xs text-zinc-400">
-                        {item.durationText} · {new Date(item.createdAt).toLocaleString()}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button type="button" variant="secondary" size="sm" onClick={() => setPreviewGenerated(item)}>预览</Button>
-                      {isAgent && item.reviewStage === "draft" ? (
-                        <Button type="button" variant="secondary" size="sm" onClick={() => submitReview(item.id)}>提交审核</Button>
-                      ) : null}
-                      {item.reviewStage === "approved" ? (
-                        <Button type="button" size="sm" onClick={() => syncToLeads(item.id)} disabled={item.synced}>
-                          {item.synced ? "已同步获客" : "同步到获客"}
-                        </Button>
-                      ) : null}
-                      {item.reviewStage === "submitted" ? <Badge variant="amber">待审核</Badge> : null}
-                      {item.reviewStage === "approved" ? <Badge variant="green">审核通过</Badge> : null}
-                      <Badge variant={item.status === "ready" ? "green" : "amber"}>{item.status === "ready" ? "可用" : "处理中"}</Badge>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
       <Modal open={!!previewAsset} title="素材预览" onClose={() => setPreviewAsset(null)}>
         {previewAsset?.kind === "image" && previewAsset.previewUrl ? <img src={previewAsset.previewUrl} alt={previewAsset.name} className="max-h-[70vh] rounded-md object-contain" /> : null}
         {previewAsset?.kind === "video" && previewAsset.previewUrl ? <video controls src={previewAsset.previewUrl} className="max-h-[70vh] w-full rounded-md bg-black" /> : null}
         {previewAsset?.kind === "file" ? <div className="text-sm text-zinc-300">{previewAsset.name}</div> : null}
-      </Modal>
-
-      <Modal open={!!previewGenerated} title="生成结果预览" onClose={() => setPreviewGenerated(null)}>
-        {previewGenerated ? (
-          <div className="space-y-4">
-            <video controls src={previewGenerated.videoUrl} className="h-72 w-full rounded-xl bg-black object-cover" />
-            <pre className="whitespace-pre-wrap rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-zinc-300">{previewGenerated.generatedScript}</pre>
-          </div>
-        ) : null}
       </Modal>
     </div>
   );
