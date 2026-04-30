@@ -1198,15 +1198,17 @@ enum JobStatus {
 
 ---
 
-## 6. AI 内容生成模块（Demo 主语义）
+## 6. AI 内容生成模块（当前实现）
 
-> **说明**：以下内容以后台 demo 页面为准，对应 `studio / studio/product-images / videos / videos/product-build / videos/avatar-ads`。当前后端未实现该模块的真实落库与接口，仍以 demo 本地状态流为主。
+> **说明**：以下内容对应 `studio / studio/product-images / videos / videos/product-build / videos/avatar-ads`。当前状态已从纯 demo 本地流演进为“部分模块已接真实后端、部分模块仍保留前端草稿流”的混合模式。
 
 ### 6.1 社媒图文生成
 
 - 页面：`/studio/social`
 - 用途：生成社媒图文内容，支持提示词、素材上传、结果预览、提交审核、同步获客
-- 当前状态：仅 demo 页面与本地状态，后端未实现
+- 当前状态：前后端已接通，服务端会并行生成文案和图片，并将结果落库到 `SocialGeneratedPost`
+- 当前支持：列表查询、生成、单条提审、标记“已同步获客”
+- 当前说明：审核中心对社媒图文的完整后端闭环仍未单独落地，当前更偏“生成结果已落库 + 提审入口已接通”
 
 ### 6.2 商品图与详情图生成
 
@@ -1219,7 +1221,15 @@ enum JobStatus {
 - 页面：`/videos`
 - 子页面：`/videos/product-build`、`/videos/avatar-ads`
 - 用途：产品视频生成、真人口播视频生成
-- 当前状态：仅 demo 页面与本地状态，后端未实现
+- 当前状态：前后端已接通，支持真实视频任务创建、轮询、成片回写与草稿箱展示
+- 产品视频：已支持 Vidu 视频任务创建、任务轮询、可选配音/BGM 合成、成片默认烧录中文字幕
+- 真人口播：已支持脚本分片、BullMQ 队列调度、分片提交/轮询/下载、最终拼接、成片默认烧录中文字幕
+- 相关接口：
+  - `POST /api/ai/generate-video`
+  - `GET /api/ai/video-tasks/:taskId`
+  - `POST /api/ai/avatar-video-tasks`
+  - `GET /api/ai/avatar-video-tasks/:taskId`
+  - `POST /api/ai/avatar-video-tasks/:taskId/retry`
 
 ---
 
@@ -1319,9 +1329,9 @@ enum JobStatus {
 
 ---
 
-## 10. 模型配置模块（Demo 主语义）
+## 10. 模型配置模块
 
-> **说明**：以后台 demo 页面 `/rules` 为准。这里的“规则”实际指模型配置，不是关键词规则。当前后端未实现该模块。
+> **说明**：后台页面 `/rules` 的主语义当前是模型配置，不是关键词规则。该模块前后端已接通，配置当前存储在 Redis。
 
 ### Demo 页面语义
 
@@ -1345,7 +1355,13 @@ enum JobStatus {
   - 视频生成
   - AI 客服
   - RAG 回答
-- 当前状态：仅 demo 页面与本地状态，后端未实现
+- 当前状态：前后端已接通，支持查看当前激活配置、测试连接、保存并激活模型配置
+- 当前接口：
+  - `GET /api/ai/model-configs/active`
+  - `GET /api/ai/model-configs/saved`
+  - `POST /api/ai/model-configs/:type/test`
+  - `PUT /api/ai/model-configs/:type/activate`
+- 权限说明：仅主公司可管理模型配置
 
 ---
 
@@ -1398,9 +1414,9 @@ enum JobStatus {
 
 ---
 
-## 12. 知识库 / RAG 模块（Demo 主语义）
+## 12. 知识库 / RAG 模块（当前实现状态）
 
-> **说明**：以后台 demo 页面 `/assets` 为准。当前后端未实现该模块，现有文档不再将 `/assets` 主语义描述为通用文件资产库。
+> **说明**：以后台 demo 页面 `/assets` 为准。前端仍以 demo 页面为主，但后端已具备知识库核心数据结构与依赖准备。
 
 ### Demo 页面语义
 
@@ -1411,7 +1427,11 @@ enum JobStatus {
   - 知识文件列表
   - 切片数与索引状态
   - 检索测试台
-- 当前状态：仅 demo 页面与本地状态，后端未实现
+- 当前状态：
+  - 前端：仍以 demo 页面与本地展示为主
+  - 后端：Prisma 已新增 `KnowledgeDocument / KnowledgeDocumentChunk / KnowledgeDocumentJob`，并预留向量字段与解析/索引状态枚举
+  - 依赖：已接入 PDF、DOCX、OCR、向量化相关基础依赖
+- 当前说明：知识库完整业务接口仍未作为正式模块对外开放，不建议写成“全链路已上线”
 
 ---
 
@@ -1486,9 +1506,10 @@ enum JobStatus {
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | `/api/health` | 服务健康状态 | 公开 |
-| GET | `/api/health/db` | 数据库连接状态 | 运维 |
-| GET | `/api/health/redis` | Redis 连接状态 | 运维 |
+| GET | `/health` | 服务健康状态；当前返回 `{ status: "ok" }` | 公开 |
+| GET | `/` | 服务根路径状态；当前返回服务名与 `status: ok` | 公开 |
+
+> **当前实现说明**：`/api/health`、`/api/health/db`、`/api/health/redis` 尚未在当前代码中提供，现阶段仅有最小健康检查与根路径状态接口。
 
 ---
 

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { AuthUser, RoleKey } from "@/types/demo";
+import { requestJson } from "@/lib/api";
 
 type LoginResult = { ok: boolean; message?: string };
 
@@ -80,22 +81,6 @@ function mapAuthUser(payload: MeResponse): AuthUser | null {
     roleKey,
     agentId: payload.agentId ?? null,
   };
-}
-
-async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit) {
-  const response = await fetch(input, init);
-  const text = await response.text();
-  const data = text ? (JSON.parse(text) as T | { message?: string }) : null;
-
-  if (!response.ok) {
-    const message =
-      data && typeof data === "object" && "message" in data && typeof data.message === "string"
-        ? data.message
-        : "请求失败";
-    throw new Error(message);
-  }
-
-  return data as T;
 }
 
 async function loginRequest(username: string, password: string) {

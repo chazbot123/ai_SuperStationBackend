@@ -2,9 +2,15 @@ import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/comm
 import { SessionUser } from '../auth/auth.types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AiService } from './ai.service';
+import { CreateAvatarVideoTaskDto } from './dto/create-avatar-video.dto';
 import { GenerateCopyDto } from './dto/generate-copy.dto';
 import { GenerateImagesDto } from './dto/generate-images.dto';
+import { GeneratePlatformMetaDto } from './dto/generate-platform-meta.dto';
+import { GenerateVideoDto } from './dto/generate-video.dto';
 import { GenerateSocialPostDto } from './dto/generate-social-post.dto';
+import { ExpandAvatarVideoScriptDto } from './dto/expand-avatar-video-script.dto';
+import { PolishPromptDto } from './dto/polish-prompt.dto';
+import { RecommendBgmDto } from './dto/recommend-bgm.dto';
 import { SaveModelConfigDto } from './dto/save-model-config.dto';
 import { TestModelConfigDto } from './dto/test-model-config.dto';
 
@@ -18,9 +24,57 @@ export class AiController {
     return this.aiService.generateCopy(dto);
   }
 
+  @Post('polish-prompt')
+  polishPrompt(@Body() dto: PolishPromptDto) {
+    return this.aiService.polishPrompt(dto);
+  }
+
+  @Post('generate-platform-meta')
+  generatePlatformMeta(@Body() dto: GeneratePlatformMetaDto) {
+    return this.aiService.generatePlatformMeta(dto);
+  }
+
   @Post('generate-images')
   generateImages(@Body() dto: GenerateImagesDto) {
     return this.aiService.generateImages(dto);
+  }
+
+  @Post('generate-video')
+  generateVideo(@Body() dto: GenerateVideoDto) {
+    return this.aiService.generateVideo(dto);
+  }
+
+  @Post('recommend-bgm')
+  recommendBgm(@Body() dto: RecommendBgmDto) {
+    return this.aiService.recommendBgm(dto);
+  }
+
+  @Get('video-tasks/:taskId')
+  getVideoTask(@Param('taskId') taskId: string) {
+    return this.aiService.getVideoTask(taskId);
+  }
+
+  @Post('avatar-video-tasks')
+  createAvatarVideoTask(
+    @Req() req: { user: SessionUser },
+    @Body() dto: CreateAvatarVideoTaskDto,
+  ) {
+    return this.aiService.createAvatarVideoTask(req.user, dto);
+  }
+
+  @Post('avatar-video-scripts/expand')
+  expandAvatarVideoScript(@Req() req: { user: SessionUser }, @Body() dto: ExpandAvatarVideoScriptDto) {
+    return this.aiService.expandAvatarVideoScript(req.user, dto);
+  }
+
+  @Get('avatar-video-tasks/:id')
+  getAvatarVideoTask(@Req() req: { user: SessionUser }, @Param('id') id: string) {
+    return this.aiService.getAvatarVideoTask(req.user, id);
+  }
+
+  @Post('avatar-video-tasks/:id/retry')
+  retryAvatarVideoTask(@Req() req: { user: SessionUser }, @Param('id') id: string) {
+    return this.aiService.retryAvatarVideoTask(req.user, id);
   }
 
   @Post('model-configs/:type/test-connection')

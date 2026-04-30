@@ -35,6 +35,21 @@ enum SocialPostReviewStage {
   approved
 }
 
+enum VideoMainTaskStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum VideoSubTaskStatus {
+  pending
+  submitted
+  processing
+  success
+  failure
+}
+
 enum KnowledgeDocumentParseStatus {
   pending
   parsing
@@ -101,6 +116,7 @@ model User {
   socialGeneratedPosts SocialGeneratedPost[]
   /// 用户上传的知识库文档
   knowledgeDocuments   KnowledgeDocument[]
+  videoMainTasks       VideoMainTask[]
 }
 
 model UserSession {
@@ -255,6 +271,57 @@ model SocialGeneratedPost {
 
   @@index([creatorId, createdAt])
   @@index([createdAt])
+}
+
+model VideoMainTask {
+  id                 String              @id @default(cuid())
+  userId             String
+  characterImageUrl  String
+  productImageUrl    String?
+  backgroundImageUrl String?
+  fullScript         String
+  voice              String?
+  style              String?
+  aspectRatio        String?
+  resolution         String?
+  segmentDurationSeconds Int?
+  segmentMaxChars    Int?
+  backgroundLock     Boolean             @default(false)
+  backgroundSeed     Int?
+  backgroundPlan     String?
+  status             VideoMainTaskStatus @default(pending)
+  finalVideoUrl      String?
+  errorMessage       String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  segments           VideoSubTask[]
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, createdAt])
+  @@map("main_tasks")
+}
+
+model VideoSubTask {
+  id              String           @id @default(cuid())
+  mainTaskId      String
+  scriptSegment   String
+  viduTaskId      String?
+  segmentVideoUrl String?
+  segmentAudioUrl String?
+  status          VideoSubTaskStatus @default(pending)
+  sequenceOrder   Int
+  attempts        Int              @default(0)
+  maxAttempts     Int              @default(3)
+  retryAt         DateTime?
+  errorMessage    String?
+  lastErrorAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  mainTask        VideoMainTask    @relation(fields: [mainTaskId], references: [id], onDelete: Cascade)
+
+  @@index([mainTaskId, sequenceOrder])
+  @@index([status, updatedAt])
+  @@map("sub_tasks")
 }
 
 model KnowledgeDocument {

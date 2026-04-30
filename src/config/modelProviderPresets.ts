@@ -4,6 +4,7 @@ export type ProviderKey =
   | "qwen"
   | "doubao"
   | "openai"
+  | "deepseek"
   | "gemini"
   | "vidu"
   | "custom";
@@ -39,6 +40,13 @@ const providerPresets: Record<ModelType, ProviderPreset[]> = {
       providerName: "OpenAI",
       baseUrl: "https://api.openai.com/v1",
       defaultModelName: "gpt-4.1-mini",
+    },
+    {
+      key: "deepseek",
+      label: "DeepSeek",
+      providerName: "DeepSeek",
+      baseUrl: "https://api.deepseek.com/v1",
+      defaultModelName: "deepseek-v4-pro",
     },
     {
       key: "gemini",
@@ -89,8 +97,8 @@ const providerPresets: Record<ModelType, ProviderPreset[]> = {
       key: "vidu",
       label: "Vidu",
       providerName: "Vidu",
-      baseUrl: "https://api.vidu.com",
-      taskQueryUrlTemplate: "https://api.vidu.com/ent/v2/tasks/{taskId}/creations",
+      baseUrl: "https://api.vidu.cn",
+      taskQueryUrlTemplate: "https://api.vidu.cn/ent/v2/tasks/{taskId}/creations",
       defaultModelName: "viduq1",
     },
     {
@@ -114,8 +122,8 @@ const providerPresets: Record<ModelType, ProviderPreset[]> = {
       key: "vidu",
       label: "Vidu",
       providerName: "Vidu",
-      baseUrl: "https://api.vidu.com",
-      taskQueryUrlTemplate: "https://api.vidu.com/ent/v2/tasks/{taskId}/creations",
+      baseUrl: "https://api.vidu.cn",
+      taskQueryUrlTemplate: "https://api.vidu.cn/ent/v2/tasks/{taskId}/creations",
       defaultModelName: "viduq1",
     },
     {
@@ -158,10 +166,13 @@ export function inferProviderKey(type: ModelType, input?: {
   if (requestUrl.includes("openai.com") || providerName.includes("openai") || providerName.includes("gpt")) {
     return "openai";
   }
+  if (requestUrl.includes("deepseek.com") || providerName.includes("deepseek")) {
+    return "deepseek";
+  }
   if (requestUrl.includes("generativelanguage.googleapis.com") || providerName.includes("gemini")) {
     return "gemini";
   }
-  if (requestUrl.includes("vidu.com") || providerName.includes("vidu")) {
+  if (requestUrl.includes("vidu.com") || requestUrl.includes("vidu.cn") || providerName.includes("vidu")) {
     return "vidu";
   }
 

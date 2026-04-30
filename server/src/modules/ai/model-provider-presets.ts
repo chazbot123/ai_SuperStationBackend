@@ -4,6 +4,7 @@ export type ProviderKey =
   | 'qwen'
   | 'doubao'
   | 'openai'
+  | 'deepseek'
   | 'gemini'
   | 'vidu'
   | 'custom';
@@ -26,7 +27,7 @@ export type ProviderPreset = {
   protocol: ProviderProtocol;
 };
 
-export const MODEL_PROVIDER_KEYS = ['qwen', 'doubao', 'openai', 'gemini', 'vidu', 'custom'] as const;
+export const MODEL_PROVIDER_KEYS = ['qwen', 'doubao', 'openai', 'deepseek', 'gemini', 'vidu', 'custom'] as const;
 
 const providerPresets: Record<ModelType, Partial<Record<ProviderKey, ProviderPreset>>> = {
   text: {
@@ -49,6 +50,13 @@ const providerPresets: Record<ModelType, Partial<Record<ProviderKey, ProviderPre
       providerName: 'OpenAI',
       baseUrl: 'https://api.openai.com/v1',
       defaultModelName: 'gpt-4.1-mini',
+      protocol: 'openai_chat',
+    },
+    deepseek: {
+      key: 'deepseek',
+      providerName: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      defaultModelName: 'deepseek-v4-pro',
       protocol: 'openai_chat',
     },
     gemini: {
@@ -99,8 +107,8 @@ const providerPresets: Record<ModelType, Partial<Record<ProviderKey, ProviderPre
     vidu: {
       key: 'vidu',
       providerName: 'Vidu',
-      baseUrl: 'https://api.vidu.com',
-      taskQueryUrlTemplate: 'https://api.vidu.com/ent/v2/tasks/{taskId}/creations',
+      baseUrl: 'https://api.vidu.cn',
+      taskQueryUrlTemplate: 'https://api.vidu.cn/ent/v2/tasks/{taskId}/creations',
       defaultModelName: 'viduq1',
       protocol: 'vidu_video',
     },
@@ -124,8 +132,8 @@ const providerPresets: Record<ModelType, Partial<Record<ProviderKey, ProviderPre
     vidu: {
       key: 'vidu',
       providerName: 'Vidu',
-      baseUrl: 'https://api.vidu.com',
-      taskQueryUrlTemplate: 'https://api.vidu.com/ent/v2/tasks/{taskId}/creations',
+      baseUrl: 'https://api.vidu.cn',
+      taskQueryUrlTemplate: 'https://api.vidu.cn/ent/v2/tasks/{taskId}/creations',
       defaultModelName: 'viduq1',
       protocol: 'vidu_video',
     },
@@ -151,8 +159,9 @@ export function inferProviderKeyByUrl(requestUrl?: string, providerName?: string
   if (url.includes('dashscope') || name.includes('qwen')) return 'qwen';
   if (url.includes('byteplus') || url.includes('volces') || name.includes('doubao')) return 'doubao';
   if (url.includes('openai.com') || name.includes('openai') || name.includes('gpt')) return 'openai';
+  if (url.includes('deepseek.com') || name.includes('deepseek')) return 'deepseek';
   if (url.includes('generativelanguage.googleapis.com') || name.includes('gemini')) return 'gemini';
-  if (url.includes('vidu.com') || name.includes('vidu')) return 'vidu';
+  if (url.includes('vidu.com') || url.includes('vidu.cn') || name.includes('vidu')) return 'vidu';
   return 'custom';
 }
 

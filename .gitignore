@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
 .env.docker
 
 data/
@@ -31,3 +32,5 @@ data/
 .vercel/
 .trae/
 AGENTS.md
+server/.tmp-*
+server/tmp-*.cjs
