@@ -34,3 +34,5 @@ data/
 AGENTS.md
 server/.tmp-*
 server/tmp-*.cjs
+server/NestJS20260426.BAT
+server/pgvector + Prisma20260426.BAT

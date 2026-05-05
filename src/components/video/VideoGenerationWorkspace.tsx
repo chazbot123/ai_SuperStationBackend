@@ -15,6 +15,7 @@ import { estimateProductEta, formatClock, formatMmSs } from "@/lib/videoEta";
 import {
   createAvatarVideoTask,
   expandAvatarVideoScript,
+  generateAiCopy,
   generatePlatformMeta,
   generateAiVideo,
   getAvatarVideoTaskStatus,
@@ -97,6 +98,12 @@ function platformPolishKey(value: VideoWorkspaceDraft["platformStyle"]) {
   return "douyin";
 }
 
+function platformCopyKey(value: VideoWorkspaceDraft["platformStyle"]) {
+  if (value === "xiaohongshu") return "xhs";
+  if (value === "wechat_mp") return "wechat";
+  return "douyin";
+}
+
 function appendPlatformHint(base: string, value: VideoWorkspaceDraft["platformStyle"]) {
   const label = platformLabel(value);
   const hint =
@@ -137,6 +144,58 @@ function getProductDurationGuide(durationSec: number) {
 function appendProductDurationHint(base: string, durationSec: number) {
   const guide = getProductDurationGuide(durationSec);
   return `${base}\n\n时长要求：目标成片约 ${guide.seconds} 秒。\n文案要求：口播控制在 ${guide.charMin}-${guide.charMax} 个中文字符，约 ${guide.sentenceCount} 句，句子尽量短，信息密度高，避免超时。\n节奏要求：${guide.pacing}`;
+}
+
+function appendAvatarVideoHint(base: string, targetSeconds: number) {
+  const seconds = Math.max(30, Math.min(300, Math.round(Number(targetSeconds) || 30)));
+  return `${base}\n\n视频生成要求：这是用于真人口播视频生成的提示词，请在不改变原意的前提下，自动补全缺失的主体设定、镜头节奏、画面连贯性、字幕节奏和结尾收束等必要提示。\n成片要求：目标成片约 ${seconds} 秒，表达口语化、自然分段，适合数字人口播视频。`;
+}
+
+function normalizePlatformCopyText(input: string) {
+  let text = String(input ?? "").trim();
+  if (!text) return "";
+  text = text.trim().replace(/^```[\s\S]*?\n/, "").replace(/\n```$/, "").trim();
+
+  const lines = text.split(/\r?\n/);
+  const first = (lines[0] ?? "").trim();
+  const headingRe = /^(#{1,6}\s*)?(【\s*)?(口播文案|文案内容)(\s*】)?\s*[:：]?\s*$/i;
+  if (headingRe.test(first)) {
+    const rest = lines.slice(1).join("\n").trim();
+    return rest;
+  }
+  const prefixRe = /^(#{1,6}\s*)?(【\s*)?(口播文案|文案内容)(\s*】)?\s*[:：]\s*/i;
+  text = text.replace(prefixRe, "").trim();
+  return text;
+}
+
+function clampCopyLength(text: string, maxChars: number) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return "";
+  const max = Math.max(1, Math.round(Number(maxChars) || 1));
+  if (raw.length <= max) return raw;
+  return raw
+    .slice(0, max)
+    .replace(/[，,、；;:：\s]+$/g, "")
+    .trim();
+}
+
+function extractSpeechContentFromProductPrompt(input: string) {
+  const raw = String(input ?? "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return "";
+  const lines = raw.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const current = lines[index].trim();
+    const matched = current.match(/^(?:【\s*)?(语音内容|旁白|配音内容|配音文案|口播内容|口播文案)(?:\s*】)?\s*[:：]\s*(.*)$/i);
+    if (!matched) continue;
+    const inline = matched[2]?.trim() ?? "";
+    const rest = lines.slice(index + 1).join("\n").trim();
+    return [inline, rest].filter(Boolean).join("\n").trim();
+  }
+  const structuredLineCount = lines.filter((line) => /^[^:\n：]{1,24}[:：]\s*.*$/.test(line.trim())).length;
+  if (structuredLineCount >= 3) {
+    return "";
+  }
+  return raw;
 }
 
 function normalizeAvatarErrorMessage(message: string) {
@@ -194,6 +253,12 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   useEffect(() => {
     const defaults: VideoWorkspaceDraft = {
       question: "",
+      avatarCopyText: "",
+      productTtsText: "",
+      productCopyPrompt: "",
+      productCopyText: "",
+      publishTitle: "",
+      publishTags: [],
       platformStyle: "douyin",
       avatarTargetSeconds: 30,
       backgroundLock: true,
@@ -223,6 +288,12 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   ]);
 
   const question = draft?.question ?? "";
+  const avatarCopyText = draft?.avatarCopyText ?? "";
+  const productTtsText = draft?.productTtsText ?? "";
+  const productCopyPrompt = draft?.productCopyPrompt ?? "";
+  const productCopyText = draft?.productCopyText ?? "";
+  const workspacePublishTitle = draft?.publishTitle ?? "";
+  const workspacePublishTags = draft?.publishTags ?? [];
   const platformStyle = draft?.platformStyle ?? "douyin";
   const avatarTargetSeconds = draft?.avatarTargetSeconds ?? 30;
   const backgroundLock = draft?.backgroundLock ?? true;
@@ -243,6 +314,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPolishing, setIsPolishing] = useState(false);
+  const [isGeneratingProductCopy, setIsGeneratingProductCopy] = useState(false);
   const [isRecommendingBgm, setIsRecommendingBgm] = useState(false);
   const [isExpandingAvatarScript, setIsExpandingAvatarScript] = useState(false);
   const [polishHint, setPolishHint] = useState<string | null>(null);
@@ -251,6 +323,8 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [promptEditorValue, setPromptEditorValue] = useState("");
   const [promptEditorHint, setPromptEditorHint] = useState<string | null>(null);
+  const [copyResultEditorOpen, setCopyResultEditorOpen] = useState(false);
+  const [copyResultEditorValue, setCopyResultEditorValue] = useState("");
   const [polishHelpOpen, setPolishHelpOpen] = useState(false);
   const isAvatarMode = props.draftSource === "avatar_video";
   const isProductMode = props.draftSource === "product_video";
@@ -401,6 +475,94 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     });
   }
 
+  async function generateProductCopyText(raw: string) {
+    if (!isProductMode) {
+      throw new Error("当前不是产品视频模式");
+    }
+    if (!accessToken) {
+      throw new Error("请先登录");
+    }
+    if (!textModelConfig) {
+      throw new Error("未找到文字模型配置");
+    }
+    const effectiveTextConfig =
+      !textModelConfig.apiKey.trim() && videoModelConfig?.apiKey?.trim()
+        ? { ...textModelConfig, apiKey: videoModelConfig.apiKey }
+        : textModelConfig;
+    const copy = await generateAiCopy({
+      prompt: [
+        `你是一名${platformLabel(platformStyle)}平台文案写作助手。`,
+        "请严格根据下面的“文案提示词”生成对应文案。",
+        "要求：",
+        "1. 优先遵守用户明确提出的字数、篇幅、结构、语气、用途、受众等要求。",
+        "2. 如果用户明确要求“500字”“分3段”“带标题”等，必须尽量严格满足。",
+        "3. 只输出最终文案结果，不要解释、不要分析、不要额外说明。",
+        "4. 如用户没有明确要求长度，再按当前平台风格给出自然、完整的成稿。",
+        "",
+        "文案提示词：",
+        raw,
+      ].join("\n"),
+      style: platformCopyKey(platformStyle),
+      format: "text",
+      modelConfig: effectiveTextConfig,
+      accessToken,
+    });
+    return normalizePlatformCopyText(copy.text).slice(0, 2000).trim();
+  }
+
+  async function syncProductMeta(text: string) {
+    if (!isProductMode) return null;
+    const meta = await generateMeta(text);
+    if (!meta) return null;
+    setDraftField(props.draftSource, "publishTitle", meta.title);
+    setDraftField(props.draftSource, "publishTags", meta.tags);
+    setMetaEditorTitle(meta.title);
+    setMetaEditorTags(meta.tags.map((tag) => `#${tag}`).join(" "));
+    if (currentProductTask?.id) {
+      updateDraft(currentProductTask.id, {
+        publishTitle: meta.title,
+        publishTags: meta.tags,
+        title: `${props.cardTitle}｜${platformLabel(platformStyle)}｜${meta.title}`,
+      });
+    }
+    return meta;
+  }
+
+  async function handleGenerateProductCopy() {
+    if (!isProductMode) return;
+    const raw = productCopyPrompt.trim();
+    if (!raw) {
+      setPolishHint("请先填写文案提示词，再生成文案。");
+      return;
+    }
+    if (isGeneratingProductCopy) return;
+    setIsGeneratingProductCopy(true);
+    setPolishHint(null);
+    try {
+      const next = await generateProductCopyText(raw);
+      if (!next) {
+        setPolishHint("文案生成失败：未返回有效内容");
+        return;
+      }
+      setDraftField(props.draftSource, "productCopyText", next);
+      if (currentProductTask?.id) {
+        updateDraft(currentProductTask.id, { generatedScript: next });
+      }
+      try {
+        await syncProductMeta(next);
+        setPolishHint("已生成文案内容、标题和标签");
+      } catch (error) {
+        setPolishHint(
+          `已生成文案内容，标题/标签生成失败：${error instanceof Error ? error.message : "请稍后重试"}`
+        );
+      }
+    } catch (error) {
+      setPolishHint(error instanceof Error ? error.message : "文案生成失败");
+    } finally {
+      setIsGeneratingProductCopy(false);
+    }
+  }
+
   async function handlePolishPrompt() {
     const raw = question.trim();
     if (!raw) return;
@@ -409,9 +571,18 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     setIsPolishing(true);
     setPolishHint(null);
     try {
-      const next = await polishPromptText(raw);
-      setDraftField(props.draftSource, "question", next);
-      setPolishHint(next === raw ? "润色结果与原文一致" : "已润色");
+      const polishedBase = await polishPromptText(raw);
+      let nextPrompt = polishedBase;
+      if (isProductMode) {
+        const effectiveDurationSec = durationSec <= 16 ? durationSec : 16;
+        nextPrompt = appendPlatformHint(appendProductDurationHint(polishedBase, effectiveDurationSec), platformStyle);
+      } else if (isAvatarMode) {
+        nextPrompt = appendAvatarVideoHint(appendPlatformHint(polishedBase, platformStyle), avatarTargetSeconds);
+      }
+      nextPrompt = nextPrompt.slice(0, 5000);
+      setDraftField(props.draftSource, "question", nextPrompt);
+
+      setPolishHint(nextPrompt === raw ? "润色结果与原文一致" : "已润色提示词");
     } catch (error) {
       const message = error instanceof Error ? error.message : "润色失败";
       setPolishHint(message);
@@ -424,7 +595,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     if (!isAvatarMode) return;
     const raw = question.trim();
     if (!raw) {
-      setPolishHint("请先输入要讲的要点/大纲，再一键生成 30-300 秒脚本");
+      setPolishHint("请先输入要讲的要点/大纲，再一键生成平台文案");
       return;
     }
     if (!accessToken) {
@@ -444,8 +615,19 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         !textModelConfig.apiKey.trim() && videoModelConfig?.apiKey?.trim()
           ? { ...textModelConfig, apiKey: videoModelConfig.apiKey }
           : textModelConfig;
+      const wrappedPrompt = [
+        `请根据下面的“用户提示词”，生成一份适合${platformLabel(platformStyle)}平台的真人口播文案内容。`,
+        "要求：",
+        "1. 文案内容必须围绕用户提示词展开，不要偏题，不要补充无关信息。",
+        "2. 如果用户明确要求字数、篇幅、段落数、结构、语气、用途，请优先严格遵守。",
+        "3. 如果用户没有明确要求字数，则默认生成符合用户提示词内容的自然、完整成稿。",
+        "4. 只输出最终文案内容，不要解释、不要分析、不要附加说明。",
+        "",
+        "用户提示词：",
+        raw,
+      ].join("\n");
       const result = await expandAvatarVideoScript({
-        prompt: raw,
+        prompt: wrappedPrompt,
         targetSeconds: avatarTargetSeconds,
         platformStyle: platformPolishKey(platformStyle),
         scene,
@@ -455,13 +637,13 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       });
       const next = result.text.trim();
       if (!next) {
-        setPolishHint("脚本生成失败：未返回有效内容");
+        setPolishHint("文案生成失败：未返回有效内容");
         return;
       }
-      setDraftField(props.draftSource, "question", next);
-      setPolishHint(`已生成约 ${result.targetSeconds} 秒脚本`);
+      setDraftField(props.draftSource, "avatarCopyText", next);
+      setPolishHint(`已生成约 ${result.targetSeconds} 秒文案`);
     } catch (error) {
-      setPolishHint(error instanceof Error ? error.message : "脚本生成失败");
+      setPolishHint(error instanceof Error ? error.message : "文案生成失败");
     } finally {
       setIsExpandingAvatarScript(false);
     }
@@ -513,11 +695,11 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       });
       const next = result.text.trim();
       if (!next) {
-        setPolishHint("脚本生成失败：未返回有效内容");
+        setPolishHint("文案生成失败：未返回有效内容");
         return;
       }
-      setDraftField(props.draftSource, "question", next);
-      setPolishHint(`已从文档生成约 ${result.targetSeconds} 秒脚本`);
+      setDraftField(props.draftSource, "avatarCopyText", next);
+      setPolishHint(`已从文档生成约 ${result.targetSeconds} 秒文案`);
     } catch (error) {
       setPolishHint(error instanceof Error ? error.message : "文档解析失败");
     } finally {
@@ -711,12 +893,14 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
     const prompt = rawQuestion || props.defaultPrompt;
     const platformText = platformLabel(platformStyle);
-    const nextScript = prompt;
+    const avatarFullScript = avatarCopyText.trim();
+    const nextScript = isAvatarMode ? avatarFullScript : productCopyText.trim();
+    const productSpeechText = isProductMode ? extractSpeechContentFromProductPrompt(prompt) : "";
 
     const next: VideoDraftItem = {
       id: makeId("video"),
       source: props.draftSource,
-      title: `${props.cardTitle}｜${platformText}｜${prompt.slice(0, 16) || "新视频任务"}`,
+      title: `${props.cardTitle}｜${platformText}｜${(nextScript || prompt).slice(0, 16) || "新视频任务"}`,
       platformStyle,
       durationText: props.draftSource === "avatar_video" ? "长视频" : formatDurationText(durationSec <= 16 ? durationSec : 16),
       status: "processing",
@@ -732,19 +916,22 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
     setIsGenerating(true);
     try {
-      try {
-        const meta = await generateMeta(prompt);
-        if (meta) {
-          updateDraft(next.id, {
-            publishTitle: meta.title,
-            publishTags: meta.tags,
-            title: `${props.cardTitle}｜${platformText}｜${meta.title}`,
-          });
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        if (message) {
-          setAssetHint(message);
+      const metaBaseText = isAvatarMode ? avatarFullScript : productCopyText.trim();
+      if (metaBaseText) {
+        try {
+          const meta = await generateMeta(metaBaseText);
+          if (meta) {
+            updateDraft(next.id, {
+              publishTitle: meta.title,
+              publishTags: meta.tags,
+              title: `${props.cardTitle}｜${platformText}｜${meta.title}`,
+            });
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (message) {
+            setAssetHint(message);
+          }
         }
       }
 
@@ -755,6 +942,14 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
           .filter(Boolean)
           .slice(0, 3);
         const imageDataUrl = referenceImages[0] ?? "";
+        if (!avatarFullScript) {
+          updateDraft(next.id, {
+            status: "failed",
+            errorMessage: "请先生成或填写“文案内容”后再提交真人口播视频",
+          });
+          setAssetHint("请先生成或填写“文案内容”后再提交真人口播视频");
+          return;
+        }
         if (!imageDataUrl) {
           updateDraft(next.id, {
             status: "failed",
@@ -765,7 +960,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         }
 
         const created = await createAvatarVideoTask({
-          fullScript: prompt,
+          fullScript: avatarFullScript,
           referenceImageDataUrl: imageDataUrl,
           referenceImages,
           voiceId:
@@ -788,7 +983,9 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
           taskId: created.taskId,
         });
         setAssetHint(
-          referenceImages.length >= 2
+          avatarCopyText.trim()
+            ? "已提交长视频生成任务：将使用上方“文案内容”作为口播脚本。进度与最终视频会在草稿箱自动更新。"
+            : referenceImages.length >= 2
             ? "已提交长视频生成任务：将按上传顺序使用图片（第1张人物，第2张产品，第3张背景）。进度与最终视频会在草稿箱自动更新。"
             : "已提交长视频生成任务，进度与最终视频会在草稿箱自动更新。"
         );
@@ -796,11 +993,13 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       }
 
       const promptForVideo = isProductMode
-        ? appendPlatformHint(appendProductDurationHint(prompt, effectiveDurationSec), platformStyle)
+        ? prompt.includes("平台风格：") || prompt.includes("时长要求：")
+          ? prompt
+          : appendPlatformHint(appendProductDurationHint(prompt, effectiveDurationSec), platformStyle)
         : appendPlatformHint(prompt, platformStyle);
       const result = await generateAiVideo({
         prompt: promptForVideo,
-        ttsText: prompt,
+        ttsText: productSpeechText || undefined,
         referenceImages: assets
           .filter((item) => item.kind === "image" && item.previewUrl)
           .map((item) => item.previewUrl as string)
@@ -914,27 +1113,6 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     };
   }, [accessToken, currentProductTask?.id, currentProductTask?.status, currentProductTask?.taskId, isProductMode, updateDraft]);
 
-  useEffect(() => {
-    if (!isProductMode) return;
-    if (!currentProductTask) {
-      setMetaEditorTitle("");
-      setMetaEditorTags("");
-      return;
-    }
-    setMetaEditorTitle(currentProductTask.publishTitle ?? "");
-    setMetaEditorTags((currentProductTask.publishTags ?? []).map((t) => `#${t}`).join(" "));
-  }, [currentProductTask?.id, isProductMode]);
-
-  const metaDirty = useMemo(() => {
-    if (!currentProductTask) return false;
-    const nextTitle = metaEditorTitle.trim();
-    const savedTitle = (currentProductTask.publishTitle ?? "").trim();
-    if (nextTitle !== savedTitle) return true;
-    const nextTags = parseTagText(metaEditorTags).join("|");
-    const savedTags = (currentProductTask.publishTags ?? []).join("|");
-    return nextTags !== savedTags;
-  }, [currentProductTask, metaEditorTags, metaEditorTitle]);
-
   const avatarTaskItems = useMemo(() => {
     if (!isAvatarMode) return [];
     return draftItems
@@ -965,6 +1143,93 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     if (!isAvatarMode) return null;
     return avatarTaskItems.find((item) => item.id === activeAvatarDraftId) ?? avatarTaskItems[0] ?? null;
   }, [activeAvatarDraftId, avatarTaskItems, isAvatarMode]);
+
+  const currentMetaDraft = useMemo(() => {
+    if (isProductMode) return currentProductTask;
+    if (isAvatarMode) return activeAvatarDraft;
+    return null;
+  }, [activeAvatarDraft, currentProductTask, isAvatarMode, isProductMode]);
+
+  const currentProductCopyResult = useMemo(() => {
+    if (!isProductMode) return "";
+    return (productCopyText.trim() || currentProductTask?.generatedScript?.trim() || "").trim();
+  }, [currentProductTask?.generatedScript, isProductMode, productCopyText]);
+
+  const currentProductCopyResultLength = useMemo(() => currentProductCopyResult.length, [currentProductCopyResult]);
+
+  function openCopyResultEditor() {
+    setCopyResultEditorValue(currentProductCopyResult);
+    setCopyResultEditorOpen(true);
+  }
+
+  function openPromptEditor() {
+    setPromptEditorValue(question || props.defaultPrompt);
+    setPromptEditorHint(null);
+    setPromptEditorOpen(true);
+  }
+
+  function saveCopyResultEditor() {
+    const next = copyResultEditorValue.trim();
+    setDraftField(props.draftSource, "productCopyText", next);
+    if (currentProductTask?.id) {
+      updateDraft(currentProductTask.id, { generatedScript: next });
+    }
+    setCopyResultEditorOpen(false);
+    setPolishHint("已保存文案生成结果");
+  }
+
+  useEffect(() => {
+    if (!currentMetaDraft) {
+      if (isProductMode) {
+        setMetaEditorTitle(workspacePublishTitle);
+        setMetaEditorTags(workspacePublishTags.map((t) => `#${t}`).join(" "));
+        return;
+      }
+      setMetaEditorTitle("");
+      setMetaEditorTags("");
+      return;
+    }
+    setMetaEditorTitle(currentMetaDraft.publishTitle ?? "");
+    setMetaEditorTags((currentMetaDraft.publishTags ?? []).map((t) => `#${t}`).join(" "));
+  }, [currentMetaDraft?.id, isProductMode, workspacePublishTags, workspacePublishTitle]);
+
+  const metaDirty = useMemo(() => {
+    if (!currentMetaDraft) {
+      if (!isProductMode) return false;
+      const nextTitle = metaEditorTitle.trim();
+      const savedTitle = workspacePublishTitle.trim();
+      if (nextTitle !== savedTitle) return true;
+      const nextTags = parseTagText(metaEditorTags).join("|");
+      const savedTags = workspacePublishTags.join("|");
+      return nextTags !== savedTags;
+    }
+    const nextTitle = metaEditorTitle.trim();
+    const savedTitle = (currentMetaDraft.publishTitle ?? "").trim();
+    if (nextTitle !== savedTitle) return true;
+    const nextTags = parseTagText(metaEditorTags).join("|");
+    const savedTags = (currentMetaDraft.publishTags ?? []).join("|");
+    return nextTags !== savedTags;
+  }, [currentMetaDraft, isProductMode, metaEditorTags, metaEditorTitle, workspacePublishTags, workspacePublishTitle]);
+
+  function handleSaveMeta() {
+    const titleValue = metaEditorTitle.trim();
+    const tagsValue = parseTagText(metaEditorTags);
+    setDraftField(props.draftSource, "publishTitle", titleValue);
+    setDraftField(props.draftSource, "publishTags", tagsValue);
+    if (!currentMetaDraft) {
+      setAssetHint("标题和标签已保存");
+      return;
+    }
+    const platformText = platformLabel(
+      (currentMetaDraft.platformStyle as VideoWorkspaceDraft["platformStyle"]) ?? "douyin",
+    );
+    updateDraft(currentMetaDraft.id, {
+      publishTitle: titleValue || undefined,
+      publishTags: tagsValue.length ? tagsValue : undefined,
+      title: titleValue ? `${props.cardTitle}｜${platformText}｜${titleValue}` : currentMetaDraft.title,
+    });
+    setAssetHint("标题和标签已保存");
+  }
 
   const avatarProgressPercent = useMemo(() => {
     if (!avatarDetail) return null;
@@ -1125,9 +1390,9 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
                   <div>
                     <div className="mb-1 flex items-center justify-between text-xs font-medium text-zinc-300">
-                      <span>提示词</span>
+                      <span>视频生成提示词</span>
                       <div className="flex items-center gap-2 text-zinc-500">
-                        <span>{question.length}/2000</span>
+                        <span>{question.length}/5000</span>
                         <Button
                           variant="secondary"
                           size="sm"
@@ -1153,7 +1418,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                       className="h-28 w-full resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-500"
                       placeholder={props.questionPlaceholder}
                       value={question}
-                      maxLength={2000}
+                      maxLength={5000}
                       onChange={(e) => setDraftField(props.draftSource, "question", e.target.value)}
                     />
                     {productDurationGuide ? (
@@ -1161,7 +1426,42 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                         当前时长 {productDurationGuide.seconds}s：{productDurationGuide.summary}
                       </div>
                     ) : null}
+                    <div className="mt-2 text-xs leading-5 text-zinc-500">
+                      这里的“用户提示词”用于生成视频；点击「润色」会自动补全缺失的视频提示词内容。如需生成语音，请在提示词里直接写 `语音内容：`、`旁白：` 或 `口播文案：` 段落。
+                    </div>
                     {polishHint ? <div className="mt-2 text-xs text-zinc-400">{polishHint}</div> : null}
+                  </div>
+
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-xs font-medium text-zinc-300">
+                      <span>文案提示词</span>
+                      <div className="flex items-center gap-2 text-zinc-500">
+                        <span>{productCopyPrompt.length}/2000</span>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={handleGenerateProductCopy}
+                          disabled={isGeneratingProductCopy || !productCopyPrompt.trim()}
+                        >
+                          {isGeneratingProductCopy ? "生成中..." : "生成文案"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setDraftField(props.draftSource, "productCopyPrompt", "")}
+                          disabled={!productCopyPrompt.trim() || isGeneratingProductCopy}
+                        >
+                          清空
+                        </Button>
+                      </div>
+                    </div>
+                    <textarea
+                      className="h-28 w-full resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-500"
+                      placeholder="这里保留用户输入的文案提示词，用于单独生成右侧的文案生成结果。"
+                      value={productCopyPrompt}
+                      maxLength={2000}
+                      onChange={(e) => setDraftField(props.draftSource, "productCopyPrompt", e.target.value)}
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -1369,27 +1669,12 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
               <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-medium text-zinc-100">当前生成结果</div>
-                  {isProductMode && currentProductTask ? (
+                  {isProductMode && (currentMetaDraft || productCopyText.trim() || workspacePublishTitle || workspacePublishTags.length > 0) ? (
                     <Button
                       size="sm"
                       variant="secondary"
                       disabled={!metaDirty}
-                      onClick={() => {
-                        if (!currentProductTask) return;
-                        const titleValue = metaEditorTitle.trim();
-                        const tagsValue = parseTagText(metaEditorTags);
-                        const platformText = platformLabel(
-                          (currentProductTask.platformStyle as VideoWorkspaceDraft["platformStyle"]) ?? "douyin",
-                        );
-                        updateDraft(currentProductTask.id, {
-                          publishTitle: titleValue || undefined,
-                          publishTags: tagsValue.length ? tagsValue : undefined,
-                          title: titleValue
-                            ? `${props.cardTitle}｜${platformText}｜${titleValue}`
-                            : currentProductTask.title,
-                        });
-                        setAssetHint("已保存");
-                      }}
+                      onClick={handleSaveMeta}
                     >
                       保存
                     </Button>
@@ -1397,9 +1682,69 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                 </div>
                 <div className="mt-3 space-y-2">
                   {!currentProductTask ? (
-                    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-10 text-center text-sm text-zinc-500">
-                      暂无生成结果
-                    </div>
+                    productCopyText.trim() || workspacePublishTitle || workspacePublishTags.length > 0 ? (
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                        <div className="space-y-4">
+                          <div>
+                            <div className="text-xs font-medium text-zinc-300">标签</div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <Badge variant="blue">{platformLabel(platformStyle)}</Badge>
+                              {workspacePublishTags.length > 0 ? (
+                                workspacePublishTags.map((tag) => (
+                                  <Badge key={tag} variant="gray">
+                                    #{tag}
+                                  </Badge>
+                                ))
+                              ) : (
+                                <div className="text-sm text-zinc-500">-</div>
+                              )}
+                            </div>
+                            <div className="mt-2">
+                              <Input
+                                value={metaEditorTags}
+                                onChange={(e) => setMetaEditorTags(e.target.value)}
+                                placeholder="支持空格/逗号分隔，例如：#新品 #种草 #抖音"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-medium text-zinc-300">标题</div>
+                            <div className="mt-2">
+                              <Input
+                                value={metaEditorTitle}
+                                onChange={(e) => setMetaEditorTitle(e.target.value)}
+                                placeholder="请输入标题"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-medium text-zinc-300">文案生成结果</div>
+                              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                                <span>当前字数：{currentProductCopyResultLength}</span>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={openCopyResultEditor}
+                                  disabled={!currentProductCopyResult}
+                                >
+                                  全屏编辑
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="mt-2 h-[10.5rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm leading-7 text-zinc-200">
+                              {currentProductCopyResult || "-"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-10 text-center text-sm text-zinc-500">
+                        暂无生成结果
+                      </div>
+                    )
                   ) : (
                     <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
                       <div className="space-y-4">
@@ -1440,11 +1785,22 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                         </div>
 
                         <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-3">
-                          <div className="text-xs font-medium text-zinc-300">文案内容</div>
-                          <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
-                            {currentProductTask.generatedScript?.trim()
-                              ? currentProductTask.generatedScript.trim()
-                              : "-"}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs font-medium text-zinc-300">文案生成结果</div>
+                            <div className="flex items-center gap-2 text-xs text-zinc-500">
+                              <span>当前字数：{currentProductCopyResultLength}</span>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={openCopyResultEditor}
+                                disabled={!currentProductCopyResult}
+                              >
+                                全屏编辑
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="mt-2 h-[10.5rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm leading-7 text-zinc-200">
+                            {currentProductCopyResult || "-"}
                           </div>
                         </div>
 
@@ -1735,6 +2091,52 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                       ) : null}
                     </div>
 
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs font-medium text-zinc-300">标题与标签</div>
+                        <Button size="sm" variant="secondary" disabled={!metaDirty} onClick={handleSaveMeta}>
+                          保存
+                        </Button>
+                      </div>
+                      <div className="mt-3 space-y-4">
+                        <div>
+                          <div className="text-xs font-medium text-zinc-300">标签</div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {activeAvatarDraft.platformStyle ? (
+                              <Badge variant="blue">{platformLabel(activeAvatarDraft.platformStyle)}</Badge>
+                            ) : null}
+                            {activeAvatarDraft.publishTags && activeAvatarDraft.publishTags.length > 0 ? (
+                              activeAvatarDraft.publishTags.map((tag) => (
+                                <Badge key={tag} variant="gray">
+                                  #{tag}
+                                </Badge>
+                              ))
+                            ) : (
+                              <div className="text-sm text-zinc-500">-</div>
+                            )}
+                          </div>
+                          <div className="mt-2">
+                            <Input
+                              value={metaEditorTags}
+                              onChange={(e) => setMetaEditorTags(e.target.value)}
+                              placeholder="支持空格/逗号分隔，例如：#口播 #招商 #抖音"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs font-medium text-zinc-300">标题</div>
+                          <div className="mt-2">
+                            <Input
+                              value={metaEditorTitle}
+                              onChange={(e) => setMetaEditorTitle(e.target.value)}
+                              placeholder="请输入标题"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                     {activeAvatarDraft.status === "processing" && avatarDetail ? (
                       <div className="rounded-xl border border-white/10 bg-black/30 p-3">
                         <div className="flex items-center justify-between gap-2">
@@ -1904,6 +2306,42 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                 </div>
               </div>
             ) : null}
+            {isAvatarMode ? (
+              <div className="mb-6">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-medium text-zinc-100">文案内容</div>
+                  <div className="flex items-center gap-2 text-zinc-500">
+                    <span className="text-xs">{avatarCopyText.length}/15000</span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleExpandAvatarScript}
+                      disabled={isExpandingAvatarScript || !question.trim()}
+                    >
+                      {isExpandingAvatarScript ? "生成中..." : "生成文案"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setDraftField(props.draftSource, "avatarCopyText", "")}
+                      disabled={!avatarCopyText.trim() || isExpandingAvatarScript}
+                    >
+                      清空
+                    </Button>
+                  </div>
+                </div>
+                <textarea
+                  className="h-40 w-full resize-none rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-500"
+                  placeholder="这里会根据上方“用户提示词”生成文案内容；如果未明确要求字数，默认生成符合用户提示词内容的完整成稿，也支持手动编辑。"
+                  value={avatarCopyText}
+                  maxLength={15000}
+                  onChange={(e) => setDraftField(props.draftSource, "avatarCopyText", e.target.value)}
+                />
+                <div className="mt-2 text-xs leading-5 text-zinc-500">
+                  文案内容根据上方“用户提示词”生成；如果未明确要求字数，会默认生成符合用户提示词内容的自然成稿。
+                </div>
+              </div>
+            ) : null}
             <div className="mb-3 flex items-center justify-between">
               <div className="text-sm font-medium text-zinc-100">用户提示词</div>
               <div className="flex items-center gap-2">
@@ -1918,24 +2356,10 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                 >
                   {isPolishing ? "润色中..." : "润色"}
                 </Button>
-                {isAvatarMode ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleExpandAvatarScript}
-                    disabled={isExpandingAvatarScript || !question.trim()}
-                  >
-                    {isExpandingAvatarScript ? "生成中..." : "生成长脚本"}
-                  </Button>
-                ) : null}
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => {
-                    setPromptEditorValue(question || props.defaultPrompt);
-                    setPromptEditorHint(null);
-                    setPromptEditorOpen(true);
-                  }}
+                  onClick={openPromptEditor}
                 >
                   全屏编辑
                 </Button>
@@ -1972,6 +2396,11 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                 </div>
               ) : null}
               {polishHint ? <div className="mt-2 text-xs text-zinc-400">{polishHint}</div> : null}
+              {isAvatarMode ? (
+                <div className="mt-2 text-xs leading-5 text-zinc-400">
+                  这里的“用户提示词”用于真人口播视频生成；点击「润色」会自动补全视频生成缺失的提示词内容。如需生成语音，请直接写 `语音内容：`、`旁白：` 或 `口播文案：` 段落。
+                </div>
+              ) : null}
               {!isAvatarMode ? (
                 <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100/90">
                   {isProductMode
@@ -2071,7 +2500,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
       <Modal
         open={promptEditorOpen}
-        title="编辑提示词"
+        title={isAvatarMode ? "编辑长文本提示词" : "编辑提示词"}
         onClose={() => {
           setPromptEditorOpen(false);
           setPromptEditorHint(null);
@@ -2158,6 +2587,50 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                 setPromptEditorHint(null);
               }}
             >
+              保存
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={copyResultEditorOpen}
+        title="编辑文案生成结果"
+        onClose={() => {
+          setCopyResultEditorOpen(false);
+        }}
+      >
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+            <span>当前字数：{copyResultEditorValue.length}</span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(copyResultEditorValue);
+                  setPolishHint("已复制文案生成结果");
+                } catch {
+                  setPolishHint("复制失败，请手动复制");
+                }
+              }}
+            >
+              复制
+            </Button>
+          </div>
+          <textarea
+            className="h-[60vh] w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-500"
+            value={copyResultEditorValue}
+            maxLength={2000}
+            onChange={(e) => setCopyResultEditorValue(e.target.value)}
+            placeholder="暂无文案生成结果"
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setCopyResultEditorOpen(false)}>
+              取消
+            </Button>
+            <Button type="button" onClick={saveCopyResultEditor}>
               保存
             </Button>
           </div>
