@@ -1208,13 +1208,21 @@ enum JobStatus {
 - 用途：生成社媒图文内容，支持提示词、素材上传、结果预览、提交审核、同步获客
 - 当前状态：前后端已接通，服务端会并行生成文案和图片，并将结果落库到 `SocialGeneratedPost`
 - 当前支持：列表查询、生成、单条提审、标记“已同步获客”
+- 相关接口：
+  - `GET /api/ai/social-posts`
+  - `POST /api/ai/social-posts/generate`
+  - `POST /api/ai/social-posts/:id/submit`
+  - `POST /api/ai/social-posts/:id/mark-synced`
 - 当前说明：审核中心对社媒图文的完整后端闭环仍未单独落地，当前更偏“生成结果已落库 + 提审入口已接通”
 
 ### 6.2 商品图与详情图生成
 
 - 页面：`/studio/product-images`
-- 用途：生成商品主图、场景图、详情图，可提交审核并同步到获客/商品下游
-- 当前状态：仅 demo 页面与本地状态，后端未实现
+- 用途：生成商品主图、场景图、详情图；生成完成后进入图文草稿箱，可提交审核并同步到获客/商品下游
+- 当前状态：前端页面已实现并已接通真实 AI 文案/图片接口；生成结果当前写入前端本地草稿 store，尚未形成独立后端落库闭环
+- 相关接口：
+  - `POST /api/ai/generate-copy`
+  - `POST /api/ai/generate-images`
 
 ### 6.3 视频生成
 
@@ -1227,6 +1235,7 @@ enum JobStatus {
 - 相关接口：
   - `POST /api/ai/generate-video`
   - `GET /api/ai/video-tasks/:taskId`
+  - `POST /api/ai/avatar-video-scripts/expand`
   - `POST /api/ai/avatar-video-tasks`
   - `GET /api/ai/avatar-video-tasks/:taskId`
   - `POST /api/ai/avatar-video-tasks/:taskId/retry`
@@ -1359,9 +1368,10 @@ enum JobStatus {
 - 当前接口：
   - `GET /api/ai/model-configs/active`
   - `GET /api/ai/model-configs/saved`
-  - `POST /api/ai/model-configs/:type/test`
-  - `PUT /api/ai/model-configs/:type/activate`
+  - `POST /api/ai/model-configs/:type/test-connection`
+  - `POST /api/ai/model-configs/:type/activate`
 - 权限说明：仅主公司可管理模型配置
+- 存储说明：当前激活配置与已保存配置均存储在 Redis，不走业务数据库
 
 ---
 
@@ -1437,7 +1447,7 @@ enum JobStatus {
 
 ## 13. 获客内容池 / Publish 模块（Demo 主语义）
 
-> **说明**：以后台 demo 页面 `/publishing` 为准。当前后端未实现该模块。
+> **说明**：以后台 demo 页面 `/publishing` 为准。当前尚无独立后端内容池 / 发布模块，页面以本地内容池与发布记录流为主。
 
 ### Demo 页面语义
 
@@ -1448,7 +1458,10 @@ enum JobStatus {
   - 一键发布到平台草稿箱
   - 发布记录
   - 上传超级站
-- 当前状态：仅 demo 页面与本地状态，后端未实现
+- 当前状态：
+  - 前端：页面已实现，依赖本地 `contents / publishJobs` store 展示已审核内容与发布记录
+  - 入池来源：草稿箱“同步到获客”当前写前端内容池 store
+  - 后端：独立内容池表、发布任务表与正式接口仍未落地
 
 ---
 

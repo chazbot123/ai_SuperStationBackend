@@ -16,6 +16,7 @@ export type ProviderProtocol =
   | 'doubao_image'
   | 'openai_image'
   | 'dashscope_video'
+  | 'vidu_image'
   | 'vidu_video';
 
 export type ProviderPreset = {
@@ -110,7 +111,7 @@ const providerPresets: Record<ModelType, Partial<Record<ProviderKey, ProviderPre
       baseUrl: 'https://api.vidu.cn',
       taskQueryUrlTemplate: 'https://api.vidu.cn/ent/v2/tasks/{taskId}/creations',
       defaultModelName: 'viduq1',
-      protocol: 'vidu_video',
+      protocol: 'vidu_image',
     },
     custom: {
       key: 'custom',

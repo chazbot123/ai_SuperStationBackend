@@ -147,6 +147,27 @@ export default function StudioDrafts() {
     });
   }, [draftItems, query, sourceFilter]);
 
+  const filteredRunningTasks = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return runningTasks.filter((task) => {
+      if (task.stage === "failed") {
+        return false;
+      }
+      const sourceMatched = sourceFilter === "all" || task.source === sourceFilter;
+      if (!sourceMatched) {
+        return false;
+      }
+      if (!normalized) {
+        return true;
+      }
+      return (
+        task.title.toLowerCase().includes(normalized) ||
+        task.label.toLowerCase().includes(normalized) ||
+        (task.errorMessage?.toLowerCase().includes(normalized) ?? false)
+      );
+    });
+  }, [query, runningTasks, sourceFilter]);
+
   function openPreview(item: DraftItem) {
     markDraftViewed(item.source, item.rawId);
     setPreviewItem(item);
@@ -269,12 +290,12 @@ export default function StudioDrafts() {
 
           <div className="space-y-2">
             <div className="text-sm font-medium text-zinc-100">正在执行的任务</div>
-            {runningTasks.length === 0 ? (
+            {filteredRunningTasks.length === 0 ? (
               <div className="rounded-md border border-white/10 bg-white/5 px-3 py-6 text-center text-sm text-zinc-500">
                 当前没有执行中的任务
               </div>
             ) : (
-              runningTasks.map((task) => (
+              filteredRunningTasks.map((task) => (
                 <div
                   key={task.id}
                   className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-3"

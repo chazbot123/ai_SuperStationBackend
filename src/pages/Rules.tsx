@@ -331,6 +331,7 @@ export default function Rules() {
                 <div>3. 图片和视频如为异步任务，可额外填写任务查询地址模板。</div>
                 <div>4. 测试连接会真实请求上游接口，可能创建测试任务或产生计费。</div>
                 <div>5. 图文生成和测试连接都会按服务商协议自动匹配。</div>
+                <div>6. Vidu 图片模型当前支持参考图生图；其中 ViduQ2 系列额外支持纯文生图。</div>
               </div>
             </div>
           </CardContent>

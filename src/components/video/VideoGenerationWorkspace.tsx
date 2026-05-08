@@ -147,7 +147,7 @@ function appendProductDurationHint(base: string, durationSec: number) {
 }
 
 function appendAvatarVideoHint(base: string, targetSeconds: number) {
-  const seconds = Math.max(30, Math.min(300, Math.round(Number(targetSeconds) || 30)));
+  const seconds = Math.max(10, Math.min(300, Math.round(Number(targetSeconds) || 30)));
   return `${base}\n\n视频生成要求：这是用于真人口播视频生成的提示词，请在不改变原意的前提下，自动补全缺失的主体设定、镜头节奏、画面连贯性、字幕节奏和结尾收束等必要提示。\n成片要求：目标成片约 ${seconds} 秒，表达口语化、自然分段，适合数字人口播视频。`;
 }
 
@@ -199,10 +199,33 @@ function extractSpeechContentFromProductPrompt(input: string) {
 }
 
 function normalizeAvatarErrorMessage(message: string) {
-  return message
+  const normalized = message
     .replace(/\s*\(trace_id:[^)]+\)/gi, "")
     .replace(/\s+/g, " ")
     .trim();
+  if (!normalized) return "未知错误";
+  if (/invalid field|unknown field|unsupported field/i.test(normalized)) {
+    return "当前视频参数组合不受支持，请调整提示词、语音内容或视频参数后重试。";
+  }
+  if (/AuditSubmitIllegal/i.test(normalized)) {
+    return "当前内容未通过上游平台审核，请调整文案或画面描述后重试。";
+  }
+  if (/timeout|timed out|超时/i.test(normalized)) {
+    return "视频生成超时，请稍后重试。";
+  }
+  return normalized;
+}
+
+function formatVideoStatusLabel(status: string | null | undefined) {
+  const value = String(status ?? "").trim().toLowerCase();
+  if (value === "pending") return "待提交";
+  if (value === "submitted") return "已提交";
+  if (value === "processing") return "生成中";
+  if (value === "success") return "成功";
+  if (value === "failure" || value === "failed") return "失败";
+  if (value === "ready" || value === "completed") return "已完成";
+  if (value === "queued") return "排队中";
+  return status ? String(status) : "未知";
 }
 
 function summarizeAvatarFailures(detail: AvatarVideoTaskStatusResponse | null) {
@@ -411,7 +434,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
   useEffect(() => {
     if (!isAvatarMode) return;
-    const next = Math.max(30, Math.min(300, Number.isFinite(avatarTargetSeconds) ? avatarTargetSeconds : 30));
+    const next = Math.max(10, Math.min(300, Number.isFinite(avatarTargetSeconds) ? avatarTargetSeconds : 30));
     if (next !== avatarTargetSeconds) {
       setDraftField(props.draftSource, "avatarTargetSeconds", next);
     }
@@ -1393,6 +1416,9 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                       <span>视频生成提示词</span>
                       <div className="flex items-center gap-2 text-zinc-500">
                         <span>{question.length}/5000</span>
+                        <Button variant="ghost" size="sm" onClick={() => setPolishHelpOpen(true)}>
+                          <Info className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="secondary"
                           size="sm"
@@ -1426,9 +1452,6 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                         当前时长 {productDurationGuide.seconds}s：{productDurationGuide.summary}
                       </div>
                     ) : null}
-                    <div className="mt-2 text-xs leading-5 text-zinc-500">
-                      这里的“用户提示词”用于生成视频；点击「润色」会自动补全缺失的视频提示词内容。如需生成语音，请在提示词里直接写 `语音内容：`、`旁白：` 或 `口播文案：` 段落。
-                    </div>
                     {polishHint ? <div className="mt-2 text-xs text-zinc-400">{polishHint}</div> : null}
                   </div>
 
@@ -1815,7 +1838,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                               />
                             ) : currentProductTask.status === "failed" ? (
                               <div className="text-sm text-zinc-300">
-                                {currentProductTask.errorMessage || "视频生成失败"}
+                                {normalizeAvatarErrorMessage(currentProductTask.errorMessage || "视频生成失败")}
                               </div>
                             ) : (
                               <div className="py-10 text-center">
@@ -1962,10 +1985,10 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                 ) : null}
                 {isAvatarMode ? (
                   <div>
-                    <div className="mb-1 text-xs font-medium text-zinc-300">脚本时长(30-300秒)</div>
+                    <div className="mb-1 text-xs font-medium text-zinc-300">脚本时长(10-300秒)</div>
                     <Input
                       type="number"
-                      min={30}
+                      min={10}
                       max={300}
                       step={5}
                       value={String(avatarTargetSeconds)}
@@ -1973,7 +1996,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                         setDraftField(
                           props.draftSource,
                           "avatarTargetSeconds",
-                          Math.max(30, Math.min(300, Number(e.target.value) || 30))
+                          Math.max(10, Math.min(300, Number(e.target.value) || 30))
                         )
                       }
                     />
@@ -2173,21 +2196,15 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                                       segment.status === "failure" ? "red" : segment.status === "pending" ? "gray" : "amber"
                                     }
                                   >
-                                    {segment.status === "pending"
-                                      ? "待提交"
-                                      : segment.status === "submitted"
-                                        ? "已提交"
-                                        : segment.status === "processing"
-                                          ? "生成中"
-                                          : segment.status === "failure"
-                                            ? "失败"
-                                            : segment.status}
+                                    {formatVideoStatusLabel(segment.status)}
                                   </Badge>
                                 </div>
                                 {segment.retryAt ? (
                                   <div className="mt-1 text-zinc-400">下次重试：{new Date(segment.retryAt).toLocaleString()}</div>
                                 ) : null}
-                                {segment.errorMessage ? <div className="mt-1 text-zinc-400">{segment.errorMessage}</div> : null}
+                                {segment.errorMessage ? (
+                                  <div className="mt-1 text-zinc-400">{normalizeAvatarErrorMessage(segment.errorMessage)}</div>
+                                ) : null}
                               </div>
                             ))}
                           {avatarDetail.segments.filter((segment) => segment.status !== "success").length === 0 ? (
@@ -2236,7 +2253,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                               <div key={segment.id} className="rounded-lg border border-white/10 bg-black/20 p-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <div className="text-xs text-zinc-300">
-                                    片段 {segment.sequenceOrder + 1} · {segment.status}
+                                    片段 {segment.sequenceOrder + 1} · {formatVideoStatusLabel(segment.status)}
                                   </div>
                                   {segment.attempts > 0 ? (
                                     <div className="text-xs text-zinc-500">
@@ -2255,7 +2272,9 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                                   />
                                 ) : null}
                                 {segment.errorMessage ? (
-                                  <div className="mt-2 text-xs text-red-300">{segment.errorMessage}</div>
+                                  <div className="mt-2 text-xs text-red-300">
+                                    {normalizeAvatarErrorMessage(segment.errorMessage)}
+                                  </div>
                                 ) : null}
                               </div>
                             ))}
@@ -2337,9 +2356,6 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                   maxLength={15000}
                   onChange={(e) => setDraftField(props.draftSource, "avatarCopyText", e.target.value)}
                 />
-                <div className="mt-2 text-xs leading-5 text-zinc-500">
-                  文案内容根据上方“用户提示词”生成；如果未明确要求字数，会默认生成符合用户提示词内容的自然成稿。
-                </div>
               </div>
             ) : null}
             <div className="mb-3 flex items-center justify-between">
@@ -2641,6 +2657,12 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         <div className="space-y-2 text-sm leading-6 text-zinc-200">
           <div>保留原文里的数字、专有名词、联系方式、占位符等，只做语序、口语化、停顿、节奏之类的优化。</div>
           <div>点击润色后会用 AI 的结果替换当前内容，你仍然可以继续手动修改。</div>
+          {isProductMode ? (
+            <div>
+              这里的“用户提示词”用于生成视频；点击「润色」会自动补全缺失的视频提示词内容。如需生成语音，请在提示词里直接写
+              `语音内容：`、`旁白：` 或 `口播文案：` 段落。
+            </div>
+          ) : null}
           <div className="text-xs text-zinc-400">
             建议先写清楚：平台风格、产品卖点、受众、场景、限制点；润色不会凭空编造数据与背书。
           </div>
