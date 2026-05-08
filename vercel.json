@@ -1,0 +1,6 @@
+{
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(?!(?:@vite/|@id/|@fs/|@react-refresh$|src/|node_modules/|favicon\\.svg$)).*", "dest": "/index.html" }
+  ]
+}
