@@ -5,6 +5,7 @@ import RequirePageAccess from "@/routes/RequirePageAccess";
 import Dashboard from "@/pages/Dashboard";
 import Login from "@/pages/Login";
 import Rbac from "@/pages/Rbac";
+import UserAgreement from "@/pages/UserAgreement";
 import Assets from "@/pages/Assets";
 import CustomerManagement from "@/pages/CustomerManagement";
 import Personalization from "@/pages/Personalization";
@@ -43,6 +44,7 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/user-agreement" element={<UserAgreement />} />
 
         <Route element={<RequireAuth />}>
           <Route element={<AppShell />}>

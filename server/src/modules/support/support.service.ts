@@ -85,12 +85,6 @@ export class SupportService {
         visitorContact: dto.visitorContact?.trim() || null,
         sourcePage: dto.sourcePage?.trim() || null,
         status: SupportConversationStatus.ai_chat,
-        messages: {
-          create: {
-            role: SupportMessageRole.system,
-            content: '会话已创建，当前由 AI 客服托管。',
-          },
-        },
       },
       include: supportConversationInclude,
     });

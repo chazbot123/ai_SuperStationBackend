@@ -1174,9 +1174,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       referenceImages,
       count: 3,
     });
+    const persistedUrls = await this.persistDraftImages(user.userId, urls, 'ai-generated-images');
 
     return {
-      urls,
+      urls: persistedUrls,
       provider: resolvedConfig.providerName,
       model: resolvedConfig.modelName,
     };
@@ -3293,7 +3294,11 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       orderBy: { createdAt: 'desc' },
     });
 
-    return items.map((item) => this.serializeSocialPost(item));
+    const normalizedItems = await Promise.all(
+      items.map((item) => this.repairSocialPostImages(user.userId, item)),
+    );
+
+    return normalizedItems.map((item) => this.serializeSocialPost(item));
   }
 
   async listProductImageDrafts(user: SessionUser) {
@@ -3302,7 +3307,11 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       orderBy: { createdAt: 'desc' },
     });
 
-    return items.map((item) => this.serializeProductImageDraft(item));
+    const normalizedItems = await Promise.all(
+      items.map((item) => this.repairProductDraftImages(user.userId, item)),
+    );
+
+    return normalizedItems.map((item) => this.serializeProductImageDraft(item));
   }
 
   async listVideoDrafts(user: SessionUser) {
@@ -4013,6 +4022,65 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       status: item.status,
       syncedToLeads: item.syncedToLeads,
     };
+  }
+
+  private async repairSocialPostImages(userId: string, item: SocialGeneratedPost) {
+    const nextImages = await this.persistDraftImages(userId, item.images, 'ai-generated-images');
+    if (this.areImagesEqual(item.images, nextImages)) {
+      return item;
+    }
+
+    return this.prisma.socialGeneratedPost.update({
+      where: { id: item.id },
+      data: { images: nextImages },
+    });
+  }
+
+  private async repairProductDraftImages(userId: string, item: ProductImageDraft) {
+    const nextImages = await this.persistDraftImages(userId, item.images, 'ai-generated-images');
+    if (this.areImagesEqual(item.images, nextImages)) {
+      return item;
+    }
+
+    return this.prisma.productImageDraft.update({
+      where: { id: item.id },
+      data: { images: nextImages },
+    });
+  }
+
+  private async persistDraftImages(userId: string, images: string[], folder: string) {
+    const normalized = images
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 12);
+
+    const persisted = await Promise.all(
+      normalized.map(async (image) => {
+        if (this.productImageStorage.isManagedPublicUrl(image)) {
+          return image;
+        }
+        if (image.startsWith('/')) {
+          return image;
+        }
+
+        try {
+          const asset = await this.productImageStorage.mirrorRemoteAsset(userId, image, folder);
+          return asset.url;
+        } catch {
+          return image;
+        }
+      }),
+    );
+
+    return persisted;
+  }
+
+  private areImagesEqual(left: string[], right: string[]) {
+    if (left.length !== right.length) {
+      return false;
+    }
+
+    return left.every((item, index) => item === right[index]);
   }
 
   private serializeReviewMaterial(

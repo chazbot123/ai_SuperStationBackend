@@ -18,7 +18,7 @@ export const navLabels = {
   publishingPlatformLogin: "平台登录",
   publishingJobs: "发布任务",
   personalization: "超级站配置中心",
-  personalizationLayout: "布局与模板",
+  personalizationLayout: "超级站地址设置",
   personalizationMetrics: "运营指标",
   personalizationIndustry: "行业与招商",
   rules: "模型配置",

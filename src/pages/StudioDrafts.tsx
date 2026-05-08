@@ -60,18 +60,34 @@ function formatTagInput(tags?: string[]) {
     .join(" ");
 }
 
+function normalizeDraftImageUrl(image: string) {
+  const next = image.trim();
+  if (!next || next.startsWith("blob:")) {
+    return "";
+  }
+  if (
+    next.startsWith("http://") ||
+    next.startsWith("https://") ||
+    next.startsWith("data:image/") ||
+    next.startsWith("/")
+  ) {
+    return next;
+  }
+  if (next.startsWith("//")) {
+    return window.location.protocol + next;
+  }
+  if (/^[a-z0-9.-]+(?::\d+)?\/.+/i.test(next)) {
+    return `${window.location.protocol}//${next}`;
+  }
+  return `/${next.replace(/^\.?\//, "")}`;
+}
+
 function getVisibleImages(images: string[]) {
-  return images.filter((image) => {
-    if (typeof image !== "string") return false;
-    const next = image.trim();
-    if (!next) return false;
-    if (next.startsWith("blob:")) return false;
-    return (
-      next.startsWith("http://") ||
-      next.startsWith("https://") ||
-      next.startsWith("data:image/") ||
-      next.startsWith("/")
-    );
+  return images.flatMap((image, index) => {
+    if (typeof image !== "string") return [];
+    const normalized = normalizeDraftImageUrl(image);
+    if (!normalized) return [];
+    return [{ index, image: normalized }];
   });
 }
 
@@ -139,6 +155,7 @@ export default function StudioDrafts() {
   const [editBody, setEditBody] = useState("");
   const [editTags, setEditTags] = useState("");
   const [editImages, setEditImages] = useState<string[]>([]);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -238,6 +255,7 @@ export default function StudioDrafts() {
     setEditBody(item.body);
     setEditTags(formatTagInput(item.tags));
     setEditImages(item.images);
+    setPreviewImage(null);
   }
 
   function handleDownloadImage(item: DraftItem, image: string, index: number) {
@@ -683,7 +701,10 @@ export default function StudioDrafts() {
       <Modal
         open={!!editingItem}
         title="编辑草稿"
-        onClose={() => setEditingItem(null)}
+        onClose={() => {
+          setPreviewImage(null);
+          setEditingItem(null);
+        }}
         panelClassName="max-w-[96vw] sm:max-w-3xl xl:max-w-5xl"
         bodyClassName="max-h-[calc(100vh-11rem)]"
         footerClassName="shrink-0"
@@ -770,27 +791,27 @@ export default function StudioDrafts() {
                 </div>
                 {getVisibleImages(editImages).length > 0 ? (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                    {getVisibleImages(editImages).map((image, index) => (
-                      <div key={`${editingItem.id}_${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                    {getVisibleImages(editImages).map(({ index: originalIndex, image }, index) => (
+                      <div key={`${editingItem.id}_${originalIndex}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
                         <button
                           type="button"
                           className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-red-500"
-                          onClick={() => handleRemoveImage(index)}
+                          onClick={() => handleRemoveImage(originalIndex)}
                           aria-label="删除图片"
                         >
                           ×
                         </button>
-                        {editingItem.downloadableImages[index] ? (
-                          <button
-                            type="button"
-                            className="absolute bottom-2 right-2 z-10 inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-black/70 px-2 text-white transition hover:bg-amber-500"
-                            onClick={() => handleDownloadImage(editingItem, image, index)}
-                            aria-label="下载图片到本地"
-                          >
-                            <Download className="h-4 w-4" />
-                          </button>
-                        ) : null}
-                        <img src={image} alt={`${editingItem.title}_${index + 1}`} className="aspect-[4/3] w-full object-cover" />
+                        <button
+                          type="button"
+                          className="absolute bottom-2 right-2 z-10 inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-black/70 px-2 text-white transition hover:bg-amber-500"
+                          onClick={() => handleDownloadImage(editingItem, image, originalIndex)}
+                          aria-label="下载图片到本地"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                        <button type="button" className="block w-full" onClick={() => setPreviewImage(image)} aria-label="放大预览图片">
+                          <img src={image} alt={`${editingItem.title}_${index + 1}`} className="aspect-[4/3] w-full object-cover transition hover:scale-[1.01]" />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -820,6 +841,10 @@ export default function StudioDrafts() {
             ) : null}
           </div>
         ) : null}
+      </Modal>
+
+      <Modal open={!!previewImage} title="图片预览" onClose={() => setPreviewImage(null)}>
+        {previewImage ? <img src={previewImage} alt="preview" className="max-h-[70vh] rounded-md object-contain" /> : null}
       </Modal>
 
       <Modal

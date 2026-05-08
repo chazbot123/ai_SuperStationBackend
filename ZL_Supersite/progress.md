@@ -36,3 +36,13 @@
 - 已确认 AI 回复失败的根因边界：`SupportAiService` 当前调 `AiService.generateTextReply()` 时未传 `userId`，而 `SupportConversation` 也未记录站点所属用户；因此公开客服链路不会命中按账号保存的文字模型配置，只能回退全局环境变量。当前 `server/.env` 仅检出 `REDIS_URL`，未检出全局 `DASHSCOPE_API_KEY / ALIYUN_API_KEY`，会导致文字模型无法调用并回退系统消息。
 - 已按“前台默认主公司账号”收口后端客服链路：公开客服现在默认按主公司 `userId` 获取文字模型配置，`SupportAiService -> AiService.generateTextReply` 已显式带上主公司账号。
 - 已验证主公司账号在 Redis 中存在有效 `text` 模型配置，且直连上游模型接口返回 `200`；同时在应用上下文中单独调用 `SupportAiService.generateReply()` 已能正常返回答案。当前仍返回系统兜底的原因是端口 `3000` 上运行的后端进程仍是旧代码，需重启后端服务生效。
+- 已按用户要求拆除首页 `iframe` 承载：当前首页改为 React 直接渲染旧稿 DOM，不再通过 `public/legacy-home.html` 套壳。
+- 已将旧稿拆为 `legacy-home-body.html / legacy-home.css / public/legacy-home.js` 三部分，样式、交互、粒子、滚动动画和公开接口逻辑继续原样运行。
+- 已移除 `React.StrictMode`，避免旧稿全局脚本在开发态被重复初始化，影响 `Lenis / GSAP / p5`。
+- 已删除旧的 `LegacyHomeFrame.tsx`，首页入口改为 `LegacyHomePage.tsx`。
+- 已完成 `npm run check` 与 `npm run build` 验证，并用浏览器快照确认首页不再是 `iframe` 外层，页面可直接选中真实 DOM，导航、产品区和交互节点均可见。
+- 已按最新要求仅替换 `#industry` 右侧 `trendBox` 模块：静态曲线图改为公开行业与招商新闻列表，左侧“本年度工程覆盖渗透率”和中部条形统计保持不变。
+- 前台新闻模块直接复用后端公开接口 `GET /api/super-site-settings/public/:userId/industry-items`，主界面当前展示前 5 条标题。
+- 已补“更多”按钮与新闻详情弹层：点击主界面标题可查看详情，点击“更多”可打开全部新闻列表并切换详情。
+- 已处理 RSS 摘要里的 HTML 标签，详情区现显示纯文本摘要而不是原始标签字符串。
+- 已再次通过 `npm run check`、`npm run build`，并在浏览器中验证 5 条标题渲染、更多弹层打开、切换不同新闻后详情更新。

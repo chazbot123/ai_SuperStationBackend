@@ -13,6 +13,7 @@ export function canEdit(roleKey: RoleKey, pageKey: PageKey) {
       pageKey === "publishing" ||
       pageKey === "products" ||
       pageKey === "dashboard" ||
+      pageKey === "personalization" ||
       pageKey === "rules"
     );
   }

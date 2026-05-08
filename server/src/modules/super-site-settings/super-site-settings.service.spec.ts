@@ -11,6 +11,7 @@ describe('SuperSiteSettingsService', () => {
     const result = await service.getMySettings('user-1');
 
     expect(result.enterpriseName).toBe('示例科技');
+    expect(result.superSiteBaseUrl).toBe('');
     expect(result.siteTemplate).toBe('standard');
     expect(result.siteMetrics).toHaveLength(4);
     expect(result.siteMetrics.find((item) => item.key === 'signing_rate')?.fixedValue).toBe('31');
@@ -34,6 +35,7 @@ describe('SuperSiteSettingsService', () => {
 
     const result = await service.updateMySettings('user-1', {
       enterpriseName: '智邻科技',
+      superSiteBaseUrl: 'http://localhost:5173/',
       siteMetrics: [
         {
           key: 'visits',
@@ -57,6 +59,7 @@ describe('SuperSiteSettingsService', () => {
       }),
     );
     expect(result.enterpriseName).toBe('智邻科技');
+    expect(result.superSiteBaseUrl).toBe('http://localhost:5173/');
     expect(result.siteMetrics.find((item) => item.key === 'visits')?.startValue).toBe('5200');
     expect(result.siteMetrics).toHaveLength(4);
   });

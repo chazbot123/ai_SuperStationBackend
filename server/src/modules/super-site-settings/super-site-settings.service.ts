@@ -2,6 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  SuperSiteImageSlotDto,
   UpdateSuperSiteSettingDto,
   type SuperSiteIndustryRefreshConfigDto,
   type SuperSiteIndustrySourceConfigDto,
@@ -20,12 +21,14 @@ import { SuperSiteIndustryQueueService } from './super-site-industry-queue.servi
 
 type SuperSiteSettingsView = {
   enterpriseName: string;
+  superSiteBaseUrl: string;
   siteTemplate: string;
   siteModules: SuperSiteModuleDto[];
   siteMetrics: SuperSiteMetricDto[];
   specialOfferTitle: string;
   specialOfferSubtitle: string;
   specialOffers: SuperSiteSpecialOfferDto[];
+  siteImageSlots: SuperSiteImageSlotDto[];
   industrySourceConfigs: SuperSiteIndustrySourceConfig[];
   industryKeywords: string[];
   industryRefreshConfig: SuperSiteIndustryRefreshConfig;
@@ -37,12 +40,14 @@ type SuperSiteSettingsView = {
 export type PublicSuperSiteSettingsView = Pick<
   SuperSiteSettingsView,
   | 'enterpriseName'
+  | 'superSiteBaseUrl'
   | 'siteTemplate'
   | 'siteModules'
   | 'siteMetrics'
   | 'specialOfferTitle'
   | 'specialOfferSubtitle'
   | 'specialOffers'
+  | 'siteImageSlots'
 >;
 
 @Injectable()
@@ -64,12 +69,14 @@ export class SuperSiteSettingsService {
 
     return this.mergeSettings({
       enterpriseName: existing.enterpriseName,
+      superSiteBaseUrl: existing.superSiteBaseUrl,
       siteTemplate: existing.siteTemplate,
       siteModules: this.readJsonArray<SuperSiteModuleDto>(existing.siteModules),
       siteMetrics: this.readJsonArray<SuperSiteMetricDto>(existing.siteMetrics),
       specialOfferTitle: existing.specialOfferTitle,
       specialOfferSubtitle: existing.specialOfferSubtitle,
       specialOffers: this.readJsonArray<SuperSiteSpecialOfferDto>(existing.specialOffers),
+      siteImageSlots: this.readJsonArray<SuperSiteImageSlotDto>(existing.siteImageSlots),
       industrySourceConfigs: this.readJsonArray<SuperSiteIndustrySourceConfigDto>(
         existing.industrySourceConfigs,
       ),
@@ -96,12 +103,14 @@ export class SuperSiteSettingsService {
       create: {
         userId,
         enterpriseName: next.enterpriseName,
+        superSiteBaseUrl: next.superSiteBaseUrl,
         siteTemplate: next.siteTemplate,
         siteModules: next.siteModules as unknown as Prisma.InputJsonValue,
         siteMetrics: next.siteMetrics as unknown as Prisma.InputJsonValue,
         specialOfferTitle: next.specialOfferTitle,
         specialOfferSubtitle: next.specialOfferSubtitle,
         specialOffers: next.specialOffers as unknown as Prisma.InputJsonValue,
+        siteImageSlots: next.siteImageSlots as unknown as Prisma.InputJsonValue,
         industrySourceConfigs:
           next.industrySourceConfigs as unknown as Prisma.InputJsonValue,
         industryKeywords: next.industryKeywords as unknown as Prisma.InputJsonValue,
@@ -115,12 +124,14 @@ export class SuperSiteSettingsService {
       },
       update: {
         enterpriseName: next.enterpriseName,
+        superSiteBaseUrl: next.superSiteBaseUrl,
         siteTemplate: next.siteTemplate,
         siteModules: next.siteModules as unknown as Prisma.InputJsonValue,
         siteMetrics: next.siteMetrics as unknown as Prisma.InputJsonValue,
         specialOfferTitle: next.specialOfferTitle,
         specialOfferSubtitle: next.specialOfferSubtitle,
         specialOffers: next.specialOffers as unknown as Prisma.InputJsonValue,
+        siteImageSlots: next.siteImageSlots as unknown as Prisma.InputJsonValue,
         industrySourceConfigs:
           next.industrySourceConfigs as unknown as Prisma.InputJsonValue,
         industryKeywords: next.industryKeywords as unknown as Prisma.InputJsonValue,
@@ -141,12 +152,14 @@ export class SuperSiteSettingsService {
 
     return this.mergeSettings({
       enterpriseName: saved.enterpriseName,
+      superSiteBaseUrl: saved.superSiteBaseUrl,
       siteTemplate: saved.siteTemplate,
       siteModules: this.readJsonArray<SuperSiteModuleDto>(saved.siteModules),
       siteMetrics: this.readJsonArray<SuperSiteMetricDto>(saved.siteMetrics),
       specialOfferTitle: saved.specialOfferTitle,
       specialOfferSubtitle: saved.specialOfferSubtitle,
       specialOffers: this.readJsonArray<SuperSiteSpecialOfferDto>(saved.specialOffers),
+      siteImageSlots: this.readJsonArray<SuperSiteImageSlotDto>(saved.siteImageSlots),
       industrySourceConfigs: this.readJsonArray<SuperSiteIndustrySourceConfigDto>(
         saved.industrySourceConfigs,
       ),
@@ -165,18 +178,21 @@ export class SuperSiteSettingsService {
     const settings = await this.getMySettings(userId);
     return {
       enterpriseName: settings.enterpriseName,
+      superSiteBaseUrl: settings.superSiteBaseUrl,
       siteTemplate: settings.siteTemplate,
       siteModules: settings.siteModules,
       siteMetrics: settings.siteMetrics,
       specialOfferTitle: settings.specialOfferTitle,
       specialOfferSubtitle: settings.specialOfferSubtitle,
       specialOffers: settings.specialOffers,
+      siteImageSlots: settings.siteImageSlots,
     };
   }
 
   private buildDefaultSettings(): SuperSiteSettingsView {
     return {
       enterpriseName: '示例科技',
+      superSiteBaseUrl: '',
       siteTemplate: 'standard',
       siteModules: [
         { key: 'ai_attract', label: 'AI招商', enabled: true },
@@ -276,6 +292,7 @@ export class SuperSiteSettingsService {
           enabled: false,
         },
       ],
+      siteImageSlots: [],
       industrySourceConfigs: buildDefaultIndustrySourceConfigs(),
       industryKeywords: buildDefaultIndustryKeywords(),
       industryRefreshConfig: buildDefaultIndustryRefreshConfig(),
@@ -292,10 +309,15 @@ export class SuperSiteSettingsService {
     const savedModules = settings?.siteModules ?? [];
     const savedMetrics = settings?.siteMetrics ?? [];
     const savedOffers = settings?.specialOffers ?? [];
+    const savedImageSlots = settings?.siteImageSlots ?? [];
     const savedIndustrySourceConfigs = settings?.industrySourceConfigs ?? [];
 
     return {
       enterpriseName: settings?.enterpriseName ?? defaults.enterpriseName,
+      superSiteBaseUrl:
+        typeof settings?.superSiteBaseUrl === 'string'
+          ? settings.superSiteBaseUrl.trim()
+          : defaults.superSiteBaseUrl,
       siteTemplate: settings?.siteTemplate ?? defaults.siteTemplate,
       siteModules: [
         ...savedModules,
@@ -318,6 +340,15 @@ export class SuperSiteSettingsService {
         settings?.specialOfferSubtitle ?? defaults.specialOfferSubtitle,
       specialOffers:
         savedOffers.length > 0 ? savedOffers : defaults.specialOffers,
+      siteImageSlots: savedImageSlots
+        .filter((item) => item?.slotKey?.trim() && item?.moduleKey?.trim() && item?.imageUrl?.trim())
+        .map((item) => ({
+          slotKey: item.slotKey.trim(),
+          moduleKey: item.moduleKey.trim(),
+          imageUrl: item.imageUrl.trim(),
+          sourceContentId: item.sourceContentId?.trim() || null,
+          updatedAt: item.updatedAt?.trim() || null,
+        })),
       industrySourceConfigs: defaults.industrySourceConfigs.map((item) => ({
         ...item,
         enabled:

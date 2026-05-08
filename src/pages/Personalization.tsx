@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { getMySuperSiteSettings } from "@/lib/superSiteSettings";
-import Badge from "@/components/ui/Badge";
+import { getMySuperSiteSettings, updateMySuperSiteSettings } from "@/lib/superSiteSettings";
 import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
-import Select from "@/components/ui/Select";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import SuperSiteIndustrySection from "@/pages/personalization/SuperSiteIndustrySection";
 import SuperSiteMetricsSection from "@/pages/personalization/SuperSiteMetricsSection";
 import { useAuthStore } from "@/store/authStore";
-import { useAppStore, type SiteTemplateKey } from "@/store/appStore";
+import { useAppStore } from "@/store/appStore";
 
 export default function Personalization() {
   usePageMeta("超级站配置中心");
@@ -18,21 +16,15 @@ export default function Personalization() {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
-  const canEdit = user?.roleKey === "main_company";
+  const canEdit = user?.roleKey === "main_company" || user?.roleKey === "level1_agent";
   const settings = useAppStore((s) => s.settings);
   const replaceSettings = useAppStore((s) => s.replaceSettings);
-  const setEnterpriseName = useAppStore((s) => s.setEnterpriseName);
-  const setSiteTemplate = useAppStore((s) => s.setSiteTemplate);
-  const toggleSiteModule = useAppStore((s) => s.toggleSiteModule);
-  const reorderSiteModules = useAppStore((s) => s.reorderSiteModules);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [superSiteBaseUrlDraft, setSuperSiteBaseUrlDraft] = useState("");
+  const [savingBaseUrl, setSavingBaseUrl] = useState(false);
+  const [baseUrlSaved, setBaseUrlSaved] = useState(false);
 
-  const enabledModules = useMemo(() => settings.siteModules.filter((m) => m.enabled), [settings.siteModules]);
-  const editableModules = useMemo(
-    () => settings.siteModules.map((module, index) => ({ ...module, index })),
-    [settings.siteModules]
-  );
   const activeSection = useMemo<"layout" | "metrics" | "industry">(() => {
     if (location.pathname.startsWith("/personalization/metrics")) {
       return "metrics";
@@ -76,10 +68,34 @@ export default function Personalization() {
     };
   }, [accessToken, canEdit, replaceSettings]);
 
+  useEffect(() => {
+    setSuperSiteBaseUrlDraft(settings.superSiteBaseUrl ?? "");
+  }, [settings.superSiteBaseUrl]);
+
+  async function handleSaveSuperSiteBaseUrl() {
+    setSavingBaseUrl(true);
+    setSettingsError(null);
+
+    try {
+      const payload = await updateMySuperSiteSettings({
+        superSiteBaseUrl: superSiteBaseUrlDraft,
+      });
+      replaceSettings(payload);
+      setBaseUrlSaved(true);
+      window.setTimeout(() => {
+        setBaseUrlSaved(false);
+      }, 1500);
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "保存超级站前台地址失败");
+    } finally {
+      setSavingBaseUrl(false);
+    }
+  }
+
   if (!canEdit) {
     return (
       <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-        当前角色无权访问超级站配置中心。该模块仅主公司可见。
+        当前角色无权访问超级站配置中心。
       </div>
     );
   }
@@ -101,69 +117,25 @@ export default function Personalization() {
       {activeSection === "layout" ? (
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>站点模板与模块布局</CardTitle>
-              <Badge variant="gray">仅影响超级站前台显示，不改后台模板</Badge>
-            </div>
+            <CardTitle>超级站地址设置</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <div className="xl:col-span-5 space-y-4">
+          <CardContent className="space-y-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <label className="space-y-1">
-                <span className="text-xs font-medium text-zinc-300">企业名称</span>
-                <Input value={settings.enterpriseName} onChange={(e) => setEnterpriseName(e.target.value)} />
+                <span className="text-xs font-medium text-zinc-300">超级站前台地址</span>
+                <Input
+                  value={superSiteBaseUrlDraft}
+                  onChange={(e) => setSuperSiteBaseUrlDraft(e.target.value)}
+                  placeholder="http://localhost:5173/"
+                />
               </label>
-
-              <label className="space-y-1">
-                <span className="text-xs font-medium text-zinc-300">超级站模板</span>
-                <Select value={settings.siteTemplate} onChange={(e) => setSiteTemplate(e.target.value as SiteTemplateKey)}>
-                  <option value="standard">标准模板</option>
-                  <option value="split">双区模板</option>
-                </Select>
-              </label>
-
-              <div>
-                <div className="mb-2 text-xs font-medium text-zinc-300">模块启停与顺序</div>
-                <div className="space-y-2">
-                  {editableModules.map((module, index) => (
-                    <div key={module.key} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-zinc-500">#{index + 1}</span>
-                        <input type="checkbox" checked={module.enabled} onChange={() => toggleSiteModule(module.key)} />
-                        <span className="text-sm text-zinc-100">{module.label}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="secondary" size="sm" disabled={index === 0} onClick={() => reorderSiteModules(index, index - 1)}>
-                          上移
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={index === editableModules.length - 1}
-                          onClick={() => reorderSiteModules(index, index + 1)}
-                        >
-                          下移
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              <div className="mt-2 text-xs text-zinc-400">
+                保存后，“上传超级站”会直接按这里的地址打开当前账号对应的前台站点。
               </div>
-            </div>
-
-            <div className="xl:col-span-7">
-              <div className="mb-2 text-xs font-medium text-zinc-300">超级站预览摘要</div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                  <div className="text-sm font-semibold text-zinc-100">{settings.enterpriseName || "企业名称"}</div>
-                  <Badge variant="amber">{settings.siteTemplate === "split" ? "双区模板" : "标准模板"}</Badge>
-                </div>
-                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                  {enabledModules.map((module) => (
-                    <div key={module.key} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-zinc-300">
-                      {module.label}
-                    </div>
-                  ))}
-                </div>
+              <div className="mt-3 flex justify-end">
+                <Button size="sm" onClick={() => void handleSaveSuperSiteBaseUrl()} disabled={savingBaseUrl}>
+                  {savingBaseUrl ? "保存中..." : baseUrlSaved ? "已保存" : "保存地址"}
+                </Button>
               </div>
             </div>
           </CardContent>

@@ -36,3 +36,9 @@
 - 会话创建接口需要：`visitorSessionId`，可选 `visitorName`、`visitorContact`、`sourcePage`。
 - 发消息接口只需要 `message`；后端返回完整会话，消息列表已包含访客消息、AI 回复、系统消息。
 - 旧稿聊天面板当前是纯前端模拟回复，替换为真实客服接口时可直接重绘 `messages`，无需自己拼接假消息。
+
+## 2026-05-07 去 iframe 承载补充
+- 当前首页可在不改 UI 和交互的前提下，去掉 `iframe`：做法是把旧稿拆成“静态 DOM + CSS + 外部运行脚本”，由 React 直接承载。
+- 旧稿核心依赖只有 `gsap / ScrollTrigger / Lenis / p5` 外链库和一份全局脚本，适合按顺序动态加载，不必重写动画逻辑。
+- 旧稿脚本含大量全局 DOM 查询、`window` 监听和 `p5` 全局 `setup/draw`；在 React 开发态必须避免双初始化，否则容易重复挂事件或重复创建动画实例。
+- `legacy-home.html` 里存在两处旧样式写法 `; saturate(...)`，浏览器容忍但打包器会报错；迁移到 `css` 文件后需要改成 `backdrop-filter` 写法，视觉不变。

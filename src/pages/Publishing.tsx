@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
@@ -6,6 +6,7 @@ import Select from "@/components/ui/Select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import { usePageMeta } from "@/hooks/usePageMeta";
+import { getMySuperSiteSettings } from "@/lib/superSiteSettings";
 import { useAuthStore } from "@/store/authStore";
 import {
   listPublishingContents,
@@ -30,6 +31,16 @@ export const defaultPublishPlatforms = publishPlatformOptions
   .filter((item) => item.enabled)
   .map((item) => item.key);
 
+function mergeJobsById(current: PublishingJobItem[], incoming: PublishingJobItem[]) {
+  const merged = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) {
+    merged.set(item.id, item);
+  }
+  return Array.from(merged.values()).sort(
+    (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+  );
+}
+
 function platformLabel(platform: LeadPlatformStyle) {
   if (platform === "xiaohongshu") return "小红书";
   if (platform === "douyin") return "抖音";
@@ -47,6 +58,7 @@ function contentTypeLabel(type: PublishingContentItem["contentType"]) {
 export default function Publishing() {
   usePageMeta("获客内容池");
   const accessToken = useAuthStore((s) => s.accessToken);
+  const user = useAuthStore((s) => s.user);
 
   const [contents, setContents] = useState<PublishingContentItem[]>([]);
   const [publishJobs, setPublishJobs] = useState<PublishingJobItem[]>([]);
@@ -58,6 +70,22 @@ export default function Publishing() {
   const [hint, setHint] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [superSiteBaseUrl, setSuperSiteBaseUrl] = useState("");
+
+  const refreshPublishJobs = useCallback(
+    async (silent = false) => {
+      if (!accessToken) return;
+      try {
+        const jobResult = await listPublishingJobs({ accessToken, page: 1, limit: 20 });
+        setPublishJobs(jobResult.items);
+      } catch (error) {
+        if (!silent) {
+          setHint(error instanceof Error ? error.message : "加载发布记录失败");
+        }
+      }
+    },
+    [accessToken],
+  );
 
   useEffect(() => {
     if (!accessToken) {
@@ -97,6 +125,51 @@ export default function Publishing() {
       } finally {
         if (!cancelled) {
           setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
+
+  const hasPendingPublishJobs = useMemo(
+    () => publishJobs.some((job) => job.status === "queued" || job.status === "running"),
+    [publishJobs],
+  );
+
+  useEffect(() => {
+    if (!accessToken || !hasPendingPublishJobs) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshPublishJobs(true);
+    }, 3000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [accessToken, hasPendingPublishJobs, refreshPublishJobs]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      setSuperSiteBaseUrl("");
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const settings = await getMySuperSiteSettings();
+        if (!cancelled) {
+          setSuperSiteBaseUrl(settings.superSiteBaseUrl?.trim() ?? "");
+        }
+      } catch {
+        if (!cancelled) {
+          setSuperSiteBaseUrl("");
         }
       }
     })();
@@ -193,13 +266,48 @@ export default function Publishing() {
         contentId: publishTarget,
         targets,
       });
-      setPublishJobs((prev) => [...result.jobs, ...prev]);
+      setPublishJobs((prev) => mergeJobsById(prev, result.jobs));
       setPublishTarget(null);
-      setHint("已创建发布任务，浏览器将自动打开并执行发布。");
+      setHint("已创建发布任务，后台正在异步执行，可在下方发布记录里查看实时状态。");
+      void refreshPublishJobs(true);
     } catch (error) {
       setHint(error instanceof Error ? error.message : "创建发布任务失败");
     } finally {
       setPublishing(false);
+    }
+  }
+
+  function hasSuperSiteImages(item: PublishingContentItem) {
+    return Boolean(item.coverImage) || (Array.isArray(item.images) && item.images.length > 0);
+  }
+
+  function openSuperSiteEditor(item: PublishingContentItem) {
+    if (!accessToken || !user?.id) {
+      setHint("当前登录状态无效，请重新登录后再试。");
+      return;
+    }
+    if (!hasSuperSiteImages(item)) {
+      setHint("当前内容没有可上传到超级站的图片素材。");
+      return;
+    }
+    if (!superSiteBaseUrl) {
+      setHint("请先到超级站配置中心填写“超级站前台地址”后再使用上传超级站。");
+      return;
+    }
+
+    try {
+      const url = new URL(superSiteBaseUrl);
+      url.searchParams.set("userId", user.id);
+      url.searchParams.set("siteEditor", "1");
+      url.searchParams.set("contentId", item.id);
+      url.searchParams.set("editorToken", accessToken);
+      const opened = window.open(url.toString(), "_blank", "noopener,noreferrer");
+      if (!opened) {
+        window.location.assign(url.toString());
+      }
+      setHint("已打开超级站编辑页，请在前台选择图片后点击对应位置，再统一保存。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "超级站前台地址无效");
     }
   }
 
@@ -256,8 +364,13 @@ export default function Publishing() {
                           <Button size="sm" onClick={() => openPublishModal(item.id)}>
                             一键发布
                           </Button>
-                          <Button size="sm" variant="secondary" disabled>
-                            超级站暂未接通
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={!hasSuperSiteImages(item)}
+                            onClick={() => openSuperSiteEditor(item)}
+                          >
+                            上传超级站
                           </Button>
                         </div>
                       </Td>

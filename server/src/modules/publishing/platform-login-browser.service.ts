@@ -413,6 +413,12 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     input: PlatformDraftSaveInput,
     uploadFiles: string[],
   ) {
+    const xiaohongshuEditorSelectors = [
+      'div.tiptap.ProseMirror',
+      'div[role="textbox"]',
+      'div[contenteditable="true"]',
+      '[class*="editor"] [contenteditable="true"]',
+    ];
     await this.enterXiaohongshuImagePublish(page);
     await this.uploadFiles(page, uploadFiles, 'image', [
       'input[type="file"][accept*="image/png"]',
@@ -429,13 +435,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       'textarea[placeholder*="标题"]',
       'input[type="text"]',
     ], input.title).catch(() => undefined);
-    await this.fillEditor(page, [
-      'div.tiptap.ProseMirror',
-      'div[role="textbox"]',
-      'div[contenteditable="true"]',
-      '[class*="editor"] [contenteditable="true"]',
-    ], input.body).catch(() => undefined);
-    await this.tryAppendXiaohongshuTopics(page, input.tags);
+    const editor = await this.fillEditor(page, xiaohongshuEditorSelectors, input.body).catch(() => null);
+    await this.appendPlainTagsAfterBody(page, editor, input.tags);
     await this.clickXiaohongshuPublish(page);
     await this.waitForActionFinished(page, {
       successHints: ['发布成功', '笔记发布成功', '审核中', '发布中', '笔记管理'],
@@ -465,6 +466,12 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     input: PlatformDraftSaveInput,
     uploadFiles: string[],
   ) {
+    const xiaohongshuEditorSelectors = [
+      'div.tiptap.ProseMirror',
+      'div[role="textbox"]',
+      'div[contenteditable="true"]',
+      '[class*="editor"] [contenteditable="true"]',
+    ];
     await this.enterXiaohongshuVideoPublish(page);
     await this.uploadFiles(page, uploadFiles, 'video');
     await this.waitForUploadSettled(page);
@@ -478,17 +485,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       ],
       input.title,
     ).catch(() => undefined);
-    await this.fillEditor(
-      page,
-      [
-        'div.tiptap.ProseMirror',
-        'div[role="textbox"]',
-        'div[contenteditable="true"]',
-        '[class*="editor"] [contenteditable="true"]',
-      ],
-      input.body,
-    ).catch(() => undefined);
-    await this.tryAppendXiaohongshuTopics(page, input.tags);
+    const editor = await this.fillEditor(page, xiaohongshuEditorSelectors, input.body).catch(() => null);
+    await this.appendPlainTagsAfterBody(page, editor, input.tags);
     await this.clickXiaohongshuPublish(page);
     await this.waitForActionFinished(page, {
       successHints: ['发布成功', '笔记发布成功', '审核中', '发布中', '笔记管理'],
@@ -502,59 +500,86 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     input: PlatformDraftSaveInput,
     uploadFiles: string[],
   ) {
+    let douyinBody = input.body;
     await this.prepareDouyinPublishMode(page, Boolean(input.videoUrl));
     if (!input.videoUrl) {
-      await this.clickFirst(page, [
-        'button:has-text("上传图文")',
-        '.container-drag-upload-tL99XD button',
-        'text=上传图文',
+      await this.openDouyinImageUpload(page).catch(() => undefined);
+    }
+    try {
+      await this.uploadFiles(
+        page,
+        uploadFiles,
+        input.videoUrl ? 'video' : 'image',
+        input.videoUrl
+          ? undefined
+          : [
+              'input[type="file"][accept*="image/png"]',
+              'input[type="file"][accept*="image/jpeg"]',
+              'input[type="file"][accept*="image/webp"]',
+              'input[type="file"][accept*="image/*"]',
+              'input[accept*="image/png"]',
+              'input[accept*="image/jpeg"]',
+              'input[accept*="image/webp"]',
+              'input[accept*="image/*"]',
+              'input[type="file"][multiple]',
+            ],
+        input.videoUrl ? true : false,
+      );
+    } catch (error) {
+      if (input.videoUrl) {
+        throw error;
+      }
+      await this.prepareDouyinPublishMode(page, false);
+      await this.openDouyinImageUpload(page).catch(() => undefined);
+      await this.uploadFiles(page, uploadFiles, 'image', [
+        'input[type="file"][accept*="image/png"]',
+        'input[type="file"][accept*="image/jpeg"]',
+        'input[type="file"][accept*="image/webp"]',
+        'input[type="file"][accept*="image/*"]',
+        'input[accept*="image/png"]',
+        'input[accept*="image/jpeg"]',
+        'input[accept*="image/webp"]',
+        'input[accept*="image/*"]',
+        'input[type="file"][multiple]',
+        'input[type="file"]',
       ]);
     }
-    await this.uploadFiles(
-      page,
-      uploadFiles,
-      input.videoUrl ? 'video' : 'image',
-      input.videoUrl
-        ? undefined
-        : [
-            'input[type="file"][accept*="image/png"]',
-            'input[type="file"][accept*="image/jpeg"]',
-            'input[type="file"][accept*="image/webp"]',
-            'input[type="file"][accept*="image/*"]',
-            'input[accept*="image/png"]',
-            'input[accept*="image/jpeg"]',
-            'input[accept*="image/webp"]',
-            'input[accept*="image/*"]',
-          ],
-      input.videoUrl ? true : false,
-    );
-    await this.waitForUploadSettled(page);
-    await this.fillFirst(page, [
-      'input[placeholder="添加作品标题"]',
-      'input[placeholder*="作品标题"]',
-      'textarea[placeholder*="作品标题"]',
-      'input.semi-input[placeholder*="添加作品标题"]',
-      'input[placeholder*="添加标题"]',
-      'input[placeholder*="标题"]',
-      'textarea[placeholder*="标题"]',
-      'input[maxlength]',
-    ], input.title);
-    await this.fillEditor(page, [
-      'div.zone-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
-      'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
-      'textarea[placeholder*="作品简介"]',
-      'textarea[placeholder*="添加简介"]',
-      'textarea[placeholder*="添加描述"]',
-      'textarea[placeholder*="作品"]',
-      'textarea[placeholder*="描述"]',
-      'div[contenteditable="true"][data-placeholder*="作品"]',
-      'div[contenteditable="true"][data-placeholder*="描述"]',
-      '[data-e2e*="content"] textarea',
-      '[class*="DraftEditor"] [contenteditable="true"]',
-      '[class*="editor-kit"] [contenteditable="true"]',
-      'div[contenteditable="true"]',
-    ], input.body);
-    await this.tryAppendDouyinTopics(page, input.tags);
+    await this.waitForDouyinUploadSettled(page, Boolean(input.videoUrl));
+    const normalizedTitle = input.title.trim();
+    if (normalizedTitle) {
+      const filledTitle = await this.fillFirst(
+        page,
+        [
+          'input[placeholder="添加作品标题"]',
+          'input[placeholder*="作品标题"]',
+          'textarea[placeholder*="作品标题"]',
+          'input.semi-input[placeholder*="添加作品标题"]',
+          'input[placeholder*="添加标题"]',
+          'input[placeholder*="标题"]',
+          'textarea[placeholder*="标题"]',
+          'input[maxlength]',
+        ],
+        normalizedTitle,
+      )
+        .then(() => true)
+        .catch((error) => {
+          if (error instanceof ConflictException) {
+            this.logger.warn('[douyin-title] title input not found, fallback to editor first line');
+            return false;
+          }
+          throw error;
+        });
+
+      if (!filledTitle) {
+        douyinBody = input.body.trim()
+          ? `${normalizedTitle}\n${input.body.trim()}`
+          : normalizedTitle;
+      }
+    }
+
+    const editor = await this.fillDouyinDescription(page, douyinBody);
+    await this.appendPlainTagsAfterBody(page, editor, input.tags);
+    await this.selectDouyinNoDeclaration(page);
     const publishButton = await this.findAndHighlightFirst(page, [
       'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
       'button:has-text("发布")',
@@ -563,11 +588,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     ]);
     await page.waitForTimeout(800);
     await this.humanClick(publishButton);
-    await this.waitForActionFinished(page, {
-      successHints: ['发布成功', '作品发布成功', '发布完成', '审核中', '正在审核', '已发布'],
-      failureHints: ['发布失败', '请完善内容', '请先上传', '请先添加'],
-      timeoutErrorMessage: '未识别到抖音发布成功或进入发布结果页，请确认页面状态',
-    });
+    await this.waitForDouyinPublishFinished(page);
   }
 
   private async publishWechatMpImagePost(
@@ -1129,9 +1150,32 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         await page.waitForTimeout(1500);
       }
 
-      await this.clickFirst(page, ['text=发布图文']);
+      await this.clickFirst(page, [
+        'text=发布图文',
+        'button:has-text("发布图文")',
+        '[role="tab"]:has-text("发布图文")',
+        'text=图文',
+      ]).catch(() => undefined);
       await page.waitForTimeout(1500);
-      await this.ensureDouyinImageModeReady(page);
+      try {
+        await this.ensureDouyinImageModeReady(page);
+      } catch {
+        await page.goto('https://creator.douyin.com/creator-micro/content/publish', {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000,
+        });
+        await page.waitForTimeout(1500);
+        await this.clickFirst(page, ['text=高清发布']).catch(() => undefined);
+        await page.waitForTimeout(1200);
+        await this.clickFirst(page, [
+          'text=发布图文',
+          'button:has-text("发布图文")',
+          '[role="tab"]:has-text("发布图文")',
+          'text=图文',
+        ]).catch(() => undefined);
+        await page.waitForTimeout(1500);
+        await this.ensureDouyinImageModeReady(page);
+      }
       return;
     }
 
@@ -1142,9 +1186,20 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     await this.clickFirst(page, ['text=发布视频']).catch(() => undefined);
     await page.waitForTimeout(1000);
-    await page
+    const ready = await page
       .waitForSelector('input[type="file"][accept*="video"]', { timeout: 8000 })
-      .catch(() => undefined);
+      .then(() => true)
+      .catch(() => false);
+    if (!ready) {
+      await page.goto('https://creator.douyin.com/creator-micro/content/upload', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+      await page.waitForTimeout(1500);
+      await page
+        .waitForSelector('input[type="file"][accept*="video"]', { timeout: 8000 })
+        .catch(() => undefined);
+    }
   }
 
   private async ensureDouyinImageModeReady(page: Page) {
@@ -1189,7 +1244,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   ) {
     const normalized = value.trim();
     if (!normalized) {
-      return;
+      return null;
     }
 
     const locator = await this.findFirstLocator(page, selectors, true);
@@ -1199,9 +1254,83 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       } else {
         await this.humanType(locator, normalized, { clearExisting: true });
       }
-      return;
+      return locator;
     }
 
+    throw new ConflictException('未找到正文输入框');
+  }
+
+  private async fillDouyinDescription(page: Page, value: string) {
+    const douyinEditorSelectors = [
+      'div.zone-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
+      'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
+      'div.zone-container[contenteditable="true"][data-placeholder*="描述"]',
+      'div.zone-container[contenteditable="true"][data-placeholder*="作品"]',
+      'div.zone-container [contenteditable="true"]',
+      '[data-e2e*="publish"] [contenteditable="true"]',
+      '[data-e2e*="content"] [contenteditable="true"]',
+      '[data-e2e*="publish"] textarea',
+      '[data-e2e*="content"] textarea',
+      'div[role="textbox"]',
+      'textarea[placeholder*="作品简介"]',
+      'textarea[placeholder*="添加简介"]',
+      'textarea[placeholder*="添加描述"]',
+      'textarea[placeholder*="作品"]',
+      'textarea[placeholder*="描述"]',
+      'div[contenteditable="true"][data-placeholder*="作品"]',
+      'div[contenteditable="true"][data-placeholder*="描述"]',
+      '[class*="DraftEditor"] [contenteditable="true"]',
+      '[class*="editor-kit"] [contenteditable="true"]',
+      'div[contenteditable="plaintext-only"]',
+      'div[contenteditable="true"]',
+    ];
+    const douyinEditorTriggerSelectors = [
+      'div.zone-container:has-text("添加作品描述")',
+      'div.zone-container:has-text("添加作品简介")',
+      'div:has-text("添加作品描述...")',
+      'div:has-text("添加作品描述")',
+      'div:has-text("添加作品简介")',
+      'div:has-text("作品描述")',
+      'div:has-text("作品简介")',
+      'text=添加作品描述',
+      'text=添加作品简介',
+      'text=作品描述',
+      'text=作品简介',
+    ];
+    const normalized = value.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const locator = await this.findFirstLocator(page, douyinEditorSelectors, true);
+      if (locator) {
+        await this.fillRichTextValue(page, douyinEditorSelectors, normalized, '未找到正文输入框', {
+          preferHumanType: true,
+          perCharDelay: 85,
+        });
+        return locator;
+      }
+
+      const trigger = await this.findFirstLocator(page, douyinEditorTriggerSelectors, true);
+      if (trigger) {
+        await this.humanClick(trigger).catch(() => undefined);
+        await page.waitForTimeout(400);
+        const activatedLocator = await this.findFirstLocator(page, douyinEditorSelectors, true);
+        if (activatedLocator) {
+          await this.fillRichTextValue(page, douyinEditorSelectors, normalized, '未找到正文输入框', {
+            preferHumanType: true,
+            perCharDelay: 85,
+          });
+          return activatedLocator;
+        }
+      }
+
+      await page.waitForTimeout(600);
+    }
+
+    const pageText = (await this.readPageText(page)).slice(0, 240);
+    this.logger.warn(`[douyin-editor] description editor not found current=${page.url()} body=${pageText}`);
     throw new ConflictException('未找到正文输入框');
   }
 
@@ -1353,12 +1482,12 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await this.humanClickFast(publishButton);
   }
 
-  private async tryAppendDouyinTopics(page: Page, tags: string[]) {
+  private async appendDouyinTopicsAfterBody(page: Page, editor: Locator | null, tags: string[]) {
     const normalizedTags = tags
       .map((item) => item.replace(/^#+/, '').trim())
       .filter(Boolean);
 
-    if (normalizedTags.length === 0) {
+    if (normalizedTags.length === 0 || !editor) {
       return;
     }
 
@@ -1372,47 +1501,42 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       return;
     }
 
-    await this.moveCursorToTagLine(page, [
-      'div.zone-container[contenteditable="true"][data-placeholder="娣诲姞浣滃搧鎻忚堪..."]',
-      'div[contenteditable="true"][data-placeholder="娣诲姞浣滃搧鎻忚堪..."]',
-      '[class*="editor-kit"] [contenteditable="true"]',
-      'div[contenteditable="true"]',
-    ]);
+    await this.moveCursorToTagLine(page, undefined, editor);
 
     for (const tag of normalizedTags) {
-      await topicButton.click({ timeout: 3000 }).catch(() => undefined);
-      await page.waitForTimeout(250);
-
-      const topicInput = await this.findFirstLocator(page, [
-        'input[placeholder*="话题"]',
-        'input[placeholder*="搜索"]',
-        'input[placeholder*="输入"]',
-        '.mention-suggest-mount-dom input',
-        '[class*="topic"] input',
-      ], true);
-
-      if (topicInput) {
-        await this.humanType(topicInput, tag, { clearExisting: true, perCharDelay: 60 });
-      } else {
-        const editor = await this.findFirstLocator(page, [
-          'div.zone-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
-          'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
-          '[class*="editor-kit"] [contenteditable="true"]',
-          'div[contenteditable="true"]',
-        ], true);
-
-        if (!editor) {
-          return;
-        }
-
-        await this.humanClick(editor);
-        await page.keyboard.type(tag, { delay: 60 }).catch(() => undefined);
-      }
-
-      await page.waitForTimeout(500);
-      await this.clickDouyinTopicOption(page, tag);
+      await this.humanClick(editor).catch(() => undefined);
+      await page.keyboard.press('Control+End').catch(() => undefined);
+      await page.waitForTimeout(100);
+      await this.humanClick(topicButton).catch(() => undefined);
+      await page.waitForTimeout(300);
+      await page.keyboard.type(tag, { delay: 60 }).catch(() => undefined);
       await page.waitForTimeout(400);
+      const applied = await this.clickDouyinTopicOption(page, editor, tag);
+      if (applied) {
+        await this.finalizeDouyinTagInput(page, editor);
+      } else {
+        await this.fallbackAppendPlainTag(page, editor, tag);
+      }
+      await page.waitForTimeout(300);
     }
+  }
+
+  private async appendPlainTagsAfterBody(page: Page, editor: Locator | null, tags: string[]) {
+    const normalizedTags = Array.from(
+      new Set(tags.map((item) => item.replace(/^#+/, '').trim()).filter(Boolean)),
+    );
+    if (normalizedTags.length === 0 || !editor) {
+      return;
+    }
+
+    await this.moveCursorToTagLine(page, undefined, editor);
+    await this.humanClick(editor).catch(() => undefined);
+    await page.keyboard
+      .type(
+        normalizedTags.map((tag) => `#${tag}`).join(' '),
+        { delay: 60 },
+      )
+      .catch(() => undefined);
   }
 
   private async enterXiaohongshuImagePublish(page: Page) {
@@ -1701,80 +1825,6 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await this.humanPauseFast(page, 300, 520);
   }
 
-  private async tryAppendXiaohongshuTopics(page: Page, tags: string[]) {
-    const normalizedTags = Array.from(
-      new Set(tags.map((item) => item.replace(/^#+/, '').trim()).filter(Boolean)),
-    );
-
-    if (normalizedTags.length === 0) {
-      return;
-    }
-
-    const editor = await this.findAndHighlightFirst(page, [
-      'div.tiptap.ProseMirror',
-      'div[role="textbox"]',
-      'div[contenteditable="true"]',
-    ]);
-
-    await this.moveCursorToTagLine(page, undefined, editor);
-
-    for (const tag of normalizedTags) {
-      await this.humanClick(editor);
-      await page.keyboard.type(`#${tag}`, { delay: 60 }).catch(() => undefined);
-      await page.waitForTimeout(500);
-      const clicked = await this.clickFirstVisibleXiaohongshuTopicCandidate(page, tag);
-      if (!clicked) {
-        this.logger.warn(`[xiaohongshu-topic] candidate not found for tag=${tag}`);
-      }
-      await page.waitForTimeout(300);
-    }
-  }
-
-  private async clickFirstVisibleXiaohongshuTopicCandidate(page: Page, tag?: string) {
-    const excludedTexts = ['#话题', '# 话题', '话题', '@用户', '@ 用户', '用户', '表情', '更多'];
-    const selectors = [
-      '[class*="suggest"] [role="option"]',
-      '[class*="topic"] [role="option"]',
-      '[class*="popover"] [class*="item"]',
-      '[class*="panel"] [class*="item"]',
-      'div[role="listbox"] > *',
-    ];
-    const normalizedTag = tag?.replace(/^#+/, '').trim() || '';
-    const preferredMatchers = normalizedTag
-      ? [
-          new RegExp(`#\\s*${this.escapeRegex(normalizedTag)}`),
-          new RegExp(this.escapeRegex(normalizedTag)),
-        ]
-      : [];
-
-    for (const selector of selectors) {
-      const locator = page.locator(selector);
-      const count = await locator.count().catch(() => 0);
-      for (let index = 0; index < count; index += 1) {
-        const candidate = locator.nth(index);
-        const text = ((await candidate.textContent().catch(() => '')) || '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (!text || excludedTexts.some((item) => text.includes(item))) {
-          continue;
-        }
-
-        const isVisible = await candidate.isVisible().catch(() => false);
-        if (!isVisible) {
-          continue;
-        }
-        if (preferredMatchers.length > 0 && !preferredMatchers.some((matcher) => matcher.test(text))) {
-          continue;
-        }
-
-        await this.humanClick(candidate);
-        return true;
-      }
-    }
-
-    return false;
-  }
-
   private async clickXiaohongshuPublish(page: Page) {
     await page
       .evaluate(() => {
@@ -1792,7 +1842,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await this.humanClick(publishButton);
   }
 
-  private async clickDouyinTopicOption(page: Page, tag: string) {
+  private async clickDouyinTopicOption(page: Page, editor: Locator, tag: string) {
     const normalizedTag = tag.replace(/^#+/, '').trim();
     const exactMatchers = [
       new RegExp(`^\\s*${this.escapeRegex(normalizedTag)}\\s*$`),
@@ -1814,7 +1864,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     for (const group of topicNameGroups) {
       for (const matcher of exactMatchers) {
         if (await this.clickFirstVisibleMatchingText(group, matcher)) {
-          return;
+          await page.waitForTimeout(350);
+          return this.hasAppliedDouyinTopic(page, editor, normalizedTag);
         }
       }
     }
@@ -1822,14 +1873,23 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     for (const group of topicNameGroups) {
       for (const matcher of partialMatchers) {
         if (await this.clickFirstVisibleMatchingText(group, matcher)) {
-          return;
+          await page.waitForTimeout(350);
+          return this.hasAppliedDouyinTopic(page, editor, normalizedTag);
         }
       }
+    }
+
+    await page.keyboard.press('Enter').catch(() => undefined);
+    await page.waitForTimeout(250);
+    if (await this.hasAppliedDouyinTopic(page, editor, normalizedTag)) {
+      return true;
     }
 
     await page.keyboard.press('ArrowDown').catch(() => undefined);
     await page.waitForTimeout(150);
     await page.keyboard.press('Enter').catch(() => undefined);
+    await page.waitForTimeout(350);
+    return this.hasAppliedDouyinTopic(page, editor, normalizedTag);
   }
 
   private escapeRegex(value: string) {
@@ -1883,6 +1943,63 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await page.waitForTimeout(120);
   }
 
+  private async finalizeDouyinTagInput(page: Page, editor: Locator) {
+    await page.keyboard.press('Escape').catch(() => undefined);
+    await page.waitForTimeout(120);
+    await this.humanClick(editor).catch(() => undefined);
+    await page.keyboard.press('Control+End').catch(() => undefined);
+    await page.waitForTimeout(100);
+  }
+
+  private async fallbackAppendPlainTag(page: Page, editor: Locator, tag: string) {
+    await page.keyboard.press('Escape').catch(() => undefined);
+    await page.waitForTimeout(120);
+    await this.humanClick(editor).catch(() => undefined);
+    await page.keyboard.press('Control+End').catch(() => undefined);
+    await page.keyboard.type(`#${tag} `, { delay: 60 }).catch(() => undefined);
+    this.logger.warn(`[douyin-topic] fallback to plain tag for tag=${tag}`);
+  }
+
+  private async hasAppliedDouyinTopic(page: Page, editor: Locator, tag: string) {
+    if (await this.editorContainsTag(editor, tag)) {
+      return true;
+    }
+
+    const appliedTopicLocators = [
+      page.locator('.zone-container [class*="tag-hash"]:not(.mention-suggest-mount-dom *)'),
+      page.locator('[class*="editor"] [class*="tag-hash"]:not(.mention-suggest-mount-dom *)'),
+      page.locator('[data-e2e*="content"] [class*="tag"]:not(.mention-suggest-mount-dom *)'),
+      page.locator('[class*="content"] [class*="topic"]:not(.mention-suggest-mount-dom *)'),
+    ];
+
+    for (const locator of appliedTopicLocators) {
+      const count = await locator.count().catch(() => 0);
+      for (let index = 0; index < count; index += 1) {
+        const text = ((await locator.nth(index).textContent().catch(() => '')) || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (text.includes(tag) || text.includes(`#${tag}`)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private async editorContainsTag(editor: Locator, tag: string) {
+    const currentValue = await editor
+      .evaluate((node) => {
+        if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+          return node.value;
+        }
+        return node.textContent ?? '';
+      })
+      .catch(() => '');
+    const normalizedText = currentValue.replace(/\s+/g, ' ').trim();
+    return normalizedText.includes(tag) || normalizedText.includes(`#${tag}`);
+  }
+
   private async clickFirst(page: LocatorContext, selectors: string[]) {
     const locator = await this.findFirstLocator(page, selectors, true);
     if (locator) {
@@ -1916,6 +2033,73 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   private async waitForUploadSettled(page: Page) {
     await page.waitForTimeout(2500);
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => undefined);
+  }
+
+  private async openDouyinImageUpload(page: Page) {
+    await this.clickFirst(page, [
+      'button:has-text("上传图文")',
+      '.container-drag-upload-tL99XD button',
+      '[role="button"]:has-text("上传图文")',
+      'text=上传图文',
+      'text=上传图片',
+    ]);
+    await page.waitForTimeout(800);
+  }
+
+  private async waitForDouyinUploadSettled(page: Page, hasVideo: boolean) {
+    const timeoutMs = hasVideo ? 45000 : 25000;
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const pageText = await this.readPageText(page);
+      const matchedFailure = ['上传失败', '上传出错', '上传异常', '重新上传失败', '请重新上传'].find(
+        (hint) => pageText.includes(hint),
+      );
+      if (matchedFailure) {
+        throw new ConflictException(`保存草稿失败：${matchedFailure}`);
+      }
+
+      const previewReady = await this.findFirstLocator(
+        page,
+        hasVideo
+          ? [
+              'video',
+              '[class*="video"] video',
+              '[class*="upload"] video',
+              'button:has-text("重新上传")',
+              '[role="button"]:has-text("重新上传")',
+              'text=重新上传',
+            ]
+          : [
+              'img',
+              '[class*="upload"] img',
+              '[class*="preview"] img',
+              '[style*="background-image"]',
+              'button:has-text("重新上传")',
+              '[role="button"]:has-text("重新上传")',
+              'text=重新上传',
+            ],
+        true,
+      );
+      if (previewReady) {
+        return;
+      }
+
+      const stillUploading = ['上传中', '处理中', '转码中', '上传进度', '%'].some((hint) =>
+        pageText.includes(hint),
+      );
+      const placeholderGone = hasVideo
+        ? !pageText.includes('上传视频') || pageText.includes('添加作品标题') || pageText.includes('添加作品描述')
+        : !pageText.includes('上传图文') || pageText.includes('添加作品标题') || pageText.includes('添加作品描述');
+
+      if (!stillUploading && placeholderGone) {
+        return;
+      }
+
+      await page.waitForTimeout(1000);
+    }
+
+    throw new ConflictException(hasVideo ? '未识别到抖音视频上传完成状态' : '未识别到抖音图文上传完成状态');
   }
 
   private async waitForWechatMpUploadSettled(page: LocatorContext) {
@@ -2153,6 +2337,66 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     throw new ConflictException(options.timeoutErrorMessage);
   }
 
+  private async waitForDouyinPublishFinished(page: Page) {
+    const timeoutMs = 30000;
+    const successHints = ['发布成功', '作品发布成功', '发布完成', '审核中', '正在审核', '已发布', '作品管理'];
+    const failureHints = ['发布失败', '请完善内容', '请先上传', '请先添加', '上传失败', '校验失败'];
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const pageText = await this.readPageText(page);
+      const matchedFailure = failureHints.find((hint) => pageText.includes(hint));
+      if (matchedFailure) {
+        throw new ConflictException(`保存草稿失败：${matchedFailure}`);
+      }
+
+      const matchedSuccess = successHints.find((hint) => pageText.includes(hint));
+      if (matchedSuccess || this.isDouyinPublishResultPage(page.url())) {
+        return;
+      }
+
+      await page.waitForTimeout(1000);
+    }
+
+    throw new ConflictException('未识别到抖音发布成功或进入结果页，请确认页面状态');
+  }
+
+  private async selectDouyinNoDeclaration(page: Page) {
+    const declarationSelect = await this.findFirstLocator(
+      page,
+      [
+        'div.selectBox-buZRzi',
+        '[class*="selectBox"]:has-text("请选择自主声明")',
+        '[class*="selectText"]:has-text("请选择自主声明")',
+        'text=请选择自主声明',
+      ],
+      true,
+    );
+    if (!declarationSelect) {
+      return;
+    }
+
+    await this.humanClick(declarationSelect).catch(() => undefined);
+    await page.waitForTimeout(300);
+
+    const noDeclarationOption = await this.findFirstLocator(
+      page,
+      [
+        'label.semi-radio:has-text("无需添加自主声明")',
+        'label:has-text("无需添加自主声明")',
+        '[class*="semi-radio"]:has-text("无需添加自主声明")',
+        'text=无需添加自主声明',
+      ],
+      true,
+    );
+    if (!noDeclarationOption) {
+      return;
+    }
+
+    await this.humanClick(noDeclarationOption).catch(() => undefined);
+    await page.waitForTimeout(400);
+  }
+
   private isPublishResultPage(currentUrl: string) {
     if (this.isWechatMpPublishResultPage(currentUrl)) {
       return true;
@@ -2160,6 +2404,12 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     return ['/content/manage', '/content/article', '/content?', '/profile', '/article/manage'].some((item) =>
       currentUrl.includes(item),
+    );
+  }
+
+  private isDouyinPublishResultPage(currentUrl: string) {
+    return ['/creator-micro/content/manage', '/creator-micro/content/post', '/creator-micro/content?'].some(
+      (item) => currentUrl.includes(item),
     );
   }
 

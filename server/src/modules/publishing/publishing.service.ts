@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -105,6 +106,9 @@ const SUPPORTED_AUTO_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
 
 @Injectable()
 export class PublishingService {
+  private readonly logger = new Logger(PublishingService.name);
+  private readonly backgroundRunningJobIds = new Set<string>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
@@ -305,9 +309,7 @@ export class PublishingService {
       }),
     );
 
-    for (const job of createdJobs) {
-      await this.executeDraftSave(job.id);
-    }
+    this.triggerPublishJobs(createdJobs.map((job) => job.id));
 
     const refreshedJobs = await this.prisma.leadPublishJob.findMany({
       where: {
@@ -374,8 +376,8 @@ export class PublishingService {
       },
       include: leadPublishJobInclude,
     });
-    const executed = await this.executeDraftSave(updated.id);
-    return this.serializePublishJob(executed);
+    this.triggerPublishJobs([updated.id]);
+    return this.serializePublishJob(updated);
   }
 
   async listPlatformAccounts(user: SessionUser, query: ListPlatformAccountsQueryDto) {
@@ -831,6 +833,30 @@ export class PublishingService {
         },
         include: leadPublishJobInclude,
       });
+    }
+  }
+
+  private triggerPublishJobs(jobIds: string[]) {
+    for (const jobId of jobIds) {
+      if (!jobId || this.backgroundRunningJobIds.has(jobId)) {
+        continue;
+      }
+
+      this.backgroundRunningJobIds.add(jobId);
+      setTimeout(() => {
+        void this.executeDraftSaveInBackground(jobId);
+      }, 0);
+    }
+  }
+
+  private async executeDraftSaveInBackground(jobId: string) {
+    try {
+      await this.executeDraftSave(jobId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '发布任务后台执行失败';
+      this.logger.error(`[publish-job:${jobId}] ${message}`);
+    } finally {
+      this.backgroundRunningJobIds.delete(jobId);
     }
   }
 

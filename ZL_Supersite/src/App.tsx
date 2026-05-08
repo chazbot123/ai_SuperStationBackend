@@ -1,5 +1,5 @@
-import LegacyHomeFrame from "./components/landing/LegacyHomeFrame";
+import LegacyHomePage from "./components/landing/LegacyHomePage";
 
 export default function App() {
-  return <LegacyHomeFrame />;
+  return <LegacyHomePage />;
 }

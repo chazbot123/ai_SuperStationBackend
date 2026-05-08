@@ -52,8 +52,11 @@ export class ProductsController {
   }
 
   @Post('infer-english-name')
-  inferEnglishName(@Body() dto: InferEnglishNameDto) {
-    return this.productsService.inferEnglishName(dto.name);
+  inferEnglishName(
+    @Req() req: { user: SessionUser },
+    @Body() dto: InferEnglishNameDto,
+  ) {
+    return this.productsService.inferEnglishName(req.user, dto.name);
   }
 
   @Get(':id')

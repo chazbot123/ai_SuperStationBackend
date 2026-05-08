@@ -349,7 +349,7 @@
         <h2>欢迎选购</h2>
         <p>石墨烯核心科技体验单品，现以特价限量开放，提前感受装饰、供暖与健康理疗的三效融合体验。</p>
       </div>
-      <div class="offers-grid">
+      <div class="offers-grid" id="offersGrid">
         <article class="offer-card reveal">
           <div class="offer-image" id="offer-img-1" style="background-image: url('assets/images/landing/img_14.jpeg')">
             <span class="badge">直降 ¥2000</span>
@@ -1090,6 +1090,7 @@
     const projectOverlayDesc = document.getElementById('projectOverlayDesc');
     const projectOverlaySpecs = document.getElementById('projectOverlaySpecs');
     const projectOverlayConsultBtn = document.getElementById('projectOverlayConsultBtn');
+    const offersGrid = document.getElementById('offersGrid');
     let activeProjectIndex = -1;
     let activeProjectImageIndex = 0;
     let lastFocusEl = null;
@@ -1123,6 +1124,58 @@
       return pool.slice(0, count);
     }
 
+    function escapeHtml(value){
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function buildOfferPrice(product){
+      if (product?.specialOfferEnabled) {
+        return {
+          label: product.specialTag || '特惠价',
+          currentText: product.specialPriceText || product.priceText || '',
+          originalText: product.originalPriceText || '',
+        };
+      }
+
+      return {
+        label: product?.specialTag || '售价',
+        currentText: product?.priceText || '',
+        originalText: '',
+      };
+    }
+
+    function renderOfferCard(product, index){
+      const primaryImage = product.images?.[0] || extraGalleryPool[index % extraGalleryPool.length] || 'assets/images/landing/img_14.jpeg';
+      const price = buildOfferPrice(product);
+      const englishName = product.englishName
+        ? product.englishName.replace(/-/g, ' ').toUpperCase()
+        : `PRODUCT ${index + 1}`;
+
+      return `
+        <article class="offer-card reveal in-view" data-product-id="${escapeHtml(product.id)}">
+          <div class="offer-image" style="background-image: url('${escapeHtml(primaryImage)}')">
+            <span class="badge${product.specialOfferEnabled ? ' hot' : ''}">${escapeHtml(price.label || '精选商品')}</span>
+          </div>
+          <div class="offer-content">
+            <p class="eyebrow">${escapeHtml(englishName)}</p>
+            <h3>${escapeHtml(product.name || `产品 ${index + 1}`)}</h3>
+            <p class="desc">${escapeHtml(product.summary || product.description || '欢迎咨询该商品的适用场景、规格方案和合作方式。')}</p>
+            <div class="price-row">
+              <div class="price">
+                <span class="currency">¥</span><strong>${escapeHtml((price.currentText || '').replace(/^¥\s*/, ''))}</strong>${price.originalText ? `<del>${escapeHtml(price.originalText)}</del>` : ''}
+              </div>
+              <button class="buy-btn" type="button">立即抢购</button>
+            </div>
+          </div>
+        </article>
+      `;
+    }
+
     const projects = Array.from(portfolioItems).map((item, index) => {
       const title = item.querySelector('h3')?.textContent?.trim() || `案例 ${index + 1}`;
       const cat = item.querySelector('.p-cat')?.textContent?.trim() || '项目';
@@ -1146,47 +1199,84 @@
       return { title, cat, images, desc, specs };
     });
 
-    const offerCards = document.querySelectorAll('.offer-card');
-    
-    const offerProjects = Array.from(offerCards).map((item, index) => {
-      const title = item.querySelector('h3')?.textContent?.trim() || `产品 ${index + 1}`;
-      const cat = item.querySelector('.eyebrow')?.textContent?.trim() || '特价单品';
-      const primary = getBgUrl(item.querySelector('.offer-image')?.style?.backgroundImage);
-      const images = [primary, ...uniqueSample(extraGalleryPool, 2, primary)].filter(Boolean);
-      const desc = item.querySelector('.desc')?.textContent?.trim() || '';
-      
-      const priceValue = item.querySelector('.price strong')?.textContent?.trim() || '100';
-      const priceCurrency = item.querySelector('.price .currency')?.textContent?.trim() || '¥';
-      const originalPrice = item.querySelector('.price del')?.textContent?.trim();
-      const specs = [
-        { 
-          k: '活动价', 
-          v: `${priceCurrency} ${priceValue}${originalPrice ? ` <del>${originalPrice}</del>` : ''}` 
-        }
-      ];
+    let offerProjects = [];
 
-      // Make offer cards clickable to open the overlay
-      item.style.cursor = 'pointer';
-      item.setAttribute('tabindex', '0');
-      item.setAttribute('role', 'button');
-      item.setAttribute('aria-label', `产品详情：${title}`);
-      
-      const clickHandler = (e) => {
-        // Prevent opening if they clicked the 'buy-btn' specifically
-        if(e.target.closest('.buy-btn')) return;
-        e.preventDefault();
-        openProject(index, true); // true indicates it's an offer, not a portfolio item
-      };
-      
-      item.addEventListener('click', clickHandler);
-      item.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          clickHandler(e);
-        }
+    function bindOfferCards(){
+      const offerCards = offersGrid?.querySelectorAll('.offer-card') || [];
+
+      offerProjects = Array.from(offerCards).map((item, index) => {
+        const title = item.querySelector('h3')?.textContent?.trim() || `产品 ${index + 1}`;
+        const cat = item.querySelector('.badge')?.textContent?.trim() || item.querySelector('.eyebrow')?.textContent?.trim() || '特价单品';
+        const primary = getBgUrl(item.querySelector('.offer-image')?.style?.backgroundImage);
+        const images = [primary, ...uniqueSample(extraGalleryPool, 2, primary)].filter(Boolean);
+        const desc = item.querySelector('.desc')?.textContent?.trim() || '';
+        const priceValue = item.querySelector('.price strong')?.textContent?.trim() || '100';
+        const priceCurrency = item.querySelector('.price .currency')?.textContent?.trim() || '¥';
+        const originalPrice = item.querySelector('.price del')?.textContent?.trim();
+        const specs = [
+          {
+            k: cat || '活动价',
+            v: `${priceCurrency} ${priceValue}${originalPrice ? ` <del>${originalPrice}</del>` : ''}`,
+          }
+        ];
+
+        item.style.cursor = 'pointer';
+        item.setAttribute('tabindex', '0');
+        item.setAttribute('role', 'button');
+        item.setAttribute('aria-label', `产品详情：${title}`);
+
+        const clickHandler = (e) => {
+          if(e.target.closest('.buy-btn')) return;
+          e.preventDefault();
+          openProject(index, true);
+        };
+
+        item.addEventListener('click', clickHandler);
+        item.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            clickHandler(e);
+          }
+        });
+
+        return { title, cat, images, desc, specs };
       });
 
-      return { title, cat, images, desc, specs };
-    });
+      offersGrid?.querySelectorAll('.buy-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const product = btn.closest('.offer-card')?.querySelector('h3')?.textContent?.trim() || '特价产品';
+          openChatWithMessage(`我想了解特价：${product}`);
+        });
+      });
+    }
+
+    async function loadPublicProducts() {
+      const userId = getSiteUserId();
+      if (!userId || !offersGrid) {
+        bindOfferCards();
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/products/public/${encodeURIComponent(userId)}`);
+        if (!response.ok) {
+          bindOfferCards();
+          return;
+        }
+
+        const payload = await response.json();
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        if (!items.length) {
+          bindOfferCards();
+          return;
+        }
+
+        offersGrid.innerHTML = items.slice(0, 6).map((item, index) => renderOfferCard(item, index)).join('');
+        bindOfferCards();
+      } catch (error) {
+        console.warn('加载公开商品失败，继续使用静态商品卡片', error);
+        bindOfferCards();
+      }
+    }
 
     let isViewingOffer = false;
 
@@ -1618,18 +1708,13 @@
     }
 
     projectOverlayConsultBtn?.addEventListener('click', () => {
-      const data = projects[activeProjectIndex];
+      const data = isViewingOffer ? offerProjects[activeProjectIndex] : projects[activeProjectIndex];
       if(!data) return;
       closeProject();
-      openChatWithMessage(`我想了解案例：${data.title}（${data.cat}）`);
+      openChatWithMessage(isViewingOffer ? `我想了解特价：${data.title}` : `我想了解案例：${data.title}（${data.cat}）`);
     });
 
-    document.querySelectorAll('.buy-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const product = btn.closest('.offer-card')?.querySelector('h3')?.textContent?.trim() || '特价产品';
-        openChatWithMessage(`我想了解特价：${product}`);
-      });
-    });
+    loadPublicProducts();
 
     // 页面加载后自动弹出提示
     setTimeout(() => {

@@ -1,34 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useAuthStore } from "@/store/authStore";
-import { useRbacStore } from "@/store/rbacStore";
-import type { RoleKey } from "@/types/demo";
 
 export default function Login() {
   const user = useAuthStore((s) => s.user);
   const login = useAuthStore((s) => s.login);
-  const loginWithPreset = useAuthStore((s) => s.loginWithPreset);
-  const roles = useRbacStore((s) => s.roles);
   const location = useLocation();
   const navigate = useNavigate();
   const from = (location.state as { from?: string } | null)?.from ?? "/";
 
-  const [username, setUsername] = useState("demo_admin");
-  const [password, setPassword] = useState("123456");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [agreedToUserAgreement, setAgreedToUserAgreement] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  const presetRoles = useMemo(
-    () =>
-      (["main_company", "level1_agent"] as RoleKey[]).map((key) => ({
-        key,
-        name: roles.find((role) => role.key === key)?.name ?? key,
-      })),
-    [roles]
-  );
 
   useEffect(() => {
     if (user) navigate(from, { replace: true });
@@ -37,22 +25,13 @@ export default function Login() {
   if (user) return null;
 
   const handleLogin = async () => {
-    setSubmitting(true);
-    const result = await login(username, password);
-    setSubmitting(false);
-
-    if (result.ok) {
-      setError(null);
-      navigate(from, { replace: true });
+    if (!agreedToUserAgreement) {
+      setError("请先勾选同意并阅读《用户协议》后再登录");
       return;
     }
 
-    setError(result.message);
-  };
-
-  const handlePresetLogin = async (roleKey: RoleKey) => {
     setSubmitting(true);
-    const result = await loginWithPreset(roleKey);
+    const result = await login(username, password);
     setSubmitting(false);
 
     if (result.ok) {
@@ -92,7 +71,7 @@ export default function Login() {
                 <Input
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
-                  placeholder="demo_admin"
+                  placeholder="请输入用户名"
                   disabled={submitting}
                 />
               </div>
@@ -102,10 +81,27 @@ export default function Login() {
                   type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder="123456"
+                  placeholder="请输入密码"
                   disabled={submitting}
                 />
               </div>
+
+              <label className="flex items-start gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-orange-500"
+                  checked={agreedToUserAgreement}
+                  onChange={(event) => setAgreedToUserAgreement(event.target.checked)}
+                  disabled={submitting}
+                />
+                <span>
+                  我已阅读并同意
+                  {" "}
+                  <Link to="/user-agreement" className="text-orange-400 hover:text-orange-300 hover:underline">
+                    《用户协议》
+                  </Link>
+                </span>
+              </label>
 
               {error ? (
                 <div className="rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>
@@ -114,29 +110,6 @@ export default function Login() {
               <Button type="submit" className="w-full" disabled={submitting}>
                 {submitting ? "登录中..." : "登录"}
               </Button>
-
-              <div className="pt-3">
-                <div className="mb-2 text-xs font-medium text-zinc-300">快速进入预设账号</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {presetRoles.map((role) => (
-                    <Button
-                      key={role.key}
-                      type="button"
-                      variant="secondary"
-                      disabled={submitting}
-                      onClick={async () => {
-                        await handlePresetLogin(role.key);
-                      }}
-                    >
-                      {role.name}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-2 text-xs text-zinc-400">
-                预置账号：`demo_admin`（主公司） / `agent_a001`（1级代理），默认密码均为 `123456`
-              </div>
             </form>
           </CardContent>
         </Card>

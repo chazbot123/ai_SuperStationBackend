@@ -543,6 +543,11 @@ export class KnowledgeService {
       throw new Error('文档内容为空，无法建立索引');
     }
 
+    const smartChunks = await this.buildChunksWithAi(text);
+    if (smartChunks.length > 0) {
+      return smartChunks;
+    }
+
     return this.buildChunksFallback(text);
   }
 
@@ -576,6 +581,34 @@ export class KnowledgeService {
   }
 
   private buildChunksFallback(text: string) {
+    const sections = this.buildDocumentStyleSections(text);
+    const normalizedSections = sections.flatMap((section) =>
+      section.length > CHUNK_TARGET_SIZE
+        ? this.recursiveCharacterSplit(section, CHUNK_TARGET_SIZE, 0, [
+            '\n\n',
+            '\n',
+            '。 ',
+            '。\n',
+            '。',
+            '！',
+            '？',
+            '；',
+            '，',
+            ' ',
+            '',
+          ])
+        : [section],
+    );
+
+    const mergedSections = this.mergeDocumentSections(
+      normalizedSections,
+      CHUNK_TARGET_SIZE,
+      CHUNK_OVERLAP,
+    );
+    if (mergedSections.length > 0) {
+      return mergedSections;
+    }
+
     return this.recursiveCharacterSplit(text, CHUNK_TARGET_SIZE, CHUNK_OVERLAP, [
       '\n\n',
       '\n',
@@ -594,6 +627,7 @@ export class KnowledgeService {
   private buildKnowledgeChunkSystemPrompt() {
     return [
       '你是一个中文知识库切片助手，负责把混乱文档整理成适合语义检索的片段。',
+      '常见输入包括产品手册、制度文档、公司简章、培训材料、FAQ、服务流程、方案说明、售后资料。',
       '输入文本可能来自 pdf、ppt、word、ocr，格式可能很乱，可能有错误换行、断句、空白、页码、标题残缺。',
       '你的目标是先识别真实文字结构，再按语义切分，不要机械按固定字数硬切。',
       '你必须先判断每段内容属于哪种结构：章节标题、小标题、正文说明、问答对、步骤流、列表项、表格字段、注意事项、案例、结论。',
@@ -612,6 +646,7 @@ export class KnowledgeService {
     const structuredText = this.buildStructuredChunkInput(text);
     return [
       '请把下面文本智能切分成适合知识库检索的语义片段。',
+      '文本通常是手册、说明文档、公司简章、FAQ、制度流程等长文资料。',
       '要求：先根据真实文字结构自动识别，再输出最终切片。',
       '执行顺序：',
       '1. 先识别标题层级、正文、列表、步骤、问答、表格字段、注意事项。',
@@ -670,7 +705,9 @@ export class KnowledgeService {
       /^第[一二三四五六七八九十0-9]+[章节部分篇条]/.test(line) ||
       /^[0-9一二三四五六七八九十]+[、.．]\S+/.test(line) ||
       /^[（(]?[0-9一二三四五六七八九十]+[)）]\S+/.test(line) ||
-      /^(附录|摘要|概述|简介|背景|方案|流程|步骤|总结|结论|注意事项|常见问题|FAQ)[:：]?$/.test(line)
+      /^(附录|摘要|概述|简介|背景|方案|流程|步骤|总结|结论|注意事项|常见问题|FAQ|公司简介|企业简介|公司概况|企业概况|品牌介绍|品牌故事|企业文化|发展历程|核心优势|主营业务|产品介绍|产品概述|适用场景|使用说明|操作说明|安装步骤|操作步骤|使用步骤|维护保养|售后服务|联系方式|联系我们|资质荣誉|组织架构|制度说明|服务流程|流程说明|案例介绍|成功案例)[:：]?$/.test(
+        line,
+      )
     );
   }
 
@@ -701,6 +738,54 @@ export class KnowledgeService {
       .filter(Boolean);
   }
 
+  private buildDocumentStyleSections(text: string) {
+    const paragraphs = this.splitParagraphs(text);
+    const sections: string[] = [];
+    let currentSection: string[] = [];
+
+    const flushCurrentSection = () => {
+      const section = this.normalizeText(currentSection.join('\n\n'));
+      if (section) {
+        sections.push(section);
+      }
+      currentSection = [];
+    };
+
+    for (const paragraph of paragraphs) {
+      const normalizedParagraph = this.normalizeText(paragraph);
+      if (!normalizedParagraph || this.isNoiseParagraph(normalizedParagraph)) {
+        continue;
+      }
+
+      if (this.isDocumentSectionHeading(normalizedParagraph)) {
+        flushCurrentSection();
+        currentSection.push(normalizedParagraph);
+        continue;
+      }
+
+      const shouldStartNewSection =
+        currentSection.length > 0 &&
+        this.isIndependentDocumentBlock(normalizedParagraph) &&
+        currentSection.join('\n\n').length >= Math.round(CHUNK_TARGET_SIZE * 0.45);
+
+      if (shouldStartNewSection) {
+        flushCurrentSection();
+      }
+
+      currentSection.push(normalizedParagraph);
+
+      if (
+        this.isIndependentDocumentBlock(normalizedParagraph) &&
+        currentSection.join('\n\n').length >= Math.round(CHUNK_TARGET_SIZE * 0.75)
+      ) {
+        flushCurrentSection();
+      }
+    }
+
+    flushCurrentSection();
+    return sections;
+  }
+
   private buildSmartChunkBatches(paragraphs: string[]) {
     const normalizedParagraphs = paragraphs.flatMap((paragraph) => this.splitOversizedParagraph(paragraph));
     const batches: string[] = [];
@@ -726,6 +811,43 @@ export class KnowledgeService {
     }
 
     return batches;
+  }
+
+  private mergeDocumentSections(sections: string[], chunkSize: number, chunkOverlap: number) {
+    if (sections.length === 0) {
+      return [];
+    }
+
+    const chunks: string[] = [];
+    let current = '';
+
+    for (const section of sections) {
+      const normalizedSection = this.normalizeText(section);
+      if (!normalizedSection) {
+        continue;
+      }
+
+      if (!current) {
+        current = normalizedSection;
+        continue;
+      }
+
+      const candidate = `${current}\n\n${normalizedSection}`;
+      if (candidate.length <= chunkSize) {
+        current = candidate;
+        continue;
+      }
+
+      chunks.push(current.trim());
+      const overlapPrefix = this.buildOverlapPrefix(current, chunkOverlap);
+      current = overlapPrefix ? `${overlapPrefix}\n\n${normalizedSection}` : normalizedSection;
+    }
+
+    if (current) {
+      chunks.push(current.trim());
+    }
+
+    return chunks.filter(Boolean);
   }
 
   private splitOversizedParagraph(paragraph: string) {
@@ -766,6 +888,31 @@ export class KnowledgeService {
 
   private splitTextByLength(text: string, maxLength: number) {
     return text.match(new RegExp(`.{1,${maxLength}}`, 'g')) ?? [text];
+  }
+
+  private isDocumentSectionHeading(paragraph: string) {
+    const [firstLine = paragraph] = paragraph.split('\n');
+    const normalizedLine = firstLine.trim();
+    return this.isHeadingLikeLine(normalizedLine);
+  }
+
+  private isIndependentDocumentBlock(paragraph: string) {
+    const [firstLine = paragraph] = paragraph.split('\n');
+    const normalizedLine = firstLine.trim();
+    return (
+      this.isQuestionAnswerLikeLine(normalizedLine) ||
+      this.isListLikeLine(normalizedLine) ||
+      this.isTableLikeLine(normalizedLine)
+    );
+  }
+
+  private isNoiseParagraph(paragraph: string) {
+    const lines = paragraph
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    return lines.length > 0 && lines.every((line) => this.isNoiseLikeLine(line));
   }
 
   private splitSentences(text: string) {

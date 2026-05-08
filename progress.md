@@ -97,3 +97,55 @@
 - 已将知识库智能切片提示词升级为“先识别真实文字结构，再决定切片边界”
 - 已新增行级结构标注输入，向文字模型显式提示 `HEADING / LIST / QA / TABLE / TEXT / NOISE`
 - 已执行 `GetDiagnostics` 与后端 `npm run build`，本轮切片策略改动通过
+- 已恢复规划文件并确认新任务：把知识库切片顺序明确改为“先文字模型智能切片，再固定切片回退”，并将固定切片改成更适配“手册 / 文档 / 公司简章”等长文结构
+- 已确认当前代码真实状态为 `buildChunks()` 只走固定切片，之前升级过的智能切片提示词实际上没有进入主链路
+- 已确认前端知识库页暂无切片策略配置入口，本轮主要改动将集中在 `KnowledgeService` 与知识库页面说明
+- 已完成知识库切片主链路修正：`buildChunks()` 现已先尝试文字模型智能切片，失败或无结果时再回退固定切片
+- 已将固定切片改为更适配手册、文档、公司简章、FAQ、制度流程等长文资料的结构化分段策略
+- 已执行 `GetDiagnostics`、后端 `npm run build`、前端 `npm run check`，本轮切片改动验证通过
+- 已恢复规划文件并确认新任务：开始对接前台产品模块与后台/后端产品模块
+- 下一步先盘点 `ZL_Supersite` 前台商品模块、后台 `Products` 页面和后端 `products` 模块接口的现状与差异
+- 已确认前台产品模块当前仍是 `legacy-home.html` 内的静态商品卡片，后台/后端产品模块已是正式数据链路
+- 已新增后端公开商品接口 `GET /api/products/public/:userId`，返回指定账号下 `live` 状态商品的前台展示字段
+- 已将前台 `主营产品` 区改为优先读取公开商品接口，接口失败或无数据时继续回退静态卡片
+- 已同步保留前台现有样式、商品详情弹层与“立即抢购 -> 打开客服咨询”交互
+- 已执行后端 `npm run build`、前台 `ZL_Supersite npm run check`，并实测 `GET /api/products/public/cmotrwinc0000n4u9e265uccn` 成功返回真实商品列表
+- 已恢复规划文件并确认新任务：继续排查“图文草稿箱图片加载不出来”
+- 已确认前端主问题有两处：图片 URL 过滤过严、编辑弹窗图片删除/下载使用过滤后索引导致错位
+- 已在 `src/pages/StudioDrafts.tsx` 放宽图片 URL 识别，兼容协议相对 URL、协议缺失 URL 与普通相对路径
+- 已修复编辑弹窗图片渲染为携带原始索引，删除/下载操作现按原始图片索引执行
+- 已执行 `GetDiagnostics`，`StudioDrafts.tsx` 诊断为 0
+- 已继续确认后端主问题：图文生成草稿之前直接存图片模型返回的 `urls`，未先固化到自有 MinIO，旧草稿也没有自动补修逻辑
+- 已在 `server/src/modules/ai/ai.service.ts` 增加图片固化与旧草稿补修：新生成图片先转自有稳定地址，`listSocialPosts / listProductImageDrafts` 读取时会尽力补修非托管图片
+- 已发现并修复 `server/src/modules/products/products.service.ts` 中上一轮英文名改造遗留的语法错误
+- 已执行 `GetDiagnostics`，`ai.service.ts / products.service.ts` 诊断为 0
+- 已执行后端 `npm run build`，构建通过
+
+## 2026-05-08
+- 已恢复规划文件并确认新任务：不再使用 `.env` 配置超级站前台地址，改为在后台现有“超级站配置中心”中维护，且主公司与一级代理都可用
+- 已确认现状：`Publishing.tsx` 当前仍读取 `VITE_SUPERSITE_URL`；`Personalization.tsx` 页面内仍写死仅主公司可见；后端 `super-site-settings` 已具备承接该字段的现成 `GET/PUT me` 链路
+- 已在 Prisma `SuperSiteSetting` 模型、`UpdateSuperSiteSettingDto`、`SuperSiteSettingsService`、前端 `Settings` 类型中新增 `superSiteBaseUrl`
+- 已在 `Personalization.tsx` 新增“超级站前台地址”输入与保存按钮，并将页面内可访问角色放开到 `main_company / level1_agent`
+- 已将 `Publishing.tsx` 的“上传超级站”改为读取后台设置里的 `superSiteBaseUrl`，缺失时提示到超级站配置中心填写
+- 已同步修改前后端默认权限定义：`level1_agent` 的 `personalization` 默认值改为 `true`
+- 已执行 `npm exec prisma generate`、`npm exec prisma db push`、后端 `npm run build`、前端 `npm run check`，命令退出码均为 `0`
+- 已执行本轮改动文件 `GetDiagnostics`，诊断结果均为 `0`
+- 已恢复规划文件并确认新任务：删除登录页“快捷进入预设账号”，改为登录前必须勾选“同意并阅读用户协议”，并补一份贴合当前功能的用户协议
+- 已确认登录页预设账号入口仅存在于 `src/pages/Login.tsx` 前端界面，不影响真实后端登录接口
+- 已删除登录页“快捷进入预设账号”按钮和预置账号说明，并将用户名/密码输入默认值改为空
+- 已在登录页增加“我已阅读并同意《用户协议》”勾选项，未勾选时禁止登录并提示
+- 已新增匿名可访问的用户协议页面 `/user-agreement`
+- 已新增协议文档 `docs/user-agreement.md`，内容覆盖账号登录、AI生成、知识库、商品、视频、获客发布、客服、超级站配置等当前实际功能
+- 已执行 `GetDiagnostics` 与前端 `npm run check`，本轮改动通过
+- 已确认一键发布“页面卡住”的直接原因是后端 `publishContent` 在请求内同步串行执行浏览器发布
+- 已将后端发布改为：创建任务后立即返回，由后台异步触发 `executeDraftSave`
+- 已同步修改重试任务逻辑，重试时不再同步阻塞请求
+- 已为 `Publishing.tsx` 增加发布记录自动轮询：存在 `queued/running` 任务时每 3 秒刷新一次
+- 已专项增强抖音自动发布稳定性：补充图文上传入口重试、图文/视频模式回退跳转、抖音上传完成识别、抖音发布完成识别
+- 已执行本轮核心文件诊断，`publishing.service.ts`、`platform-login-browser.service.ts`、`Publishing.tsx` 均为 `0` 错误
+- 已执行前端 `npm run check` 与后端 `npm run build`，均通过
+- 已恢复规划文件并确认新任务：基于当前真实项目架构，输出一份 Ubuntu 服务器从安装环境到部署上线的完整手册，并明确沿用当前测试环境数据的迁移步骤
+- 已核对现有部署相关文档：当前只有环境说明和生产建议，缺少“测试库数据恢复 + 双前端 + Nginx + PM2 + MinIO/Redis 同步”的完整落地手册
+- 已核对当前真实部署要点：`docker-compose.yml` 仅包含 `PostgreSQL / Redis / MinIO` 三个基础服务；后台前端默认端口 `5173`，超级站前台默认端口 `5180`，后端默认端口 `3000`
+- 已确认 Redis 中保存当前 AI 模型配置，MinIO 中保存业务文件与图片；若要沿用测试环境业务状态，上线时除 PostgreSQL 外应同步 Redis 和 MinIO
+- 已新增部署文档 `docs/ubuntu-install-and-deploy-with-test-data.md`，覆盖 Ubuntu 装机、Docker/Node/Nginx/PM2、数据库恢复、MinIO/Redis 恢复、双前端上线、Nginx 配置、上线检查与回滚

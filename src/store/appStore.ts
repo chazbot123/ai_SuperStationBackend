@@ -168,12 +168,20 @@ export type ProductItem = {
 
 export type Settings = {
   enterpriseName: string;
+  superSiteBaseUrl: string;
   siteTemplate: SiteTemplateKey;
   siteModules: SiteModule[];
   siteMetrics: SiteMetricItem[];
   specialOfferTitle: string;
   specialOfferSubtitle: string;
   specialOffers: SpecialOfferItem[];
+  siteImageSlots: Array<{
+    slotKey: string;
+    moduleKey: string;
+    imageUrl: string;
+    sourceContentId?: string | null;
+    updatedAt?: string | null;
+  }>;
   industrySourceConfigs: IndustrySourceConfig[];
   industryKeywords: string[];
   industryRefreshConfig: IndustryRefreshConfig;
@@ -403,12 +411,14 @@ function buildSpecialOffer(index: number, patch?: Partial<SpecialOfferItem>): Sp
 function defaultSettings(): Settings {
   return {
     enterpriseName: "示例科技",
+    superSiteBaseUrl: "",
     siteTemplate: "standard",
     siteModules: defaultSiteModules(),
     siteMetrics: defaultSiteMetrics(),
     specialOfferTitle: "特价商品专区",
     specialOfferSubtitle: "支持首页插入限时优惠、秒杀引导与爆款推荐",
     specialOffers: defaultSpecialOffers(),
+    siteImageSlots: [],
     industrySourceConfigs: defaultIndustrySourceConfigs(),
     industryKeywords: defaultIndustryKeywords(),
     industryRefreshConfig: defaultIndustryRefreshConfig(),
@@ -423,6 +433,7 @@ function mergeSettings(settings?: Partial<Settings> | null): Settings {
   const savedModules = settings?.siteModules ?? [];
   const savedMetrics = settings?.siteMetrics ?? [];
   const savedOffers = settings?.specialOffers ?? [];
+  const savedImageSlots = settings?.siteImageSlots ?? [];
   const savedIndustrySourceConfigs = settings?.industrySourceConfigs ?? [];
   const hasSavedOffers = Array.isArray(settings?.specialOffers);
 
@@ -445,9 +456,20 @@ function mergeSettings(settings?: Partial<Settings> | null): Settings {
   return {
     ...defaults,
     ...settings,
+    superSiteBaseUrl:
+      typeof settings?.superSiteBaseUrl === "string" ? settings.superSiteBaseUrl.trim() : defaults.superSiteBaseUrl,
     siteModules,
     siteMetrics,
     specialOffers,
+    siteImageSlots: savedImageSlots
+      .filter((item) => item?.slotKey?.trim() && item?.moduleKey?.trim() && item?.imageUrl?.trim())
+      .map((item) => ({
+        slotKey: item.slotKey.trim(),
+        moduleKey: item.moduleKey.trim(),
+        imageUrl: item.imageUrl.trim(),
+        sourceContentId: item.sourceContentId?.trim() || null,
+        updatedAt: item.updatedAt?.trim() || null,
+      })),
     industrySourceConfigs: defaults.industrySourceConfigs.map((item) => ({
       ...item,
       enabled: savedIndustrySourceConfigs.find((saved) => saved.key === item.key)?.enabled ?? item.enabled,

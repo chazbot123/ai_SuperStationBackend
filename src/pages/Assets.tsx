@@ -292,7 +292,7 @@ export default function Assets() {
             <div>
               <CardTitle>知识库管理</CardTitle>
               <div className="mt-2 text-sm text-zinc-400">
-                当前版本已接入知识文件上传和索引状态管理，后续 AI 客服会直接复用这里的文档与向量检索结果。
+                当前切片策略已调整为先走文字模型智能切片，失败后再回退到适配手册、文档、公司简章等长文资料的固定切片。
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -721,7 +721,7 @@ export default function Assets() {
               <div className="text-xs font-medium text-zinc-300">当前说明</div>
               <div className="mt-2 space-y-2 text-zinc-400">
                 <div>1. 当前已接通知识文件上传、列表、详情和删除。</div>
-                <div>2. 当前已接通解析、切片、embedding 和向量检索，支持状态追踪。</div>
+                <div>2. 当前切片会先走文字模型智能切片，再回退到面向手册、文档、公司简章、FAQ、流程资料的固定切片。</div>
                 <div>3. AI 客服当前可直接复用这里的知识片段召回结果。</div>
               </div>
             </div>

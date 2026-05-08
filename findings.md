@@ -70,3 +70,32 @@
 - 智能切片失败时会回退到固定规则切片：按段落聚合到约 `800` 字，段间保留约 `120` 字重叠
 - 知识库 embedding 当前不是大模型向量；入库时写死为 `embeddingModel: local_hash_v1`，并由 `buildEmbedding()` 生成本地哈希向量
 - 某些文档只生成 1 个切片的常见原因包括：解析后的有效文本较短、段落本就只有一个完整语义单元、或 OCR/解析抽出的内容偏少
+- 当前代码真实状态与之前结论不一致：`KnowledgeService.buildChunks()` 现在直接返回 `buildChunksFallback(text)`，并未先调用 `buildChunksWithAi()`
+- 现有固定切片仍是通用 `recursiveCharacterSplit`，主要依赖换行、句号、逗号和字符长度，不区分“手册 / 文档 / 公司简章 / FAQ / 制度 / 流程”这类长文结构
+- 前端知识库页面当前没有切片策略配置 UI，切片策略调整可优先收敛在后端实现与页面说明文案
+- `ZL_Supersite` 前台商品区当前在 `legacy-home.html` 中实现，原本是静态 HTML 卡片 + 运行时从 DOM 提取 `offerProjects`
+- 后台/后端产品链路已完整：后台 `Products.tsx` 对应后端 `products` 模块，字段包含 `name / englishName / summary / description / priceText / specialOfferEnabled / originalPriceText / specialPriceText / specialTag / images / status`
+- 前台商品区对接最小方案适合新增公开接口 `GET /api/products/public/:userId`，只返回指定账号下 `live` 商品，前台继续保留现有样式和详情/咨询交互
+- `StudioDrafts.tsx` 的 `getVisibleImages()` 之前只接受 `http/https/data:image//根路径`，会把协议缺失 URL、协议相对 URL 或普通相对路径图片直接过滤掉
+- 图文草稿编辑弹窗之前使用“过滤后的图片下标”执行删除和下载，但状态数组仍按原始 `editImages` 存储，存在明显索引错位风险
+- `AiService.generateSocialPost()` 当前把 `generateImages()` 返回的 `urls` 直接写入草稿；在本轮修复前，后端没有先把这些上游图片地址固化到自有 MinIO
+- `server/.env` 当前 `MINIO_ENDPOINT=127.0.0.1`，图片公开地址默认会被拼成 `http://127.0.0.1:9000/...`
+
+## 2026-05-08
+- `Publishing.tsx` 的“上传超级站”此前直接读取 `import.meta.env.VITE_SUPERSITE_URL`，不是后台可维护配置
+- 现有 `super-site-settings` 的 `GET/PUT me` 已是最适合承接“超级站前台地址”的现成链路，无需新建独立设置模块
+- `Personalization.tsx` 当前页面内仍写死“仅主公司可见”，即使路由权限放开，一级代理也会被页面内判断挡住
+- 后端 `level1_agent` 默认 `personalization` 权限原本为 `false`；仅改常量不一定自动覆盖已有数据库权限记录
+- `Login.tsx` 当前“快捷进入预设账号”完全是前端界面层能力，移除后不影响真实后端登录接口
+- 登录前增加“同意并阅读用户协议”最小实现可直接收口在 `Login.tsx` 前端校验，无需改后端认证接口
+- 用户协议阅读页可作为匿名公开路由挂在 `/user-agreement`，不需要登录态
+- `PublishingService.publishContent` 原先在接口请求内串行 `await executeDraftSave(job.id)`，这是“页面卡住”的直接原因
+- 发布记录页原先只在初始化时读取一次 `listPublishingJobs`，没有对 `queued/running` 任务自动轮询刷新
+- 抖音链路最脆弱的 3 个点集中在：图文/视频模式切换、上传完成识别、发布成功结果页识别
+- 仓库里已有 `scripts/debug-douyin-image-flow.cjs`，其中抖音调试选择器与正式实现一致，可作为稳定性修复参照
+- 当前 `docker-compose.yml` 只定义了 `postgres / redis / minio` 三个基础服务容器，前端和后端应用仍按宿主机进程方式部署
+- 根目录后台前端 `package.json` 默认端口是 `5173`，`ZL_Supersite/package.json` 默认端口是 `5180`，后端默认端口是 `3000`
+- 当前两个前端构建默认都更适合部署在域名根路径；若上线时不改 Vite `base`，建议使用两个域名或二级域名，而不是直接挂到同域名子路径
+- 后端 `server/src/main.ts` 中 `CORS_ORIGIN` 当前直接作为单值 `origin` 传入 `enableCors()`，没有现成多域名白名单解析
+- `AiModelConfigCacheService` 当前把模型配置直接存进 Redis `ai:model-config:*` 键；如果要保留测试环境现有模型配置，Redis 也应纳入迁移范围
+- 当前业务文件和图片资源由 MinIO 承载，数据库中的 `storageUrl / objectKey` 仅保存引用；若只恢复 PostgreSQL 不同步 MinIO，对应资源会在新环境失效

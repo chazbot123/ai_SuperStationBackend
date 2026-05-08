@@ -61,7 +61,7 @@ export const DEFAULT_PERMISSION_MATRIX: Record<string, Record<RbacPageKey, boole
     customerManagement: false,
     videos: true,
     support: false,
-    personalization: false,
+    personalization: true,
     agents: true,
     rules: true,
     reviews: false,

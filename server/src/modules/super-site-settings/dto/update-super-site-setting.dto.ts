@@ -84,6 +84,25 @@ export class SuperSiteSpecialOfferDto {
   enabled!: boolean;
 }
 
+export class SuperSiteImageSlotDto {
+  @IsString()
+  slotKey!: string;
+
+  @IsString()
+  moduleKey!: string;
+
+  @IsString()
+  imageUrl!: string;
+
+  @IsOptional()
+  @IsString()
+  sourceContentId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  updatedAt?: string | null;
+}
+
 export class SuperSiteIndustrySourceConfigDto {
   @IsString()
   key!: string;
@@ -118,6 +137,10 @@ export class UpdateSuperSiteSettingDto {
 
   @IsOptional()
   @IsString()
+  superSiteBaseUrl?: string;
+
+  @IsOptional()
+  @IsString()
   siteTemplate?: string;
 
   @IsOptional()
@@ -145,6 +168,12 @@ export class UpdateSuperSiteSettingDto {
   @ValidateNested({ each: true })
   @Type(() => SuperSiteSpecialOfferDto)
   specialOffers?: SuperSiteSpecialOfferDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SuperSiteImageSlotDto)
+  siteImageSlots?: SuperSiteImageSlotDto[];
 
   @IsOptional()
   @IsArray()
