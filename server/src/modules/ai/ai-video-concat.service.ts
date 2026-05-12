@@ -1,4 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -16,18 +17,61 @@ export type SubtitleCue = {
 @Injectable()
 export class AiVideoConcatService {
   constructor() {
-    const resolvedFfmpegPath =
-      typeof ffmpegInstaller?.path === 'string' && ffmpegInstaller.path
-        ? ffmpegInstaller.path
-        : typeof ffmpegStaticPath === 'string' && ffmpegStaticPath
-          ? ffmpegStaticPath
-          : '';
+    const resolvedFfmpegPath = this.resolveFfmpegPath();
     if (resolvedFfmpegPath) {
       ffmpeg.setFfmpegPath(resolvedFfmpegPath);
     }
-    if (typeof ffprobeInstaller?.path === 'string' && ffprobeInstaller.path) {
-      ffmpeg.setFfprobePath(ffprobeInstaller.path);
+
+    const resolvedFfprobePath = this.resolveFfprobePath();
+    if (resolvedFfprobePath) {
+      ffmpeg.setFfprobePath(resolvedFfprobePath);
     }
+  }
+
+  private resolveFfmpegPath() {
+    const envPath = process.env.FFMPEG_PATH?.trim();
+    if (envPath) {
+      return envPath;
+    }
+
+    const systemCandidates =
+      process.platform === 'linux'
+        ? ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']
+        : process.platform === 'darwin'
+          ? ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']
+          : [];
+    const systemPath = systemCandidates.find((candidate) => existsSync(candidate));
+    if (systemPath) {
+      return systemPath;
+    }
+
+    if (typeof ffmpegInstaller?.path === 'string' && ffmpegInstaller.path) {
+      return ffmpegInstaller.path;
+    }
+
+    return typeof ffmpegStaticPath === 'string' && ffmpegStaticPath ? ffmpegStaticPath : '';
+  }
+
+  private resolveFfprobePath() {
+    const envPath = process.env.FFPROBE_PATH?.trim();
+    if (envPath) {
+      return envPath;
+    }
+
+    const systemCandidates =
+      process.platform === 'linux'
+        ? ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe']
+        : process.platform === 'darwin'
+          ? ['/opt/homebrew/bin/ffprobe', '/usr/local/bin/ffprobe']
+          : [];
+    const systemPath = systemCandidates.find((candidate) => existsSync(candidate));
+    if (systemPath) {
+      return systemPath;
+    }
+
+    return typeof ffprobeInstaller?.path === 'string' && ffprobeInstaller.path
+      ? ffprobeInstaller.path
+      : '';
   }
 
   async concatMp4Files(inputFiles: string[]) {

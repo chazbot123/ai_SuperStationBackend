@@ -1,0 +1,6 @@
+2026/04/28-11:49:29.819 7b94 Reusing MANIFEST D:\zhilin_project\AI-SuperWeb\AI-SuperWeb\server\.runtime\publishing-platform-sessions\cmoi332190000lcu9xj0onev0\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/04/28-11:49:29.820 7b94 Recovering log #4
+2026/04/28-11:49:29.820 7b94 Reusing old log D:\zhilin_project\AI-SuperWeb\AI-SuperWeb\server\.runtime\publishing-platform-sessions\cmoi332190000lcu9xj0onev0\Default\EdgeCoupons/coupons_data.db/000004.log 
+2026/04/28-11:49:29.852 2bf0 Level-0 table #8: started
+2026/04/28-11:49:29.856 2bf0 Level-0 table #8: 682224 bytes OK
+2026/04/28-11:49:29.858 2bf0 Delete type=0 #4

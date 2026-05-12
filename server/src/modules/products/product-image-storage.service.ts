@@ -46,7 +46,7 @@ export class ProductImageStorageService {
       secretKey,
     });
     this.bucketName = bucketName;
-    this.publicBaseUrl = this.buildPublicBaseUrl(endpoint, port, useSSL);
+    this.publicBaseUrl = this.resolvePublicBaseUrl(endpoint, port, useSSL);
   }
 
   async uploadProductImage(userId: string, file?: ProductUploadFile) {
@@ -230,7 +230,16 @@ export class ProductImageStorageService {
     return this.resolveExtensionFromMimeType(file.mimetype);
   }
 
-  private buildPublicBaseUrl(endpoint: string, port: number, useSSL: boolean) {
+  private resolvePublicBaseUrl(endpoint: string, port: number, useSSL: boolean) {
+    const explicit = this.configService.get<string>('MINIO_PUBLIC_BASE_URL')?.trim();
+    if (explicit) {
+      return explicit.replace(/\/+$/, '');
+    }
+
+    return this.buildDefaultPublicBaseUrl(endpoint, port, useSSL);
+  }
+
+  private buildDefaultPublicBaseUrl(endpoint: string, port: number, useSSL: boolean) {
     const protocol = useSSL ? 'https' : 'http';
     const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
 

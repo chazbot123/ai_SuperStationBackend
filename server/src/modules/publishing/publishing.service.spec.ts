@@ -17,6 +17,7 @@ describe('PublishingService draft payloads', () => {
       { get: jest.fn() } as unknown as ConfigService,
       {} as never,
       {} as never,
+      {} as never,
     );
   });
 
@@ -117,6 +118,7 @@ describe('PublishingService draft payloads', () => {
         platform: LeadPublishPlatform.xiaohongshu,
         accountName: '725947261',
         displayName: 'kobe',
+        authPayloadEncrypted: 'encrypted-old',
         browserSessionPath: 'D:/tmp/session',
         status: PlatformAccountStatus.valid,
         loginStatus: PlatformAccountLoginStatus.authenticated,
@@ -128,11 +130,11 @@ describe('PublishingService draft payloads', () => {
       .mockResolvedValueOnce({
         id: 'job-1',
         status: LeadPublishStatus.failed,
-        lastError: '褰撳墠骞冲彴璐﹀彿鐧诲綍宸插け鏁堬紝璇烽噸鏂扮櫥褰曞悗鍐嶅彂甯?',
+        lastError: '当前平台账号登录已失效，请重新登录后再发布',
       });
     const leadPlatformAccountUpdate = jest.fn().mockResolvedValue(undefined);
     const publish = jest.fn().mockRejectedValue(
-      new Error('褰撳墠骞冲彴璐﹀彿鐧诲綍宸插け鏁堬紝璇烽噸鏂扮櫥褰曞悗鍐嶅彂甯?'),
+      new Error('当前平台账号登录已失效，请重新登录后再发布'),
     );
 
     service = new PublishingService(
@@ -147,11 +149,14 @@ describe('PublishingService draft payloads', () => {
       } as never,
       { get: jest.fn() } as unknown as ConfigService,
       {} as never,
+      {} as never,
       {
         publish,
         getSessionPath: jest.fn().mockReturnValue('D:/tmp/session'),
       } as never,
     );
+
+    jest.spyOn(service as never, 'decryptAuthPayload').mockReturnValue('sid=expired_cookie');
 
     await (service as never)['executeDraftSave']('job-1');
 
@@ -160,8 +165,80 @@ describe('PublishingService draft payloads', () => {
       data: {
         status: PlatformAccountStatus.invalid,
         loginStatus: PlatformAccountLoginStatus.failed,
-        lastError: '褰撳墠骞冲彴璐﹀彿鐧诲綍宸插け鏁堬紝璇烽噸鏂扮櫥褰曞悗鍐嶅彂甯?',
+        lastError: '当前平台账号登录已失效，请重新登录后再发布',
       },
+    });
+  });
+
+  it('refreshes the platform account auth payload after publish login recovery succeeds', async () => {
+    const findUnique = jest.fn().mockResolvedValue({
+      id: 'job-1',
+      platform: LeadPublishPlatform.xiaohongshu,
+      platformAccountId: 'account-1',
+      draftTitle: '标题',
+      draftBody: '正文',
+      draftTags: ['露营'],
+      draftImages: ['https://example.com/1.jpg'],
+      draftVideoUrl: null,
+      platformAccount: {
+        id: 'account-1',
+        platform: LeadPublishPlatform.xiaohongshu,
+        accountName: 'old_account',
+        displayName: 'Old Account',
+        authPayloadEncrypted: 'encrypted-old',
+        browserSessionPath: 'D:/tmp/session',
+        status: PlatformAccountStatus.valid,
+        loginStatus: PlatformAccountLoginStatus.authenticated,
+      },
+    });
+    const leadPublishJobUpdate = jest
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: LeadPublishStatus.success,
+        draftUrl: 'https://creator.xiaohongshu.com/publish/success',
+      });
+    const leadPlatformAccountUpdate = jest.fn().mockResolvedValue(undefined);
+    const publish = jest.fn().mockResolvedValue({
+      draftUrl: 'https://creator.xiaohongshu.com/publish/success',
+      authPayload: 'sid=fresh_cookie',
+      accountName: 'fresh_account',
+      displayName: 'Fresh Account',
+    });
+
+    service = new PublishingService(
+      {
+        leadPublishJob: {
+          findUnique,
+          update: leadPublishJobUpdate,
+        },
+        leadPlatformAccount: {
+          update: leadPlatformAccountUpdate,
+        },
+      } as never,
+      { get: jest.fn().mockReturnValue('unit-test-secret') } as unknown as ConfigService,
+      {} as never,
+      {} as never,
+      {
+        publish,
+        getSessionPath: jest.fn().mockReturnValue('D:/tmp/session'),
+      } as never,
+    );
+
+    jest.spyOn(service as never, 'decryptAuthPayload').mockReturnValue('sid=old_cookie');
+
+    await (service as never)['executeDraftSave']('job-1');
+
+    expect(leadPlatformAccountUpdate).toHaveBeenCalledWith({
+      where: { id: 'account-1' },
+      data: expect.objectContaining({
+        accountName: 'fresh_account',
+        displayName: 'Fresh Account',
+        status: PlatformAccountStatus.valid,
+        loginStatus: PlatformAccountLoginStatus.authenticated,
+        lastError: null,
+      }),
     });
   });
 
@@ -198,6 +275,7 @@ describe('PublishingService draft payloads', () => {
         },
       } as never,
       { get: jest.fn() } as unknown as ConfigService,
+      {} as never,
       {} as never,
       {} as never,
     );
@@ -264,6 +342,11 @@ describe('PublishingService draft payloads', () => {
       createdAt: new Date('2026-04-01T00:00:00.000Z'),
       updatedAt: new Date('2026-04-30T00:00:00.000Z'),
     });
+    const collectLoginResult = jest.fn().mockResolvedValue({
+      authPayload: 'did=1234567890; token=abcdef',
+      accountName: 'chaz',
+      displayName: 'chaz',
+    });
 
     service = new PublishingService(
       {
@@ -275,6 +358,10 @@ describe('PublishingService draft payloads', () => {
       { get: jest.fn().mockReturnValue('unit-test-secret') } as unknown as ConfigService,
       {} as never,
       {} as never,
+      {
+        collectLoginResult,
+        getSessionPath: jest.fn().mockReturnValue('D:/tmp/session'),
+      } as never,
     );
 
     jest.spyOn(service as never, 'decryptAuthPayload').mockReturnValue('did=1234567890; token=abcdef');
@@ -340,6 +427,7 @@ describe('PublishingService draft payloads', () => {
       { get: jest.fn() } as unknown as ConfigService,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const result = await service.listJobs({ userId: 'user-1', role: 'employee' } as never, {
@@ -393,6 +481,7 @@ describe('PublishingService draft payloads', () => {
         },
       } as never,
       { get: jest.fn() } as unknown as ConfigService,
+      {} as never,
       {} as never,
       {} as never,
     );

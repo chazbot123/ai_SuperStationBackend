@@ -5,7 +5,9 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import {
   LeadContentStatus,
   LeadPublishPlatform,
@@ -26,7 +28,11 @@ import { ListPublishingContentsQueryDto } from './dto/list-publishing-contents-q
 import { ListPublishingJobsQueryDto } from './dto/list-publishing-jobs-query.dto';
 import { ListPlatformAccountsQueryDto } from './dto/list-platform-accounts-query.dto';
 import { PublishLeadContentDto } from './dto/publish-lead-content.dto';
+import { StartExtensionPublishJobDto } from './dto/start-extension-publish-job.dto';
+import { StartPlatformExtensionLoginDto } from './dto/start-platform-extension-login.dto';
 import { StartPlatformLoginDto } from './dto/start-platform-login.dto';
+import { SyncExtensionPublishJobDto } from './dto/sync-extension-publish-job.dto';
+import { SyncPlatformExtensionLoginDto } from './dto/sync-platform-extension-login.dto';
 import { SyncPublishingContentDto } from './dto/sync-publishing-content.dto';
 import { UpdatePlatformAccountDto } from './dto/update-platform-account.dto';
 import { PlatformLoginBrowserService } from './platform-login-browser.service';
@@ -67,6 +73,8 @@ const leadPublishJobInclude = {
     select: {
       id: true,
       platform: true,
+      authType: true,
+      authPayloadEncrypted: true,
       accountName: true,
       displayName: true,
       browserSessionPath: true,
@@ -97,6 +105,10 @@ type LeadPlatformAccountWithRelations = Prisma.LeadPlatformAccountGetPayload<{
 
 const PENDING_LOGIN_PLACEHOLDER = '__PLATFORM_LOGIN_PENDING__';
 const PENDING_LOGIN_PREVIEW = '浏览器登录中，完成后自动回收 Cookie';
+const EXTENSION_LOGIN_TOKEN_PURPOSE = 'publishing_extension_login';
+const EXTENSION_PUBLISH_TOKEN_PURPOSE = 'publishing_extension_publish';
+const EXTENSION_LOGIN_TTL_SECONDS = 5 * 60;
+const EXTENSION_PUBLISH_TTL_SECONDS = 10 * 60;
 const SUPPORTED_AUTO_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
   LeadPublishPlatform.douyin,
   LeadPublishPlatform.xiaohongshu,
@@ -104,14 +116,42 @@ const SUPPORTED_AUTO_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
   LeadPublishPlatform.kuaishou,
 ]);
 
+type ExtensionLoginSession = {
+  sessionId: string;
+  userId: string;
+  platform: LeadPublishPlatform;
+  accountId: string | null;
+  expiresAt: number;
+  status: 'pending' | 'completed';
+  syncedAccountId: string | null;
+};
+
+type ExtensionLoginTokenPayload = {
+  purpose: typeof EXTENSION_LOGIN_TOKEN_PURPOSE;
+  sid: string;
+  uid: string;
+  platform: LeadPublishPlatform;
+  aid?: string | null;
+};
+
+type ExtensionPublishTokenPayload = {
+  purpose: typeof EXTENSION_PUBLISH_TOKEN_PURPOSE;
+  jid: string;
+  uid: string;
+  platform: LeadPublishPlatform;
+  aid: string;
+};
+
 @Injectable()
 export class PublishingService {
   private readonly logger = new Logger(PublishingService.name);
   private readonly backgroundRunningJobIds = new Set<string>();
+  private readonly extensionLoginSessions = new Map<string, ExtensionLoginSession>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly jwtService: JwtService,
     private readonly productImageStorageService: ProductImageStorageService,
     private readonly platformLoginBrowserService: PlatformLoginBrowserService,
   ) {}
@@ -237,6 +277,11 @@ export class PublishingService {
   }
 
   async publishContent(user: SessionUser, id: string, dto: PublishLeadContentDto) {
+    this.logger.log(
+      `[publish-request] content=${id} user=${user.userId} targets=${dto.targets
+        .map((item) => `${item.platform}:${item.platformAccountId}`)
+        .join(',')}`,
+    );
     let content = await this.findAccessibleLeadContent(user, id);
     content = await this.ensureLeadContentAssetsPersisted(content);
 
@@ -309,7 +354,15 @@ export class PublishingService {
       }),
     );
 
-    this.triggerPublishJobs(createdJobs.map((job) => job.id));
+    this.logger.log(
+      `[publish-request] queued jobs=${createdJobs
+        .map((job) => `${job.id}:${job.platform}:${job.platformAccountId}`)
+        .join(',')}`,
+    );
+
+    if (dto.executionMode !== 'extension') {
+      this.triggerPublishJobs(createdJobs.map((job) => job.id));
+    }
 
     const refreshedJobs = await this.prisma.leadPublishJob.findMany({
       where: {
@@ -325,6 +378,125 @@ export class PublishingService {
       contentId: content.id,
       jobs: refreshedJobs.map((job) => this.serializePublishJob(job)),
     };
+  }
+
+  async startExtensionPublishJob(user: SessionUser, dto: StartExtensionPublishJobDto) {
+    const job = await this.findAccessibleLeadPublishJob(user, dto.jobId.trim());
+
+    if (!job.platformAccountId || !job.platformAccount) {
+      throw new ConflictException('该发布任务未绑定平台账号，请重新发起');
+    }
+
+    if (
+      job.platformAccount.status !== PlatformAccountStatus.valid ||
+      job.platformAccount.loginStatus !== PlatformAccountLoginStatus.authenticated
+    ) {
+      throw new ConflictException('所选平台账号尚未完成有效登录');
+    }
+
+    if (!this.isAutoPublishPlatformSupported(job.platform)) {
+      throw new ConflictException('当前阶段仅支持小红书、抖音、视频号、快手自动发布');
+    }
+
+    const sessionToken = await this.jwtService.signAsync(
+      {
+        purpose: EXTENSION_PUBLISH_TOKEN_PURPOSE,
+        jid: job.id,
+        uid: user.userId,
+        platform: job.platform,
+        aid: job.platformAccount.id,
+      } satisfies ExtensionPublishTokenPayload,
+      {
+        expiresIn: `${EXTENSION_PUBLISH_TTL_SECONDS}s`,
+      },
+    );
+
+    const running =
+      job.status === LeadPublishStatus.running
+        ? job
+        : await this.prisma.leadPublishJob.update({
+            where: { id: job.id },
+            data: {
+              status: LeadPublishStatus.running,
+              lastError: null,
+            },
+            include: leadPublishJobInclude,
+          });
+
+    return {
+      sessionToken,
+      expiresAt: new Date(Date.now() + EXTENSION_PUBLISH_TTL_SECONDS * 1000).toISOString(),
+      job: this.serializePublishJob(running),
+    };
+  }
+
+  async syncExtensionPublishJob(dto: SyncExtensionPublishJobDto) {
+    const tokenPayload = await this.verifyExtensionPublishToken(dto.sessionToken);
+    const job = await this.prisma.leadPublishJob.findUnique({
+      where: { id: tokenPayload.jid },
+      include: leadPublishJobInclude,
+    });
+
+    if (!job || !job.platformAccountId || !job.platformAccount) {
+      throw new NotFoundException('发布任务不存在');
+    }
+
+    if (job.platform !== tokenPayload.platform || job.platformAccountId !== tokenPayload.aid) {
+      throw new UnauthorizedException('扩展发布任务与平台账号不匹配');
+    }
+
+    if (dto.authPayload?.trim()) {
+      await this.prisma.leadPlatformAccount.update({
+        where: { id: job.platformAccount.id },
+        data: {
+          accountName: dto.accountName?.trim() || job.platformAccount.accountName,
+          displayName:
+            dto.displayName !== undefined
+              ? dto.displayName.trim() || null
+              : job.platformAccount.displayName,
+          authType: PlatformAccountAuthType.cookie,
+          authPayloadEncrypted: this.encryptAuthPayload(dto.authPayload.trim()),
+          authPayloadPreview: this.maskAuthPayload(dto.authPayload.trim()),
+          status: PlatformAccountStatus.valid,
+          loginStatus: PlatformAccountLoginStatus.authenticated,
+          lastLoginCompletedAt: new Date(),
+          lastValidatedAt: new Date(),
+          lastError: null,
+        },
+      });
+    }
+
+    const nextStatus =
+      dto.status === 'running'
+        ? LeadPublishStatus.running
+        : dto.status === 'success'
+          ? LeadPublishStatus.success
+          : LeadPublishStatus.failed;
+
+    const updated = await this.prisma.leadPublishJob.update({
+      where: { id: job.id },
+      data: {
+        status: nextStatus,
+        draftUrl: dto.draftUrl?.trim() || job.draftUrl,
+        draftedAt: dto.status === 'success' ? new Date() : job.draftedAt,
+        lastError:
+          dto.status === 'failed'
+            ? dto.lastError?.trim() || '本地扩展执行发布失败'
+            : dto.status === 'success'
+              ? null
+              : job.lastError,
+      },
+      include: leadPublishJobInclude,
+    });
+
+    if (nextStatus === LeadPublishStatus.failed && updated.platformAccountId) {
+      await this.markPlatformAccountAuthExpiredIfNeeded(
+        updated.platformAccountId,
+        updated.lastError || '',
+      );
+    }
+
+    return this.serializePublishJob(updated);
   }
 
   async listJobs(user: SessionUser, query: ListPublishingJobsQueryDto) {
@@ -487,6 +659,153 @@ export class PublishingService {
     return this.launchHostedLoginForAccount(created);
   }
 
+  async startPlatformExtensionLogin(user: SessionUser, dto: StartPlatformExtensionLoginDto) {
+    this.cleanupExpiredExtensionLoginSessions();
+
+    const platform = dto.platform as LeadPublishPlatform;
+    const accountId = dto.accountId?.trim() || null;
+
+    if (accountId) {
+      const current = await this.findAccessiblePlatformAccount(user, accountId);
+      if (current.platform !== platform) {
+        throw new ConflictException('平台与所选账号不匹配');
+      }
+    }
+
+    const sessionId = randomBytes(16).toString('hex');
+    const expiresAt = Date.now() + EXTENSION_LOGIN_TTL_SECONDS * 1000;
+    const sessionToken = await this.jwtService.signAsync(
+      {
+        purpose: EXTENSION_LOGIN_TOKEN_PURPOSE,
+        sid: sessionId,
+        uid: user.userId,
+        platform,
+        aid: accountId,
+      } satisfies ExtensionLoginTokenPayload,
+      {
+        expiresIn: `${EXTENSION_LOGIN_TTL_SECONDS}s`,
+      },
+    );
+
+    this.extensionLoginSessions.set(sessionId, {
+      sessionId,
+      userId: user.userId,
+      platform,
+      accountId,
+      expiresAt,
+      status: 'pending',
+      syncedAccountId: null,
+    });
+
+    return {
+      sessionId,
+      sessionToken,
+      platform,
+      accountId,
+      expiresAt: new Date(expiresAt).toISOString(),
+      loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(platform),
+    };
+  }
+
+  async syncPlatformExtensionLogin(dto: SyncPlatformExtensionLoginDto) {
+    this.cleanupExpiredExtensionLoginSessions();
+
+    const tokenPayload = await this.verifyExtensionLoginToken(dto.sessionToken);
+    const session = this.extensionLoginSessions.get(tokenPayload.sid);
+
+    if (!session || session.userId !== tokenPayload.uid || session.platform !== tokenPayload.platform) {
+      throw new UnauthorizedException('扩展登录会话不存在或已失效');
+    }
+
+    if (session.expiresAt <= Date.now()) {
+      this.extensionLoginSessions.delete(session.sessionId);
+      throw new UnauthorizedException('扩展登录会话已过期');
+    }
+
+    const authPayload = dto.authPayload.trim();
+    if (!authPayload) {
+      throw new ConflictException('Cookie / Token 不能为空');
+    }
+
+    const validation = this.validateAuthPayload(dto.authType as PlatformAccountAuthType, authPayload);
+    if (validation.status !== PlatformAccountStatus.valid) {
+      throw new ConflictException(validation.lastError ?? '登录信息校验未通过');
+    }
+
+    const requestedAccountName = dto.accountName?.trim() || '';
+    const displayName = dto.displayName?.trim() || null;
+    const remark = dto.remark?.trim() || null;
+
+    let saved: LeadPlatformAccountWithRelations;
+    if (session.accountId) {
+      const current = await this.prisma.leadPlatformAccount.findFirst({
+        where: {
+          id: session.accountId,
+          creatorId: session.userId,
+        },
+        include: leadPlatformAccountInclude,
+      });
+
+      if (!current) {
+        throw new NotFoundException('平台登录账号不存在');
+      }
+
+      saved = await this.prisma.leadPlatformAccount.update({
+        where: { id: current.id },
+        data: {
+          authType: dto.authType as PlatformAccountAuthType,
+          accountName:
+            requestedAccountName || current.accountName || `auto_${session.platform}_${new Date().getTime().toString(36)}`,
+          displayName,
+          authPayloadEncrypted: this.encryptAuthPayload(authPayload),
+          authPayloadPreview: this.maskAuthPayload(authPayload),
+          loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(session.platform),
+          status: PlatformAccountStatus.valid,
+          loginStatus: PlatformAccountLoginStatus.authenticated,
+          lastLoginCompletedAt: new Date(),
+          lastValidatedAt: new Date(),
+          lastError: null,
+          ...(remark !== null ? { remark } : {}),
+        },
+        include: leadPlatformAccountInclude,
+      });
+    } else {
+      try {
+        saved = await this.prisma.leadPlatformAccount.create({
+          data: {
+            creatorId: session.userId,
+            platform: session.platform,
+            authType: dto.authType as PlatformAccountAuthType,
+            accountName:
+              requestedAccountName || `auto_${session.platform}_${new Date().getTime().toString(36)}`,
+            displayName,
+            authPayloadEncrypted: this.encryptAuthPayload(authPayload),
+            authPayloadPreview: this.maskAuthPayload(authPayload),
+            loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(session.platform),
+            status: PlatformAccountStatus.valid,
+            loginStatus: PlatformAccountLoginStatus.authenticated,
+            lastLoginCompletedAt: new Date(),
+            lastValidatedAt: new Date(),
+            lastError: null,
+            remark,
+          },
+          include: leadPlatformAccountInclude,
+        });
+      } catch (error) {
+        this.handlePlatformAccountWriteError(error);
+      }
+    }
+
+    session.status = 'completed';
+    session.syncedAccountId = saved.id;
+
+    return {
+      sessionId: session.sessionId,
+      account: this.serializePlatformAccount(saved),
+      sourceUrl: dto.sourceUrl?.trim() || null,
+    };
+  }
+
   async updatePlatformAccount(user: SessionUser, id: string, dto: UpdatePlatformAccountDto) {
     const current = await this.findAccessiblePlatformAccount(user, id);
     const nextAuthPayload = dto.authPayload?.trim();
@@ -531,6 +850,56 @@ export class PublishingService {
   async validatePlatformAccount(user: SessionUser, id: string) {
     const current = await this.findAccessiblePlatformAccount(user, id);
     const decryptedPayload = this.decryptAuthPayload(current.authPayloadEncrypted);
+    if (current.authType === PlatformAccountAuthType.cookie) {
+      try {
+        const result = await this.platformLoginBrowserService.collectLoginResult({
+          accountId: current.id,
+          sessionPath:
+            current.browserSessionPath || this.platformLoginBrowserService.getSessionPath(current.id),
+          platform: current.platform,
+          authPayload: decryptedPayload,
+          loginUrl: current.loginUrl,
+          fallbackAccountName: current.accountName,
+        });
+
+        const updated = await this.prisma.leadPlatformAccount.update({
+          where: { id: current.id },
+          data: {
+            accountName: result.accountName || current.accountName,
+            displayName: result.displayName,
+            authType: PlatformAccountAuthType.cookie,
+            authPayloadEncrypted: this.encryptAuthPayload(result.authPayload),
+            authPayloadPreview: this.maskAuthPayload(result.authPayload),
+            status: PlatformAccountStatus.valid,
+            loginStatus: PlatformAccountLoginStatus.authenticated,
+            lastValidatedAt: new Date(),
+            lastLoginCompletedAt: new Date(),
+            lastError: null,
+          },
+          include: leadPlatformAccountInclude,
+        });
+
+        return this.serializePlatformAccount(updated);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '平台登录状态校验失败';
+        const updated = await this.prisma.leadPlatformAccount.update({
+          where: { id: current.id },
+          data: {
+            status: PlatformAccountStatus.invalid,
+            loginStatus:
+              current.loginStatus === PlatformAccountLoginStatus.pending
+                ? PlatformAccountLoginStatus.pending
+                : PlatformAccountLoginStatus.failed,
+            lastValidatedAt: new Date(),
+            lastError: message,
+          },
+          include: leadPlatformAccountInclude,
+        });
+
+        return this.serializePlatformAccount(updated);
+      }
+    }
+
     const validation = this.validateAuthPayload(current.authType, decryptedPayload);
     const nextLoginStatus =
       validation.status === PlatformAccountStatus.valid
@@ -805,12 +1174,34 @@ export class PublishingService {
           this.platformLoginBrowserService.getSessionPath(current.platformAccount.id),
         platform: current.platform,
         jobId: current.id,
+        authPayload: this.decryptAuthPayload(current.platformAccount.authPayloadEncrypted),
         title: current.draftTitle,
         body: current.draftBody,
         tags: current.draftTags,
         images: current.draftImages,
         videoUrl: current.draftVideoUrl,
       });
+
+      if (result.authPayload) {
+        await this.prisma.leadPlatformAccount.update({
+          where: { id: current.platformAccount.id },
+          data: {
+            accountName: result.accountName || current.platformAccount.accountName,
+            displayName:
+              result.displayName !== undefined
+                ? result.displayName
+                : current.platformAccount.displayName,
+            authType: PlatformAccountAuthType.cookie,
+            authPayloadEncrypted: this.encryptAuthPayload(result.authPayload),
+            authPayloadPreview: this.maskAuthPayload(result.authPayload),
+            status: PlatformAccountStatus.valid,
+            loginStatus: PlatformAccountLoginStatus.authenticated,
+            lastLoginCompletedAt: new Date(),
+            lastValidatedAt: new Date(),
+            lastError: null,
+          },
+        });
+      }
 
       return this.prisma.leadPublishJob.update({
         where: { id: current.id },
@@ -843,6 +1234,7 @@ export class PublishingService {
       }
 
       this.backgroundRunningJobIds.add(jobId);
+      this.logger.log(`[publish-queue] schedule job=${jobId}`);
       setTimeout(() => {
         void this.executeDraftSaveInBackground(jobId);
       }, 0);
@@ -851,6 +1243,7 @@ export class PublishingService {
 
   private async executeDraftSaveInBackground(jobId: string) {
     try {
+      this.logger.log(`[publish-queue] run job=${jobId}`);
       await this.executeDraftSave(jobId);
     } catch (error) {
       const message = error instanceof Error ? error.message : '发布任务后台执行失败';
@@ -1244,6 +1637,45 @@ export class PublishingService {
           status: PlatformAccountStatus.invalid,
           lastError: 'Token 长度校验未通过',
         };
+  }
+
+  private cleanupExpiredExtensionLoginSessions() {
+    const now = Date.now();
+    for (const [sessionId, session] of this.extensionLoginSessions.entries()) {
+      if (session.expiresAt <= now) {
+        this.extensionLoginSessions.delete(sessionId);
+      }
+    }
+  }
+
+  private async verifyExtensionLoginToken(token: string) {
+    try {
+      const payload = await this.jwtService.verifyAsync<ExtensionLoginTokenPayload>(token);
+      if (payload.purpose !== EXTENSION_LOGIN_TOKEN_PURPOSE) {
+        throw new UnauthorizedException('扩展登录令牌用途无效');
+      }
+      return payload;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('扩展登录令牌无效或已过期');
+    }
+  }
+
+  private async verifyExtensionPublishToken(token: string) {
+    try {
+      const payload = await this.jwtService.verifyAsync<ExtensionPublishTokenPayload>(token);
+      if (payload.purpose !== EXTENSION_PUBLISH_TOKEN_PURPOSE) {
+        throw new UnauthorizedException('扩展发布令牌用途无效');
+      }
+      return payload;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('扩展发布令牌无效或已过期');
+    }
   }
 
   private handlePlatformAccountWriteError(error: unknown): never {

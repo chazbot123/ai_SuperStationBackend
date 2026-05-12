@@ -1,70 +1,86 @@
-# AI-SuperWeb Ubuntu 安装到上线完整手册
+# AI-SuperWeb Ubuntu 运行包部署手册
 
 ## 目标
-- 在 `Ubuntu` 服务器上完成当前项目安装、环境准备、部署上线。
-- 沿用当前测试环境已有业务数据，不从空库重新开始。
-- 保持当前项目架构不大改：
-  - 后台前端：`src/**`
-  - 超级站前台：`ZL_Supersite/**`
-  - 后端：`server/**`
-  - 基础服务：`PostgreSQL / Redis / MinIO`
+- 不在服务器拉源码。
+- 本机先打好 `2 个前端 + 1 个后端` 运行包，再上传到服务器部署。
+- 保持原有架构不变：
+  - `Nginx` 托管两个前端静态文件
+  - `PM2` 托管 `NestJS` 后端
+  - `Docker Compose` 只跑 `PostgreSQL / Redis / MinIO`
+- 线上继续使用当前已经备份好的业务数据。
 
-## 当前推荐部署架构
+## 本次本机现成文件
+
+### 运行包目录
+- `D:\zhilin_project\backups\deploy_bundle_20260509_143128\project-root`
+
+### 现有备份目录
+- `D:\zhilin_project\backups\sql\ai_superweb.sql`
+- `D:\zhilin_project\backups\redis\data`
+- `D:\zhilin_project\backups\minio\data`
+
+## 服务器目标根目录
+- 服务器项目根目录按本次要求统一使用 `/data/ai-superweb`
+
+## 当前推荐上线架构
 
 ```text
 Browser
   |
-  +-- admin.example.com  -> 后台前端静态站点
-  |                          \-> /api -> NestJS
+  +-- zlb.jizhidaoai.com -> Nginx -> /data/ai-superweb/dist
+  |                         \-> /api -> 127.0.0.1:3001
   |
-  +-- site.example.com   -> 超级站前台静态站点
-                             \-> /api -> NestJS
+  +-- zlf.jizhidaoai.com  -> Nginx -> /data/ai-superweb/ZL_Supersite/dist
+                            \-> /api -> 127.0.0.1:3001
 
 Ubuntu Server
   |
+  +-- /data/ai-superweb
+  |    +-- dist
+  |    +-- ZL_Supersite/dist
+  |    +-- server
+  |    +-- data/postgres
+  |    +-- data/redis
+  |    +-- data/minio
+  |    +-- backups
+  |    +-- docker-compose.yml
+  |    +-- .env
+  |
   +-- Nginx
-  +-- PM2 托管 NestJS
+  +-- PM2
   +-- Docker Compose
-       +-- PostgreSQL 16 + pgvector
-       +-- Redis 7
-       +-- MinIO
 ```
 
-## 这次迁移必须保留的数据
-- `PostgreSQL`：主业务数据，必须迁。
-- `MinIO`：商品图、知识库文件、生成图片等对象文件，建议一起迁。
-- `Redis`：当前 AI 模型配置缓存按 `ai:model-config:*` 保存在 Redis；如果你希望线上和测试环境保持完全一致，建议一起迁。
+## 运行包内应该有什么
+- 根目录 `dist`：后台前端构建产物
+- `ZL_Supersite/dist`：超级站前端构建产物
+- `server/dist`：后端编译产物
+- `server/node_modules`：后端运行时依赖
+- `server/package.json`
+- `server/package-lock.json`
+- `server/prisma/schema.prisma`
+- `docker-compose.yml`
 
-## 关键原则
-- `PostgreSQL` 不直接拷贝数据目录跨机器复用，优先使用 `pg_dump/pg_restore`。
-- `MinIO` 和 `Redis` 可以迁数据目录，但必须在服务停止状态下操作。
-- 前端生产环境不跑 `vite dev`，统一 `build` 后交给 `Nginx`。
-- 后端生产环境不跑 `start:dev`，统一 `npm run build` 后由 `PM2` 托管 `node dist/main`。
+## 为什么这次不用拉源码
+- 前端是静态站点，只需要 `dist`
+- 后端运行只需要 `dist + node_modules + package.json + .env`
+- 当前服务器不再负责前端构建和后端编译，只负责运行
 
-## 1. 服务器准备
+## 1. 服务器基础环境
 
-### 推荐规格
+### 1.1 建议规格
 - `Ubuntu 22.04 LTS` 或 `Ubuntu 24.04 LTS`
-- `4 vCPU / 8 GB RAM / 100 GB SSD` 起步
-- 正式生产建议 `8 vCPU / 16 GB RAM / 200 GB SSD`
+- 最少 `4 vCPU / 8 GB RAM / 100 GB SSD`
 
-### 建议域名
-- 后台：`admin.example.com`
-- 超级站前台：`site.example.com`
-
-说明：
-- 当前两个前端构建默认都更适合部署在域名根路径。
-- 这样不需要改 Vite `base`，也不需要为 `/admin` 子路径额外改构建配置。
-
-## 2. Ubuntu 基础环境安装
+### 1.2 安装基础工具
 
 ```bash
 sudo apt update
-sudo apt install -y git curl unzip wget jq ca-certificates gnupg lsb-release build-essential nginx
+sudo apt install -y curl unzip wget jq ca-certificates gnupg lsb-release build-essential nginx
 sudo timedatectl set-timezone Asia/Shanghai
 ```
 
-## 3. 安装 Docker 与 Compose
+## 2. 安装 Docker 与 Compose
 
 ```bash
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -84,99 +100,123 @@ docker --version
 docker compose version
 ```
 
-## 4. 安装 Node.js 20 与 PM2
+## 3. 安装 Node.js 20、PM2、Xvfb、Chrome
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm install -g pm2
 
+sudo apt install -y xvfb x11-utils fonts-liberation libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
+  libcups2t64 libdrm2 libgbm1 libgtk-3-0t64 libnspr4 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 \
+  libxfixes3 libxkbcommon0 libxrandr2 wget
+
+wget -O /tmp/google-chrome-stable_current_amd64.deb \
+  https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y /tmp/google-chrome-stable_current_amd64.deb
+rm -f /tmp/google-chrome-stable_current_amd64.deb
+
 node -v
 npm -v
 pm2 -v
+Xvfb -help >/dev/null 2>&1 || true
+google-chrome --version
 ```
 
-## 5. 服务器目录规划
+如果你希望直接用仓库脚本安装，也可以上传后执行：
 
 ```bash
-sudo mkdir -p /opt/ai-superweb
-sudo chown -R $USER:$USER /opt/ai-superweb
-
-mkdir -p /opt/ai-superweb/app
-mkdir -p /opt/ai-superweb/backups
-mkdir -p /opt/ai-superweb/logs
+cd /data/ai-superweb
+chmod +x scripts/install-ubuntu-xvfb-browser.sh
+./scripts/install-ubuntu-xvfb-browser.sh
 ```
 
-## 6. 拉取代码
+## 4. 创建服务器目录
 
 ```bash
-cd /opt/ai-superweb/app
-git clone https://github.com/chazbot123/ai_SuperStationBackend.git current
-cd current
-git checkout main
+sudo mkdir -p /data/ai-superweb
+sudo chown -R $USER:$USER /data/ai-superweb
+
+mkdir -p /data/ai-superweb/backups
+mkdir -p /data/ai-superweb/data
+mkdir -p /data/ai-superweb/logs
+mkdir -p /data/ai-superweb/scripts
+mkdir -p /data/ai-superweb/ZL_Supersite
+mkdir -p /data/ai-superweb/server
 ```
 
-## 7. 从当前测试环境导出数据
+## 5. 上传运行包和备份
 
-### 7.1 导出 PostgreSQL
+### 5.1 上传运行包
 
-如果当前测试库就是本项目根目录 `docker-compose.yml` 启动的 `postgres`：
+推荐把本机运行包目录内容上传到服务器 `/data/ai-superweb/`：
 
 ```bash
-cd D:\zhilin_project
-mkdir -p backups
-docker exec ai-superweb-postgres pg_dump -U ai_superweb -d ai_superweb -Fc -f /tmp/ai_superweb.dump
-docker cp ai-superweb-postgres:/tmp/ai_superweb.dump ./backups/ai_superweb.dump
+scp -r D:/zhilin_project/backups/deploy_bundle_20260509_143128/project-root/* user@your-server:/data/ai-superweb/
 ```
 
-如果不是容器库，而是普通本机 PostgreSQL：
+如果你用 `WinSCP`：
+- 本地目录选择 `D:\zhilin_project\backups\deploy_bundle_20260509_143128\project-root`
+- 远端目录选择 `/data/ai-superweb`
+- 上传时覆盖同名文件
+
+### 5.2 上传备份文件
 
 ```bash
-pg_dump -h 127.0.0.1 -p 5432 -U ai_superweb -d ai_superweb -Fc -f ai_superweb.dump
+scp D:/zhilin_project/backups/sql/ai_superweb.sql user@your-server:/data/ai-superweb/backups/sql/
+scp -r D:/zhilin_project/backups/redis/data user@your-server:/data/ai-superweb/backups/redis/
+scp -r D:/zhilin_project/backups/minio/data user@your-server:/data/ai-superweb/backups/minio/
 ```
 
-### 7.2 备份 MinIO 数据
-
-如果要沿用当前图片、知识库文件、生成素材，必须一起迁。
-
-当前项目若使用根目录 `data/minio`：
+如果服务器还没有这些子目录，先执行：
 
 ```bash
-cd D:\zhilin_project
-tar -czf backups/minio-data.tar.gz data/minio
+mkdir -p /data/ai-superweb/backups/sql
+mkdir -p /data/ai-superweb/backups/redis
+mkdir -p /data/ai-superweb/backups/minio
 ```
 
-### 7.3 备份 Redis 数据
+## 6. 确认服务器目录结构
 
-如果要保留当前 AI 模型配置缓存，建议一起迁。
+上传完成后，目录应接近这样：
 
-当前项目若使用根目录 `data/redis`：
+```text
+/data/ai-superweb
+  ├─ dist
+  ├─ scripts
+  ├─ ZL_Supersite/dist
+  ├─ server/dist
+  ├─ server/node_modules
+  ├─ server/package.json
+  ├─ server/package-lock.json
+  ├─ logs
+  ├─ docker-compose.yml
+  └─ backups
+     ├─ sql/ai_superweb.sql
+     ├─ redis/data
+     └─ minio/data
+```
+
+## 7. 配置根目录 `.env`
 
 ```bash
-cd D:\zhilin_project
-tar -czf backups/redis-data.tar.gz data/redis
+cd /data/ai-superweb
+cat > .env <<'EOF'
+POSTGRES_DB=ai_superweb
+POSTGRES_USER=ai_superweb
+POSTGRES_PASSWORD=请改成强密码
+POSTGRES_PORT=5432
+
+REDIS_PORT=6379
+
+MINIO_ROOT_USER=ai-superweb
+MINIO_ROOT_PASSWORD=请改成强密码
+MINIO_API_PORT=9000
+MINIO_CONSOLE_PORT=9001
+EOF
 ```
 
-### 7.4 上传备份到服务器
-
-```bash
-scp ai_superweb.dump user@your-server:/opt/ai-superweb/backups/
-scp minio-data.tar.gz user@your-server:/opt/ai-superweb/backups/
-scp redis-data.tar.gz user@your-server:/opt/ai-superweb/backups/
-```
-
-## 8. 配置基础服务环境变量
-
-### 8.1 根目录 `.env`
-
-在服务器上：
-
-```bash
-cd /opt/ai-superweb/app/current
-cp .env.example .env
-```
-
-建议改成：
+内容如下：
 
 ```env
 POSTGRES_DB=ai_superweb
@@ -192,20 +232,106 @@ MINIO_API_PORT=9000
 MINIO_CONSOLE_PORT=9001
 ```
 
-### 8.2 后端 `server/.env`
+说明：
+- 这个 `.env` 只给根目录 `docker-compose.yml` 使用
+- `PostgreSQL / Redis / MinIO` 的端口和账号都从这里读取
+- 即使服务器上没有 `.env.example`，也可以直接用上面的命令创建
+
+## 8. 启动基础服务
 
 ```bash
-cd /opt/ai-superweb/app/current/server
-cp .env.example .env
+cd /data/ai-superweb
+docker compose up -d postgres redis minio
+docker compose ps
 ```
 
-建议改成：
+确认：
+- `ai-superweb-postgres` 正常
+- `ai-superweb-redis` 正常
+- `ai-superweb-minio` 正常
 
-```env
-PORT=3000
+## 9. 恢复 PostgreSQL 备份
+
+这次现有备份是普通 SQL 文件，不是 `.dump`。
+
+### 9.1 重建数据库
+
+```bash
+docker exec ai-superweb-postgres psql -U ai_superweb -d postgres -c "DROP DATABASE IF EXISTS ai_superweb;"
+docker exec ai-superweb-postgres psql -U ai_superweb -d postgres -c "CREATE DATABASE ai_superweb OWNER ai_superweb;"
+```
+
+### 9.2 导入 SQL
+
+```bash
+docker exec -i ai-superweb-postgres psql -U ai_superweb -d ai_superweb < /data/ai-superweb/backups/sql/ai_superweb.sql
+```
+
+说明：
+- 当前目标是沿用已有测试数据
+- 恢复后先不要急着执行 `prisma db push`
+- 只有在确认代码结构比备份库更新时，才先再备份一次后再审慎执行
+
+## 10. 恢复 MinIO 数据
+
+恢复前先停服务：
+
+```bash
+cd /data/ai-superweb
+docker compose stop minio
+```
+
+覆盖数据目录：
+
+```bash
+rm -rf /data/ai-superweb/data/minio
+cp -a /data/ai-superweb/backups/minio/data /data/ai-superweb/data/minio
+```
+
+再启动：
+
+```bash
+cd /data/ai-superweb
+docker compose up -d minio
+```
+
+说明：
+- 这一步必须恢复，否则数据库里已有图片和文件记录会指向空对象
+
+## 11. 恢复 Redis 数据
+
+恢复前先停服务：
+
+```bash
+cd /data/ai-superweb
+docker compose stop redis
+```
+
+覆盖数据目录：
+
+```bash
+rm -rf /data/ai-superweb/data/redis
+cp -a /data/ai-superweb/backups/redis/data /data/ai-superweb/data/redis
+```
+
+再启动：
+
+```bash
+cd /data/ai-superweb
+docker compose up -d redis
+```
+
+说明：
+- 当前 AI 模型配置缓存依赖 Redis
+- 如果不恢复 Redis，业务主数据还在，但模型配置可能需要重新设置
+
+## 12. 配置后端 `server/.env`
+
+```bash
+cd /data/ai-superweb/server
+cat > .env <<'EOF'
+PORT=3001
 NODE_ENV=production
-
-# 这里可以留空或按你的单域方案填写
 CORS_ORIGIN=
 
 JWT_SECRET=请改成强密码
@@ -222,121 +348,64 @@ MINIO_ACCESS_KEY=ai-superweb
 MINIO_SECRET_KEY=请改成强密码
 MINIO_BUCKET=ai-superweb
 
+FFMPEG_PATH=/usr/bin/ffmpeg
+FFPROBE_PATH=/usr/bin/ffprobe
+
+PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome
+PUBLISHING_BROWSER_HEADLESS=false
+
+AMAP_WEB_SERVICE_KEY=
+EOF
+```
+
+内容如下：
+
+```env
+PORT=3001
+NODE_ENV=production
+CORS_ORIGIN=
+
+JWT_SECRET=请改成强密码
+JWT_EXPIRES_IN=7d
+SESSION_DEVICE_LIMIT=2
+
+DATABASE_URL=postgresql://ai_superweb:请改成强密码@127.0.0.1:5432/ai_superweb?schema=public
+REDIS_URL=redis://127.0.0.1:6379
+
+MINIO_ENDPOINT=127.0.0.1
+MINIO_PORT=9000
+MINIO_USE_SSL=false
+MINIO_ACCESS_KEY=ai-superweb
+MINIO_SECRET_KEY=请改成强密码
+MINIO_BUCKET=ai-superweb
+
+FFMPEG_PATH=/usr/bin/ffmpeg
+FFPROBE_PATH=/usr/bin/ffprobe
+
+PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome
+PUBLISHING_BROWSER_HEADLESS=false
+
 AMAP_WEB_SERVICE_KEY=
 ```
 
 说明：
-- 当前代码里前台会通过各自域名访问本域 `/api`，Nginx 再反代到后端。
-- 这样前端不会直接跨域请求 `3000`。
+- 当前后端正式运行端口按 `3001`
+- 当前代码内部默认仍是 `process.env.PORT ?? 3000`
+- 如果 `server/.env` 没有正确提供 `PORT=3001`，后端会退回监听 `3000`
+- 即使服务器上没有 `server/.env.example`，也可以直接用上面的命令创建 `server/.env`
+- 不要把 `server/.env` 写成只剩 `PORT=3001`
+- 至少要保留 `DATABASE_URL / REDIS_URL / MINIO_* / JWT_*`
+- 视频后处理建议显式指定 `FFMPEG_PATH=/usr/bin/ffmpeg`、`FFPROBE_PATH=/usr/bin/ffprobe`
+- `PUBLISHING_BROWSER_EXECUTABLE_PATH` 固定指向服务器 Chrome
+- `PUBLISHING_BROWSER_HEADLESS=false` 的前提是后端由 `Xvfb` 提供虚拟显示
 
-## 9. 启动基础服务
-
-```bash
-cd /opt/ai-superweb/app/current
-docker compose up -d postgres redis minio
-docker compose ps
-```
-
-## 10. 恢复测试环境数据
-
-### 10.1 恢复 PostgreSQL
+## 13. 启动后端
 
 ```bash
-cd /opt/ai-superweb/app/current
-docker cp /opt/ai-superweb/backups/ai_superweb.dump ai-superweb-postgres:/tmp/ai_superweb.dump
-
-docker exec ai-superweb-postgres psql -U ai_superweb -d postgres -c "DROP DATABASE IF EXISTS ai_superweb;"
-docker exec ai-superweb-postgres psql -U ai_superweb -d postgres -c "CREATE DATABASE ai_superweb;"
-
-docker exec ai-superweb-postgres pg_restore -U ai_superweb -d ai_superweb --clean --if-exists /tmp/ai_superweb.dump
-```
-
-注意：
-- 当前目标是沿用测试环境数据，所以恢复后一般不需要再重建空库。
-- 如果当前代码和备份数据库完全同版，恢复后不要再盲目执行 `prisma db push`。
-- 只有在代码 schema 明显比备份库更新时，才在再次备份后审慎执行 `prisma db push`。
-
-### 10.2 恢复 MinIO 数据
-
-恢复前先停掉 MinIO：
-
-```bash
-cd /opt/ai-superweb/app/current
-docker compose stop minio
-```
-
-恢复数据：
-
-```bash
-cd /opt/ai-superweb/app/current
-rm -rf data/minio
-tar -xzf /opt/ai-superweb/backups/minio-data.tar.gz
-docker compose up -d minio
-```
-
-说明：
-- 如果数据库里已经保存了商品图、知识库文件、生成素材的 `storageUrl/objectKey`，但你不恢复 MinIO，线上会出现“记录还在但文件打不开”。
-
-### 10.3 恢复 Redis 数据
-
-恢复前先停掉 Redis：
-
-```bash
-cd /opt/ai-superweb/app/current
-docker compose stop redis
-```
-
-恢复数据：
-
-```bash
-cd /opt/ai-superweb/app/current
-rm -rf data/redis
-tar -xzf /opt/ai-superweb/backups/redis-data.tar.gz
-docker compose up -d redis
-```
-
-说明：
-- 当前 AI 模型配置缓存存放在 Redis `ai:model-config:*` 键下。
-- 如果不恢复 Redis，上线后业务数据仍在，但 AI 模型配置可能需要重新配置。
-
-## 11. 安装依赖并构建项目
-
-### 11.1 后台前端
-
-```bash
-cd /opt/ai-superweb/app/current
-npm ci
-npm run build
-```
-
-构建产物：
-- `/opt/ai-superweb/app/current/dist`
-
-### 11.2 超级站前台
-
-```bash
-cd /opt/ai-superweb/app/current/ZL_Supersite
-npm ci
-npm run build
-```
-
-构建产物：
-- `/opt/ai-superweb/app/current/ZL_Supersite/dist`
-
-### 11.3 后端
-
-```bash
-cd /opt/ai-superweb/app/current/server
-npm ci
-npm run prisma:generate
-npm run build
-```
-
-## 12. 启动后端服务
-
-```bash
-cd /opt/ai-superweb/app/current/server
-pm2 start dist/main.js --name ai-superweb-server --cwd /opt/ai-superweb/app/current/server
+cd /data/ai-superweb/server
+pm2 delete ai-superweb-server || true
+chmod +x /data/ai-superweb/scripts/start-server-with-xvfb.sh
+pm2 start /data/ai-superweb/scripts/start-server-with-xvfb.sh --name ai-superweb-server --interpreter bash
 pm2 save
 pm2 startup systemd -u $USER --hp /home/$USER
 ```
@@ -345,20 +414,25 @@ pm2 startup systemd -u $USER --hp /home/$USER
 
 ```bash
 pm2 ls
-curl http://127.0.0.1:3000/api
+curl http://127.0.0.1:3001/api/health
+tail -n 50 /data/ai-superweb/logs/xvfb.log
 ```
 
 正常应返回：
 
 ```json
-{"name":"ai-superweb-server","status":"ok"}
+{"status":"ok"}
 ```
 
-## 13. 配置 Nginx
+说明：
+- 现在 `PM2` 托管的是 `scripts/start-server-with-xvfb.sh`
+- 这个脚本会先检查并拉起 `Xvfb :99`
+- 然后导出 `DISPLAY=:99`，再启动 `node dist/main.js`
+- 这样服务器即使没有桌面环境，平台登录也能用虚拟显示启动浏览器
 
-### 13.1 后台前端站点
+## 14. 配置 Nginx
 
-新建：
+### 14.1 后台前端
 
 ```bash
 sudo nano /etc/nginx/sites-available/ai-superweb-admin.conf
@@ -369,13 +443,13 @@ sudo nano /etc/nginx/sites-available/ai-superweb-admin.conf
 ```nginx
 server {
     listen 80;
-    server_name admin.example.com;
+    server_name zlb.jizhidaoai.com;
 
-    root /opt/ai-superweb/app/current/dist;
+    root /data/ai-superweb/dist;
     index index.html;
 
     location /api/ {
-        proxy_pass http://127.0.0.1:3000/api/;
+        proxy_pass http://127.0.0.1:3001/api/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -384,7 +458,7 @@ server {
     }
 
     location = /api {
-        proxy_pass http://127.0.0.1:3000/api;
+        proxy_pass http://127.0.0.1:3001/api;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -398,9 +472,7 @@ server {
 }
 ```
 
-### 13.2 超级站前台站点
-
-新建：
+### 14.2 超级站前台
 
 ```bash
 sudo nano /etc/nginx/sites-available/ai-superweb-site.conf
@@ -411,15 +483,15 @@ sudo nano /etc/nginx/sites-available/ai-superweb-site.conf
 ```nginx
 server {
     listen 80;
-    server_name site.example.com;
+    server_name zlf.jizhidaoai.com;
 
-    root /opt/ai-superweb/app/current/ZL_Supersite/dist;
+    root /data/ai-superweb/ZL_Supersite/dist;
     index index.html;
 
     client_max_body_size 50m;
 
     location /api/ {
-        proxy_pass http://127.0.0.1:3000/api/;
+        proxy_pass http://127.0.0.1:3001/api/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -428,7 +500,7 @@ server {
     }
 
     location = /api {
-        proxy_pass http://127.0.0.1:3000/api;
+        proxy_pass http://127.0.0.1:3001/api;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -442,34 +514,29 @@ server {
 }
 ```
 
-### 13.3 启用站点
+### 14.3 启用站点
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/ai-superweb-admin.conf /etc/nginx/sites-enabled/
-sudo ln -s /etc/nginx/sites-available/ai-superweb-site.conf /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/ai-superweb-admin.conf /etc/nginx/sites-enabled/ai-superweb-admin.conf
+sudo ln -sf /etc/nginx/sites-available/ai-superweb-site.conf /etc/nginx/sites-enabled/ai-superweb-site.conf
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## 14. 配置 HTTPS
+## 15. HTTPS
 
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d admin.example.com -d site.example.com
-```
-
-续期检查：
-
-```bash
+sudo certbot --nginx -d zlb.jizhidaoai.com -d zlf.jizhidaoai.com
 sudo certbot renew --dry-run
 ```
 
-## 15. 上线后检查清单
+## 16. 上线检查清单
 
-### 基础服务
+### 16.1 基础服务
 
 ```bash
-cd /opt/ai-superweb/app/current
+cd /data/ai-superweb
 docker compose ps
 ```
 
@@ -478,60 +545,62 @@ docker compose ps
 - `redis` 正常
 - `minio` 正常
 
-### 后端
+### 16.2 后端
 
 ```bash
-curl http://127.0.0.1:3000/api
+curl http://127.0.0.1:3001/api/health
 pm2 logs ai-superweb-server --lines 100
 ```
 
-### 后台前端
-- 打开 `https://admin.example.com`
+### 16.3 后台前端
+- 打开 `https://zlb.jizhidaoai.com`
 - 登录后台
 - 检查 `产品 / 知识库 / 客服 / 超级站配置中心`
 
-### 超级站前台
-- 打开 `https://site.example.com`
+### 16.4 超级站前台
+- 打开 `https://zlf.jizhidaoai.com`
 - 检查 `运营指标 / 产品 / 行业资讯 / AI客服`
 
-### 数据验证
-- 后台是否能看到测试环境原有用户、商品、知识库记录
+### 16.5 数据验证
+- 后台是否能看到原有用户和商品
 - 超级站前台是否能看到原有公开商品
-- 图片、知识库文件、生成素材是否能正常打开
+- 图片、知识库文件、生成素材是否能打开
 - AI 模型配置是否保持原状
 
-## 16. 回滚方案
+## 17. 这次实际坑点
+- 这次部署方案不再依赖 `git clone`，服务器上不需要源码目录
+- 后端不能只传 `server/dist`，还必须带 `server/node_modules`
+- 后端正式端口按 `3001`，不要漏改 `Nginx` 和健康检查
+- 当前服务器就算没有 `.env.example` 和 `server/.env.example`，也不影响部署；直接手建根目录 `.env` 和 `server/.env` 即可
+- `server/.env` 不能只留 `PORT=3001`，否则会因为缺少数据库和存储配置直接启动失败
+- 当前 SQL 备份是 `ai_superweb.sql`，恢复时要用 `psql`，不是 `pg_restore`
+- `Redis` 和 `MinIO` 当前备份是目录，不是压缩包，恢复时是覆盖目录，不是解压 `.tar.gz`
+- 如果只恢复 SQL 不恢复 MinIO，后台和前台很多图片、文件会打不开
+
+## 18. 回滚方案
 
 如果上线后异常：
-- 停掉后端：
 
 ```bash
 pm2 stop ai-superweb-server
 ```
 
-- 恢复数据库：
-  - 使用上线前备份重新 `pg_restore`
-- 恢复 MinIO：
-  - 用上线前的 `minio-data.tar.gz` 覆盖 `data/minio`
-- 恢复 Redis：
-  - 用上线前的 `redis-data.tar.gz` 覆盖 `data/redis`
-- 前端回滚：
-  - 切回上一个 Git 提交后重新 `build`
+然后按这三类回滚：
+- PostgreSQL：用上线前 SQL 重新导入
+- Redis：用上线前的 `backups/redis/data` 覆盖 `data/redis`
+- MinIO：用上线前的 `backups/minio/data` 覆盖 `data/minio`
 
-## 17. 这份方案的结论
-- 当前项目最稳妥的上线方式不是“把所有东西都容器化”，而是：
-  - `Docker Compose` 只跑 `PostgreSQL / Redis / MinIO`
-  - `Nginx` 托管两个前端静态产物
-  - `PM2` 托管 `NestJS`
-- 如果你要沿用当前测试环境业务数据，只迁 `PostgreSQL` 还不够：
-  - 图片和知识库文件依赖 `MinIO`
-  - 当前 AI 模型配置依赖 `Redis`
+前端回滚：
+- 直接回滚到上一版 `dist`
+- 再执行 `sudo systemctl reload nginx`
 
-## 18. 推荐你实际执行顺序
-1. 先在测试环境导出 `PostgreSQL / MinIO / Redis`
-2. 先在 Ubuntu 装好 `Docker / Node / PM2 / Nginx`
-3. 先起 `PostgreSQL / Redis / MinIO`
-4. 先恢复三类数据
-5. 再构建并启动后端
-6. 再构建两个前端并接入 `Nginx`
-7. 最后做 HTTPS 和上线验证
+## 19. 推荐实际顺序
+1. 先把本机运行包上传到 `/data/ai-superweb`
+2. 再把 `sql / redis / minio` 备份上传到 `/data/ai-superweb/backups`
+3. 配好根目录 `.env`
+4. 先起 `PostgreSQL / Redis / MinIO`
+5. 恢复 `SQL / Redis / MinIO`
+6. 配好 `server/.env`
+7. 用 `PM2` 启动后端
+8. 用 `Nginx` 挂两个前端
+9. 最后做 HTTPS 和全链路检查

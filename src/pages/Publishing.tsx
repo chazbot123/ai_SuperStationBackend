@@ -13,12 +13,18 @@ import {
   listPublishingJobs,
   listPlatformAccounts,
   publishLeadContent,
+  startExtensionPublishJob,
+  syncExtensionPublishJob,
   type LeadPlatformStyle,
   type LeadPublishStatus,
   type PlatformAccountItem,
   type PublishingContentItem,
   type PublishingJobItem,
 } from "@/lib/publishing";
+import {
+  pingPlatformLoginExtension,
+  startPlatformPublishExtensionSession,
+} from "@/lib/platformLoginExtension";
 
 export const publishPlatformOptions: Array<{ key: LeadPlatformStyle; label: string; enabled: boolean }> = [
   { key: "xiaohongshu", label: "小红书", enabled: true },
@@ -260,15 +266,41 @@ export default function Publishing() {
     }
 
     try {
+      const extensionReady = await pingPlatformLoginExtension();
+      if (!extensionReady) {
+        setHint("未检测到平台扩展，请先安装并启用扩展后再一键发布。");
+        return;
+      }
+
       setPublishing(true);
       const result = await publishLeadContent({
         accessToken,
         contentId: publishTarget,
         targets,
+        executionMode: "extension",
       });
+      for (const job of result.jobs) {
+        const session = await startExtensionPublishJob({
+          accessToken,
+          jobId: job.id,
+        });
+        try {
+          await startPlatformPublishExtensionSession({
+            session,
+            platform: job.platform,
+            apiBaseUrl: window.location.origin,
+          });
+        } catch (error) {
+          await syncExtensionPublishJob({
+            sessionToken: session.sessionToken,
+            status: "failed",
+            lastError: error instanceof Error ? error.message : "本地发布扩展启动失败",
+          });
+        }
+      }
       setPublishJobs((prev) => mergeJobsById(prev, result.jobs));
       setPublishTarget(null);
-      setHint("已创建发布任务，后台正在异步执行，可在下方发布记录里查看实时状态。");
+      setHint("已创建发布任务，扩展正在用户本机浏览器按原发布步骤执行，可在下方发布记录里查看状态。");
       void refreshPublishJobs(true);
     } catch (error) {
       setHint(error instanceof Error ? error.message : "创建发布任务失败");
@@ -318,7 +350,7 @@ export default function Publishing() {
           <CardTitle>获客内容池</CardTitle>
         </CardHeader>
         <CardContent className="text-sm leading-6 text-zinc-300">
-          内容池展示已同步入池的正式素材。当前前端一键发布已开放小红书、抖音、视频号、快手，点击后会打开可见浏览器并自动执行发布流程。
+          内容池展示已同步入池的正式素材。当前前端一键发布已开放小红书、抖音、视频号、快手，点击后会调用本机浏览器扩展，在用户自己桌面的已登录浏览器中执行发布流程。
         </CardContent>
       </Card>
 

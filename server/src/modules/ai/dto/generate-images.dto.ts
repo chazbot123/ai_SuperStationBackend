@@ -56,6 +56,11 @@ export class GenerateImagesDto {
 
   @IsOptional()
   @IsString()
+  @IsIn(['social_post', 'product_image'])
+  scene?: 'social_post' | 'product_image';
+
+  @IsOptional()
+  @IsString()
   @IsIn(['1_1', '3_4', '4_5', '9_16', '16_9'])
   sizePreset?: '1_1' | '3_4' | '4_5' | '9_16' | '16_9';
 

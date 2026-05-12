@@ -4,11 +4,13 @@ import {
   ArrayMinSize,
   IsArray,
   IsIn,
+  IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
 
 const PUBLISH_PLATFORMS = ['xiaohongshu', 'douyin', 'wechat_mp', 'kuaishou'] as const;
+const PUBLISH_EXECUTION_MODES = ['server', 'extension'] as const;
 
 export class PublishLeadContentTargetDto {
   @IsString()
@@ -26,4 +28,9 @@ export class PublishLeadContentDto {
   @ValidateNested({ each: true })
   @Type(() => PublishLeadContentTargetDto)
   targets!: PublishLeadContentTargetDto[];
+
+  @IsOptional()
+  @IsString()
+  @IsIn(PUBLISH_EXECUTION_MODES)
+  executionMode?: (typeof PUBLISH_EXECUTION_MODES)[number];
 }

@@ -1,14 +1,27 @@
 import { ConfigService } from '@nestjs/config';
 import { LeadPublishPlatform } from '@prisma/client';
+import { chromium } from 'playwright-core';
 import { PlatformLoginBrowserService } from './platform-login-browser.service';
 
 describe('PlatformLoginBrowserService', () => {
   let service: PlatformLoginBrowserService;
+  const originalPlatform = process.platform;
+  const originalDisplay = process.env.DISPLAY;
+  const originalWaylandDisplay = process.env.WAYLAND_DISPLAY;
 
   beforeEach(() => {
     service = new PlatformLoginBrowserService({
       get: jest.fn(),
     } as unknown as ConfigService);
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+    });
+    process.env.DISPLAY = originalDisplay;
+    process.env.WAYLAND_DISPLAY = originalWaylandDisplay;
+    jest.restoreAllMocks();
   });
 
   it('dispatches Xiaohongshu publish jobs through a dedicated browser flow', async () => {
@@ -46,6 +59,59 @@ describe('PlatformLoginBrowserService', () => {
 
     expect(publishXiaohongshuImagePost).toHaveBeenCalled();
     expect(result.draftUrl).toBe('https://creator.xiaohongshu.com/publish/publish');
+  });
+
+  it('returns a readable error when login requires a visible browser on Linux without display', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+    });
+    delete process.env.DISPLAY;
+    delete process.env.WAYLAND_DISPLAY;
+
+    await expect(
+      service.launchLoginPage({
+        accountId: 'account-id',
+        platform: LeadPublishPlatform.douyin,
+        sessionPath: 'D:/tmp/session',
+      }),
+    ).rejects.toThrow('当前服务器未配置桌面显示环境，无法打开平台登录浏览器');
+  });
+
+  it('falls back to headless mode for publish flows on Linux without display', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+    });
+    delete process.env.DISPLAY;
+    delete process.env.WAYLAND_DISPLAY;
+
+    const context = {
+      pages: jest.fn().mockReturnValue([]),
+      newPage: jest.fn().mockResolvedValue({
+        url: jest.fn().mockReturnValue('https://creator.douyin.com/creator-micro/content/publish'),
+      }),
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+    jest.spyOn(service as never, 'resolveExecutablePath').mockReturnValue('/usr/bin/google-chrome');
+    const launchPersistentContext = jest
+      .spyOn(chromium, 'launchPersistentContext')
+      .mockResolvedValue(context as never);
+
+    await (service as never)['withReadableContext'](
+      {
+        accountId: 'account-id',
+        sessionPath: 'D:/tmp/session',
+        platform: LeadPublishPlatform.douyin,
+        visible: true,
+      },
+      async () => 'ok',
+    );
+
+    expect(launchPersistentContext).toHaveBeenCalledWith(
+      'D:/tmp/session',
+      expect.objectContaining({
+        headless: true,
+      }),
+    );
   });
 
   it('dispatches Kuaishou image publish jobs through a dedicated browser flow', async () => {
@@ -182,16 +248,36 @@ describe('PlatformLoginBrowserService', () => {
     expect(humanClick).toHaveBeenCalledWith(visibleCandidate);
   });
 
-  it('stops Xiaohongshu publish flow when the browser is still on the login page', async () => {
+  it('waits for Xiaohongshu login recovery instead of failing immediately on the login page', async () => {
     const page = {
       url: jest.fn().mockReturnValue('https://creator.xiaohongshu.com/login'),
       waitForLoadState: jest.fn().mockResolvedValue(undefined),
       goto: jest.fn().mockResolvedValue(undefined),
     };
+    const waitForPublishLoginRecovery = jest
+      .spyOn(service as never, 'waitForPublishLoginRecovery')
+      .mockResolvedValue({
+        authPayload: 'a=1',
+        accountName: 'demo_account',
+        displayName: 'Demo Account',
+      });
+    jest
+      .spyOn(service as never, 'isLoginPageUrl')
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
 
     await expect(
       (service as never)['ensurePublishPageReady'](page, LeadPublishPlatform.xiaohongshu, false),
-    ).rejects.toThrow('当前平台账号登录已失效，请重新登录后再发布');
+    ).resolves.toEqual({
+      authPayload: 'a=1',
+      accountName: 'demo_account',
+      displayName: 'Demo Account',
+    });
+    expect(waitForPublishLoginRecovery).toHaveBeenCalledWith(
+      page,
+      LeadPublishPlatform.xiaohongshu,
+      false,
+    );
   });
 
   it('does not treat the Kuaishou publish page as a login page', async () => {
@@ -206,7 +292,7 @@ describe('PlatformLoginBrowserService', () => {
 
     await expect(
       (service as never)['ensurePublishPageReady'](page, LeadPublishPlatform.kuaishou, false),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
   });
 
   it('falls back to the direct Xiaohongshu image publish url when the homepage card is not found', async () => {
@@ -261,12 +347,11 @@ describe('PlatformLoginBrowserService', () => {
     expect(humanClick).toHaveBeenCalledWith(editor);
   });
 
-  it('moves Douyin tags onto a new line before converting them through topic suggestions', async () => {
+  it('moves Douyin tags onto a new line and converts them one by one through topic suggestions', async () => {
     const editor = {};
     const topicButton = {
       click: jest.fn().mockResolvedValue(undefined),
     };
-    const topicInput = {};
     const page = {
       keyboard: {
         press: jest.fn().mockResolvedValue(undefined),
@@ -277,24 +362,60 @@ describe('PlatformLoginBrowserService', () => {
 
     const findFirstLocator = jest
       .spyOn(service as never, 'findFirstLocator')
-      .mockResolvedValueOnce(topicButton)
-      .mockResolvedValueOnce(editor)
-      .mockResolvedValueOnce(topicInput);
-    const humanType = jest.spyOn(service as never, 'humanType').mockResolvedValue(undefined);
+      .mockResolvedValueOnce(topicButton);
+    const humanClick = jest.spyOn(service as never, 'humanClick').mockResolvedValue(undefined);
     const clickDouyinTopicOption = jest
       .spyOn(service as never, 'clickDouyinTopicOption')
+      .mockResolvedValue(true);
+    const finalizeDouyinTagInput = jest
+      .spyOn(service as never, 'finalizeDouyinTagInput')
       .mockResolvedValue(undefined);
 
-    await (service as never)['tryAppendDouyinTopics'](page, ['露营']);
+    await (service as never)['appendDouyinTopicsAfterBody'](page, editor, ['露营', '相机']);
 
     expect(findFirstLocator).toHaveBeenCalled();
     expect(page.keyboard.press).toHaveBeenCalledWith('Control+End');
     expect(page.keyboard.press).toHaveBeenCalledWith('Enter');
-    expect(humanType).toHaveBeenCalledWith(topicInput, '露营', {
-      clearExisting: true,
-      perCharDelay: 60,
-    });
-    expect(clickDouyinTopicOption).toHaveBeenCalledWith(page, '露营');
+    expect(page.keyboard.type).toHaveBeenNthCalledWith(1, '露营', { delay: 60 });
+    expect(page.keyboard.type).toHaveBeenNthCalledWith(2, '相机', { delay: 60 });
+    expect(clickDouyinTopicOption).toHaveBeenNthCalledWith(1, page, editor, '露营');
+    expect(clickDouyinTopicOption).toHaveBeenNthCalledWith(2, page, editor, '相机');
+    expect(finalizeDouyinTagInput).toHaveBeenCalledTimes(2);
+    expect(humanClick).toHaveBeenCalledWith(editor);
+    expect(humanClick).toHaveBeenCalledWith(topicButton);
+  });
+
+  it('clicks the first visible Douyin topic candidate by default', async () => {
+    const hiddenCandidate = {
+      textContent: jest.fn().mockResolvedValue('隐藏候选'),
+      isVisible: jest.fn().mockResolvedValue(false),
+      locator: jest.fn(),
+    };
+    const firstVisibleCandidate = {
+      textContent: jest.fn().mockResolvedValue('平台推荐标签'),
+      isVisible: jest.fn().mockResolvedValue(true),
+      locator: jest.fn(),
+    };
+    const locator = {
+      count: jest.fn().mockResolvedValue(2),
+      nth: jest.fn((index: number) => (index === 0 ? hiddenCandidate : firstVisibleCandidate)),
+    };
+    const page = {
+      locator: jest.fn().mockReturnValue(locator),
+      keyboard: {
+        press: jest.fn().mockResolvedValue(undefined),
+      },
+      waitForTimeout: jest.fn().mockResolvedValue(undefined),
+    };
+    const editor = {};
+
+    const humanClick = jest.spyOn(service as never, 'humanClick').mockResolvedValue(undefined);
+    jest.spyOn(service as never, 'hasAppliedDouyinTopic').mockResolvedValue(true);
+
+    const result = await (service as never)['clickDouyinTopicOption'](page, editor, '露营');
+
+    expect(result).toBe(true);
+    expect(humanClick).toHaveBeenCalledWith(firstVisibleCandidate);
   });
   it('uses Kuaishou fast humanized typing when filling the image post editor', async () => {
     const editor = {};

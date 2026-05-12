@@ -149,3 +149,62 @@
 - 已核对当前真实部署要点：`docker-compose.yml` 仅包含 `PostgreSQL / Redis / MinIO` 三个基础服务；后台前端默认端口 `5173`，超级站前台默认端口 `5180`，后端默认端口 `3000`
 - 已确认 Redis 中保存当前 AI 模型配置，MinIO 中保存业务文件与图片；若要沿用测试环境业务状态，上线时除 PostgreSQL 外应同步 Redis 和 MinIO
 - 已新增部署文档 `docs/ubuntu-install-and-deploy-with-test-data.md`，覆盖 Ubuntu 装机、Docker/Node/Nginx/PM2、数据库恢复、MinIO/Redis 恢复、双前端上线、Nginx 配置、上线检查与回滚
+- 已恢复规划文件并确认新任务：在 D 盘备份当前项目的 SQL、Redis、MinIO 数据
+- 已确认当前容器状态正常：`ai-superweb-postgres / ai-superweb-redis / ai-superweb-minio` 均在运行
+- 已创建备份目录 `D:\zhilin_project\backups\20260508_231808`
+- 已执行 `pg_dump` 导出 `ai_superweb.sql`
+- 已执行 Redis `SAVE` 并复制 `data\redis` 到备份目录
+- 已复制 `data\minio` 到备份目录
+- 已核对 SQL、Redis、MinIO 备份目录和文件均真实存在
+
+## 2026-05-09
+- 已恢复规划文件并确认新任务：本机先把 `2 个前端 + 1 个后端` 打成同一套运行包，再把部署文档改为“上传运行包部署”，并沿用当前 `backups` 数据
+- 已确认当前本地备份真实结构为 `D:\zhilin_project\backups\sql\ai_superweb.sql`、`D:\zhilin_project\backups\redis\data`、`D:\zhilin_project\backups\minio\data`
+- 已完成前端 `npm run build`、超级站前端 `npm run build`、后端 `npm run build`
+- 已新建运行包目录 `D:\zhilin_project\backups\deploy_bundle_20260509_143128\project-root`
+- 已将后台前端 `dist`、超级站前端 `ZL_Supersite/dist`、后端 `server/dist`、`server/node_modules`、`server/package.json`、`server/package-lock.json`、`server/.env.example`、`server/prisma/schema.prisma`、根目录 `docker-compose.yml` 与 `.env.example` 整理进运行包
+- 已按用户最新要求把部署根目录统一改为 `/data/ai-superweb`
+- 已将 `docs/ubuntu-install-and-deploy-with-test-data.md` 重写为“运行包部署”版本：改为上传运行包、上传现有 `backups`、恢复 SQL/Redis/MinIO、配置 `.env`、PM2 启后端、Nginx 挂双前端
+- 已执行文档 `GetDiagnostics`，结果为 `0`
+- 已恢复规划文件并确认新任务：继续排查“更新包后服务器前台卡在 CHILINTECH 加载层”
+- 已确认超级站前台启动链路此前依赖外部 CDN 脚本，具备明显的服务器网络敏感性
+- 已下载本地脚本到 `D:\zhilin_project\ZL_Supersite\public\vendor\{gsap.min.js,ScrollTrigger.min.js,lenis.min.js,p5.min.js}`
+- 已修改 `LegacyHomePage.tsx`：脚本引用改为本地 `/vendor/*`，并增加 8 秒超时与失败时强制隐藏 `.page-loader` 兜底
+- 已修改 `ZL_Supersite/public/legacy-home.html`，同步改为本地 `vendor` 脚本，避免静态入口继续依赖外部 CDN
+- 已执行 `GetDiagnostics`，`LegacyHomePage.tsx / public/legacy-home.html` 诊断为 `0`
+- 已执行 `ZL_Supersite npm run build`，新产物为 `dist/assets/index-BECH69d4.js`
+
+## 2026-05-11
+- 已继续收口当前阶段，重新核对 `task_plan.md / progress.md / findings.md` 与工作区未提交差异
+- 已确认本轮关键改动文件编辑器诊断均为 `0`，覆盖后台前端、后端发布链路、超级站前台脚本与资源落地相关文件
+- 已重新执行最小验证：根仓库前端 `npm run check`、后端 `server npm run build`、超级站前端 `ZL_Supersite npm run check`，命令退出码均为 `0`
+- 已修正 `task_plan.md` 中阶段 `129` 状态残留为 `in_progress` 的记录错误，并补记当前阶段复核完成
+- 已恢复规划文件并确认新任务：为服务器补 `Xvfb + PM2` 正式部署方案，解决平台登录依赖可视浏览器的问题
+- 已确认现有 Ubuntu 运行包部署文档只覆盖 `pm2 start dist/main.js`，尚未包含 `Xvfb`、Chrome 安装和虚拟显示启动
+- 已新增 `scripts/install-ubuntu-xvfb-browser.sh`，用于在 Ubuntu 服务器安装 `Xvfb` 与 `google-chrome`
+- 已新增 `scripts/start-server-with-xvfb.sh`，用于先拉起 `Xvfb :99`、导出 `DISPLAY`，再启动 `server/dist/main.js`
+- 已将 `docs/ubuntu-install-and-deploy-with-test-data.md` 改为 `Xvfb + PM2` 部署方式，并补 `server/.env` 中的浏览器相关变量
+- 已将最新 `server/dist`、`server/.env.example`、`scripts/*.sh` 与部署文档同步到 `backups/deploy_bundle_20260509_143128/project-root`
+- 已核对运行包内编译产物，确认已包含系统 `ffmpeg/ffprobe` 优先与托管浏览器无显示环境处理逻辑
+- [2026-05-11 21:01:54] 已确认平台登录线上问题根因不只是服务器环境，而是现有实现把登录动作绑定在服务端浏览器。
+- [2026-05-11 21:01:54] 已将 src/pages/PublishingPlatformLogin.tsx 改为“本机浏览器登录 + 当前页粘贴 Cookie/Token + 复用现有 create/update/validate 接口保存”。
+- [2026-05-11 21:01:54] 已执行 GetDiagnostics 与前端 
+pm run check，结果均通过。
+- [2026-05-11 21:13:07] 已确认仓库内暂无现成浏览器扩展实现；当前后端可复用平台账号保存接口，但缺扩展专用上传入口与扩展鉴权。
+- [2026-05-11 21:34:07] 已完成浏览器扩展自动回传方案首版：新增后端扩展登录会话接口、扩展同步接口、MV3 扩展目录和平台登录页扩展桥接。
+- [2026-05-11 21:34:07] 已保留原有平台登录页面 UI，点击哪个平台就打开哪个平台官网登录页；登录完成后扩展会自动回传 Cookie 并更新页面账号状态。
+- [2026-05-11 21:34:07] 已执行前端诊断、后端诊断、前端构建、后端构建，结果均通过。
+- [2026-05-11 22:04:29] 已把 4 平台账号识别规则接入扩展 content script，并在 background 回传时连同 Cookie 一并提交后端保存。
+- [2026-05-11 22:04:29] 已执行前端构建与后端构建，结果均通过。
+- [2026-05-12 00:15:08] 已核对 4 平台自动发布主链路，确认发布任务创建后会真实调用 `PlatformLoginBrowserService.publish()` 并进入各平台脚本。
+- [2026-05-12 00:15:08] 已定位当前抖音一键发布的核心断点：扩展登录账号只有 Cookie，没有 `browserSessionPath`；而自动发布此前未把 Cookie 注入 Playwright 浏览器上下文。
+- [2026-05-12 00:15:08] 已将自动发布改为发布前优先把平台账号 Cookie 注入浏览器上下文，并补查询字段 `authType / authPayloadEncrypted`。
+- [2026-05-12 00:15:08] 已执行 `GetDiagnostics` 与后端 `npm run build`，结果通过。
+- [2026-05-12 00:15:08] 已手动重启本地后端并确认 `http://127.0.0.1:3001/api/health` 返回 `{\"status\":\"ok\"}`。
+- [2026-05-12 12:19:00] 已恢复规划文件并确认需求变更：一键发布应改为“前端发起 + 浏览器扩展在用户自己桌面已登录浏览器执行”，且发布步骤尽量沿用以前 4 平台既有逻辑。
+- [2026-05-12 12:19:00] 已确认现状：前端一键发布入口仍只调用后端 `publishLeadContent()`；扩展只有登录回传能力；旧发布步骤仍集中在后端 `platform-login-browser.service.ts`。
+- [2026-05-12 12:19:00] 规划辅助脚本在当前环境路径缺失，已继续沿用仓库内 `task_plan.md / findings.md / progress.md` 手工维护本轮任务。
+- [2026-05-12 13:08:00] 已完成后端本地扩展发布接口骨架：新增 `extension/publish-jobs/start` 与 `extension/publish-jobs/sync`，并为内容发布接口增加 `executionMode=extension`。
+- [2026-05-12 13:08:00] 已完成前端一键发布默认切到扩展执行：发布前先检测扩展，创建任务后逐个启动本地发布会话。
+- [2026-05-12 13:08:00] 已完成扩展首版本地发布链路：新增 `publish-automation.js`，`background.js` 可打开平台发布页并向 `content.js` 下发执行命令，执行结果会回传后端发布记录。
+- [2026-05-12 13:08:00] 已执行前端 `npm run check` 与后端 `server npm run build`，结果通过。

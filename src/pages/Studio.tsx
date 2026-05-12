@@ -638,7 +638,6 @@ export default function Studio() {
               <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="text-base font-semibold text-zinc-100">当前生成结果</div>
-                  <div className="mt-1 text-sm text-zinc-400">结果区比例已放大，方便你边生成边编辑当前版本。</div>
                 </div>
                 <Button
                   type="button"

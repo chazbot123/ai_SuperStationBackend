@@ -7,20 +7,20 @@ import Modal from "@/components/ui/Modal";
 import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import {
-  cancelHostedPlatformLogin,
-  completeHostedPlatformLogin,
   deletePlatformAccount,
   listPlatformAccounts,
-  restartHostedPlatformLogin,
-  startHostedPlatformLogin,
+  startExtensionPlatformLogin,
   type LeadPlatformStyle,
   type PlatformAccountItem,
-  type PlatformAccountLoginStatus,
   type PlatformAccountStatus,
   updatePlatformAccount,
   validatePlatformAccount,
 } from "@/lib/publishing";
-import { checkPendingPlatformAccountLogin, openPlatformAccountSession } from "./publishingPlatformLoginActions";
+import {
+  listenPlatformExtensionEvents,
+  pingPlatformLoginExtension,
+  startPlatformLoginExtensionSession,
+} from "@/lib/platformLoginExtension";
 import { useAuthStore } from "@/store/authStore";
 
 function XiaohongshuIcon({ className = "" }: { className?: string }) {
@@ -152,12 +152,12 @@ function statusMeta(status: PlatformAccountStatus) {
   return { label: "待校验", variant: "gray" as const };
 }
 
-function loginStatusMeta(status: PlatformAccountLoginStatus) {
+function loginStatusMeta(status: PlatformAccountItem["loginStatus"]) {
   if (status === "pending") return { label: "登录中", variant: "blue" as const };
-  if (status === "authenticated") return { label: "已回收", variant: "green" as const };
+  if (status === "authenticated") return { label: "已登录", variant: "green" as const };
   if (status === "failed") return { label: "登录失败", variant: "red" as const };
   if (status === "cancelled") return { label: "已取消", variant: "gray" as const };
-  return { label: "未发起", variant: "gray" as const };
+  return { label: "未登录", variant: "gray" as const };
 }
 
 function isDeletedResult(
@@ -171,6 +171,21 @@ function formatTime(value?: string | null) {
   return new Date(value).toLocaleString();
 }
 
+function getPlatformLoginUrl(platform: LeadPlatformStyle) {
+  switch (platform) {
+    case "xiaohongshu":
+      return "https://creator.xiaohongshu.com/login";
+    case "douyin":
+      return "https://creator.douyin.com/";
+    case "wechat_mp":
+      return "https://channels.weixin.qq.com/platform";
+    case "kuaishou":
+      return "https://cp.kuaishou.com/article/publish/video";
+    default:
+      return "";
+  }
+}
+
 export default function PublishingPlatformLogin() {
   usePageMeta("平台登录");
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -182,11 +197,12 @@ export default function PublishingPlatformLogin() {
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [startingPlatform, setStartingPlatform] = useState<LeadPlatformStyle | null>(null);
-  const [completingId, setCompletingId] = useState<string | null>(null);
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
+  const [extensionReady, setExtensionReady] = useState<boolean | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PlatformAccountItem | null>(null);
+  const [accountName, setAccountName] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [remark, setRemark] = useState("");
 
   const loadAccounts = useCallback(
@@ -214,30 +230,44 @@ export default function PublishingPlatformLogin() {
     void loadAccounts(true);
   }, [loadAccounts]);
 
-  const hasPendingLogin = useMemo(
-    () => items.some((item) => item.loginStatus === "pending"),
-    [items],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    void pingPlatformLoginExtension()
+      .then((ready) => {
+        if (!cancelled) {
+          setExtensionReady(ready);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setExtensionReady(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!accessToken || !hasPendingLogin) return;
-    const timer = window.setInterval(() => {
-      const pendingAccount = items.find((item) => item.loginStatus === "pending");
-      if (!pendingAccount) return;
-
-      void (async () => {
-        const result = await checkPendingPlatformAccountLogin({
-          accessToken,
-          account: pendingAccount,
+    return listenPlatformExtensionEvents((event) => {
+      if (event.kind === "synced") {
+        setItems((current) => {
+          const exists = current.some((item) => item.id === event.account.id);
+          if (exists) {
+            return current.map((item) => (item.id === event.account.id ? event.account : item));
+          }
+          return [event.account, ...current];
         });
+        setHint(`${platformLabel(event.platform)} 登录信息已自动保存。`);
+        return;
+      }
 
-        if (result.kind === "success") {
-          setItems((current) => current.map((item) => (item.id === result.account.id ? result.account : item)));
-        }
-      })();
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [accessToken, hasPendingLogin, items]);
+      if (event.kind === "error" || event.kind === "publish-error") {
+        setHint(event.message);
+      }
+    });
+  }, []);
 
   const summary = useMemo(() => {
     const validCount = items.filter((item) => item.status === "valid").length;
@@ -261,13 +291,31 @@ export default function PublishingPlatformLogin() {
 
   function resetEditForm() {
     setRemark("");
+    setAccountName("");
+    setDisplayName("");
     setEditingItem(null);
   }
 
   function openEditModal(item: PlatformAccountItem) {
     setEditingItem(item);
+    setAccountName(item.accountName);
+    setDisplayName(item.displayName ?? "");
     setRemark(item.remark ?? "");
     setEditorOpen(true);
+  }
+
+  function openLocalLoginPage(platform: LeadPlatformStyle, loginUrl?: string | null) {
+    const targetUrl = loginUrl?.trim() || getPlatformLoginUrl(platform);
+    if (!targetUrl) {
+      setHint("当前平台暂未配置登录地址。");
+      return;
+    }
+
+    const opened = window.open(targetUrl, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      setHint("浏览器拦截了新窗口，请允许弹窗后重试。");
+      return;
+    }
   }
 
   async function handleStartLogin(platform: LeadPlatformStyle) {
@@ -276,11 +324,21 @@ export default function PublishingPlatformLogin() {
       return;
     }
 
+    if (extensionReady === false) {
+      setHint("未检测到平台登录扩展，请先安装并启用扩展。");
+      return;
+    }
+
     try {
       setStartingPlatform(platform);
-      const next = await startHostedPlatformLogin({ accessToken, platform });
-      setItems((current) => [next, ...current.filter((item) => item.id !== next.id)]);
-      setHint(`已发起${platformLabel(platform)}登录，请在浏览器完成授权后回到这里继续操作。`);
+      const session = await startExtensionPlatformLogin({ accessToken, platform });
+      await startPlatformLoginExtensionSession({
+        session,
+        platform,
+        apiBaseUrl: window.location.origin,
+      });
+      openLocalLoginPage(platform, session.loginUrl);
+      setHint(`已打开${platformLabel(platform)}官方登录页，完成登录后系统会自动保存账号。`);
     } catch (error) {
       setHint(error instanceof Error ? error.message : "发起平台登录失败");
     } finally {
@@ -294,19 +352,31 @@ export default function PublishingPlatformLogin() {
       return;
     }
 
+    const normalizedAccountName = accountName.trim();
+    const normalizedDisplayName = displayName.trim();
+    const normalizedRemark = remark.trim();
+
+    if (!normalizedAccountName) {
+      setHint("请填写平台账号。");
+      return;
+    }
+
     try {
       setSaving(true);
       const next = await updatePlatformAccount({
         accessToken,
         id: editingItem.id,
-        remark,
+        accountName: normalizedAccountName,
+        displayName: normalizedDisplayName || undefined,
+        remark: normalizedRemark || undefined,
       });
       setItems((current) => current.map((item) => (item.id === next.id ? next : item)));
+      setHint("账号信息已更新。");
+
       setEditorOpen(false);
       resetEditForm();
-      setHint("备注已更新。");
     } catch (error) {
-      setHint(error instanceof Error ? error.message : "更新平台账号失败");
+      setHint(error instanceof Error ? error.message : "保存平台账号失败");
     } finally {
       setSaving(false);
     }
@@ -318,55 +388,29 @@ export default function PublishingPlatformLogin() {
       return;
     }
 
+    if (extensionReady === false) {
+      setHint("未检测到平台登录扩展，请先安装并启用扩展。");
+      return;
+    }
+
     try {
       setRestartingId(item.id);
-      const next = await restartHostedPlatformLogin({ accessToken, id: item.id });
-      setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
-      setHint(`已重新打开${platformLabel(item.platform)}登录流程。`);
+      const session = await startExtensionPlatformLogin({
+        accessToken,
+        platform: item.platform,
+        accountId: item.id,
+      });
+      await startPlatformLoginExtensionSession({
+        session,
+        platform: item.platform,
+        apiBaseUrl: window.location.origin,
+      });
+      openLocalLoginPage(item.platform, session.loginUrl || item.loginUrl);
+      setHint(`已重新打开${platformLabel(item.platform)}官方登录页，完成登录后系统会自动更新账号。`);
     } catch (error) {
       setHint(error instanceof Error ? error.message : "重新发起登录失败");
     } finally {
       setRestartingId(null);
-    }
-  }
-
-  async function handleCompleteLogin(item: PlatformAccountItem) {
-    if (!accessToken) {
-      setHint("登录已失效，请重新登录。");
-      return;
-    }
-
-    try {
-      setCompletingId(item.id);
-      const next = await completeHostedPlatformLogin({ accessToken, id: item.id });
-      setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
-      setHint("已回收并保存登录信息。");
-    } catch (error) {
-      setHint(error instanceof Error ? error.message : "完成登录失败");
-    } finally {
-      setCompletingId(null);
-    }
-  }
-
-  async function handleCancelLogin(item: PlatformAccountItem) {
-    if (!accessToken) {
-      setHint("登录已失效，请重新登录。");
-      return;
-    }
-
-    try {
-      setCancellingId(item.id);
-      const next = await cancelHostedPlatformLogin({ accessToken, id: item.id });
-      if (isDeletedResult(next)) {
-        setItems((current) => current.filter((entry) => entry.id !== item.id));
-      } else {
-        setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
-      }
-      setHint("当前登录流程已取消。");
-    } catch (error) {
-      setHint(error instanceof Error ? error.message : "取消登录失败");
-    } finally {
-      setCancellingId(null);
     }
   }
 
@@ -407,14 +451,7 @@ export default function PublishingPlatformLogin() {
   }
 
   async function handleOpenLoginUrl(item: PlatformAccountItem) {
-    const result = await openPlatformAccountSession({ accessToken, account: item });
-    if (result.kind === "error") {
-      setHint(result.message);
-      return;
-    }
-
-    setItems((current) => current.map((entry) => (entry.id === item.id ? result.account : entry)));
-    setHint(result.message);
+    await handleRestartLogin(item);
   }
 
   return (
@@ -440,7 +477,11 @@ export default function PublishingPlatformLogin() {
             </span>
           </div>
           <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-3 text-xs text-zinc-300">
-            四个平台统一走自动完成链路。点击“发起登录”后在真实浏览器完成登录，系统会自动回收 Cookie 并完成入库，“手动完成”仅作补触发。
+            点击“发起登录”后，会在你的本机浏览器打开对应平台官方登录页。完成登录后，浏览器扩展会自动回传并保存登录信息。
+          </div>
+          <div className="text-xs text-zinc-500">
+            扩展状态：
+            {extensionReady === true ? " 已连接" : extensionReady === false ? " 未检测到扩展" : " 检测中..."}
           </div>
           <div className="flex flex-wrap gap-3 text-xs text-zinc-400">
             <span>账号总数：{summary.total}</span>
@@ -519,11 +560,7 @@ export default function PublishingPlatformLogin() {
                               const currentStatus = statusMeta(item.status);
                               const currentLogin = loginStatusMeta(item.loginStatus);
                               const actionBusy =
-                                validatingId === item.id ||
-                                deletingId === item.id ||
-                                completingId === item.id ||
-                                cancellingId === item.id ||
-                                restartingId === item.id;
+                                validatingId === item.id || deletingId === item.id || restartingId === item.id;
 
                               return (
                                 <Tr key={item.id}>
@@ -554,44 +591,22 @@ export default function PublishingPlatformLogin() {
                                   <Td className="text-zinc-400">{item.remark || "-"}</Td>
                                   <Td className="text-right">
                                     <div className="flex flex-wrap justify-end gap-2">
-                                      {item.loginStatus === "pending" ? (
-                                        <>
-                                          <Button
-                                            size="sm"
-                                            onClick={() => void handleCompleteLogin(item)}
-                                            disabled={completingId === item.id}
-                                          >
-                                            {completingId === item.id ? "处理中..." : "手动完成"}
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            onClick={() => void handleCancelLogin(item)}
-                                            disabled={cancellingId === item.id}
-                                          >
-                                            {cancellingId === item.id ? "取消中..." : "取消"}
-                                          </Button>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            onClick={() => void handleRestartLogin(item)}
-                                            disabled={restartingId === item.id}
-                                          >
-                                            {restartingId === item.id ? "打开中..." : "重新登录"}
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            onClick={() => void handleValidate(item)}
-                                            disabled={validatingId === item.id || actionBusy}
-                                          >
-                                            {validatingId === item.id ? "校验中..." : "校验"}
-                                          </Button>
-                                        </>
-                                      )}
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() => void handleRestartLogin(item)}
+                                        disabled={restartingId === item.id}
+                                      >
+                                        {restartingId === item.id ? "打开中..." : "重新登录"}
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() => void handleValidate(item)}
+                                        disabled={validatingId === item.id || actionBusy}
+                                      >
+                                        {validatingId === item.id ? "校验中..." : "校验"}
+                                      </Button>
 
                                       <Button
                                         size="sm"
@@ -644,7 +659,11 @@ export default function PublishingPlatformLogin() {
 
       <Modal
         open={editorOpen}
-        title={editingItem ? `编辑 ${platformLabel(editingItem.platform)} 账号` : "编辑平台账号"}
+        title={
+          editingItem
+            ? `编辑 ${platformLabel(editingItem.platform)} 账号`
+            : "编辑平台账号"
+        }
         onClose={() => {
           setEditorOpen(false);
           resetEditForm();
@@ -677,19 +696,40 @@ export default function PublishingPlatformLogin() {
                 </div>
               </div>
               <div className="space-y-2">
-                <div className="text-sm text-zinc-200">真实账号</div>
+                <div className="text-sm text-zinc-200">登录类型</div>
                 <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-200">
-                  {editingItem.accountName}
+                  {editingItem.authType === "cookie" ? "Cookie" : "Token"}
                 </div>
               </div>
             </div>
           ) : null}
 
-          {editingItem?.displayName ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm text-zinc-200">平台账号</div>
+              <input
+                value={accountName}
+                onChange={(event) => setAccountName(event.target.value)}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30"
+                placeholder="例如：账号 ID、手机号或平台昵称"
+              />
+            </div>
             <div className="space-y-2">
               <div className="text-sm text-zinc-200">展示名称</div>
-              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-200">
-                {editingItem.displayName}
+              <input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30"
+                placeholder="例如：品牌主账号"
+              />
+            </div>
+          </div>
+
+          {editingItem?.authPayloadPreview ? (
+            <div className="space-y-2">
+              <div className="text-sm text-zinc-200">当前登录信息</div>
+              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-3 font-mono text-xs text-zinc-400">
+                {editingItem.authPayloadPreview}
               </div>
             </div>
           ) : null}

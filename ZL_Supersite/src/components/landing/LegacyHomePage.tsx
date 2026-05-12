@@ -3,29 +3,38 @@ import legacyHomeMarkup from "./legacy-home-body.html?raw";
 import "./legacy-home.css";
 
 const EXTERNAL_SCRIPT_ATTRIBUTE = "data-legacy-home-script";
+const BOOT_TIMEOUT_MS = 8000;
+const LEGACY_HOME_RUNTIME_VERSION = "20260511-2";
 
 const scriptChain = [
   {
     key: "gsap",
-    src: "https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js",
+    src: "/vendor/gsap.min.js",
   },
   {
     key: "scroll-trigger",
-    src: "https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js",
+    src: "/vendor/ScrollTrigger.min.js",
   },
   {
     key: "lenis",
-    src: "https://cdn.jsdelivr.net/gh/studio-freight/lenis@1.0.27/bundled/lenis.min.js",
+    src: "/vendor/lenis.min.js",
   },
   {
     key: "legacy-home-runtime",
-    src: "/legacy-home.js",
+    src: `/legacy-home.js?v=${LEGACY_HOME_RUNTIME_VERSION}`,
   },
   {
     key: "p5",
-    src: "https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js",
+    src: "/vendor/p5.min.js",
   },
 ] as const;
+
+function hidePageLoader() {
+  const loader = document.querySelector<HTMLElement>(".page-loader");
+  if (!loader) return;
+  loader.style.display = "none";
+  loader.style.transform = "translateY(-100%)";
+}
 
 function loadExternalScript(key: string, src: string) {
   return new Promise<void>((resolve, reject) => {
@@ -68,20 +77,31 @@ function loadExternalScript(key: string, src: string) {
 export default function LegacyHomePage() {
   useEffect(() => {
     let cancelled = false;
+    let bootTimeout = window.setTimeout(() => {
+      if (cancelled) return;
+      console.warn("legacy home bootstrap timeout, hide loader as fallback");
+      hidePageLoader();
+    }, BOOT_TIMEOUT_MS);
 
     const bootLegacyHome = async () => {
       for (const item of scriptChain) {
         if (cancelled) return;
         await loadExternalScript(item.key, item.src);
+        if (item.key === "legacy-home-runtime") {
+          hidePageLoader();
+        }
       }
+      window.clearTimeout(bootTimeout);
     };
 
     bootLegacyHome().catch((error) => {
       console.error("legacy home bootstrap failed", error);
+      hidePageLoader();
     });
 
     return () => {
       cancelled = true;
+      window.clearTimeout(bootTimeout);
       document.body.classList.remove("overlay-open");
       document.documentElement.classList.remove("lenis", "lenis-smooth", "lenis-stopped");
     };

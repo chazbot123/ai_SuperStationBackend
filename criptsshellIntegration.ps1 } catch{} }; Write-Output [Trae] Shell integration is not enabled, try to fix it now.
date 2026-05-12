@@ -1,0 +1,58 @@
+warning: in the working copy of 'ZL_Supersite/public/legacy-home.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ZL_Supersite/public/legacy-home.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ZL_Supersite/src/components/landing/LegacyHomePage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ZL_Supersite/src/components/landing/legacy-home.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ZL_Supersite/vite.config.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ZL_Supersite/vite.config.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/ubuntu-install-and-deploy-with-test-data.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'findings.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'progress.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/main.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/modules/ai/ai-video-concat.service.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/modules/products/product-image-storage.service.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/modules/publishing/platform-login-browser.service.spec.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/modules/publishing/platform-login-browser.service.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/modules/publishing/publishing.controller.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/modules/publishing/publishing.module.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/modules/publishing/publishing.service.spec.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/modules/publishing/publishing.service.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/api.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/publishing.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/pages/Login.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/pages/Products.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/pages/PublishingPlatformLogin.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/pages/Studio.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'task_plan.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'vercel.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'vite.config.ts', LF will be replaced by CRLF the next time Git touches it
+ ZL_Supersite/public/legacy-home.html               | 312 [32m+++++[m[31m-----[m
+ ZL_Supersite/public/legacy-home.js                 |  73 [32m++[m[31m-[m
+ .../src/components/landing/LegacyHomePage.tsx      |  30 [32m+[m[31m-[m
+ .../src/components/landing/legacy-home-body.html   |  36 [32m+[m[31m-[m
+ .../src/components/landing/legacy-home.css         |  13 [32m+[m[31m-[m
+ ZL_Supersite/tsconfig.node.tsbuildinfo             |   2 [32m+[m[31m-[m
+ ZL_Supersite/vite.config.js                        |   2 [32m+[m[31m-[m
+ ZL_Supersite/vite.config.ts                        |   2 [32m+[m[31m-[m
+ docs/ubuntu-install-and-deploy-with-test-data.md   | 563 [32m++++++++++[m[31m--------[m
+ findings.md                                        |  44 [32m++[m
+ progress.md                                        |  52 [32m++[m
+ server/.env.example                                |   4 [32m+[m
+ server/src/main.ts                                 |   2 [32m+[m[31m-[m
+ server/src/modules/ai/ai-video-concat.service.ts   |  60 [32m+[m[31m-[m
+ .../products/product-image-storage.service.ts      |  13 [32m+[m[31m-[m
+ .../platform-login-browser.service.spec.ts         | 151 [32m++++[m[31m-[m
+ .../publishing/platform-login-browser.service.ts   | 634 [32m+++++++++++++++++[m[31m----[m
+ .../modules/publishing/publishing.controller.ts    |   9 [32m+[m
+ server/src/modules/publishing/publishing.module.ts |  24 [32m+[m[31m-[m
+ .../modules/publishing/publishing.service.spec.ts  |  95 [32m++[m[31m-[m
+ .../src/modules/publishing/publishing.service.ts   | 284 [32m+++++++++[m
+ src/lib/api.ts                                     |   8 [32m+[m[31m-[m
+ src/lib/publishing.ts                              |  22 [32m+[m
+ src/pages/Login.tsx                                |   2 [32m+[m[31m-[m
+ src/pages/Products.tsx                             | 180 [32m++++[m[31m--[m
+ src/pages/PublishingPlatformLogin.tsx              | 314 [32m+++++[m[31m-----[m
+ src/pages/Studio.tsx                               |   1 [31m-[m
+ task_plan.md                                       |  62 [32m+[m[31m-[m
+ vite.config.ts                                     |   2 [32m+[m[31m-[m
+ 29 files changed, 2187 insertions(+), 809 deletions(-)

@@ -6,6 +6,7 @@ export type LeadContentSourceType = "social" | "product" | "video" | "manual";
 export type LeadContentStatus = "active" | "archived" | "deleted";
 export type LeadPublishStatus = "queued" | "running" | "success" | "failed";
 export type LeadPublishMode = "draft_box";
+export type PublishExecutionMode = "server" | "extension";
 export type PlatformAccountAuthType = "cookie" | "token";
 export type PlatformAccountStatus = "saved" | "valid" | "invalid" | "disabled";
 export type PlatformAccountLoginStatus = "idle" | "pending" | "authenticated" | "failed" | "cancelled";
@@ -115,6 +116,21 @@ export type PlatformAccountItem = {
   updatedAt: string;
 };
 
+export type PlatformExtensionLoginSession = {
+  sessionId: string;
+  sessionToken: string;
+  platform: LeadPlatformStyle;
+  accountId: string | null;
+  expiresAt: string;
+  loginUrl: string;
+};
+
+export type PlatformExtensionPublishSession = {
+  sessionToken: string;
+  expiresAt: string;
+  job: PublishingJobItem;
+};
+
 type PlatformAccountsResponse = {
   items: PlatformAccountItem[];
   pagination?: {
@@ -199,6 +215,7 @@ export async function publishLeadContent(input: {
     platform: LeadPlatformStyle;
     platformAccountId: string;
   }>;
+  executionMode?: PublishExecutionMode;
 }) {
   return requestJson<{ contentId: string; jobs: PublishingJobItem[] }>(
     `/api/publishing/contents/${input.contentId}/publish`,
@@ -207,9 +224,37 @@ export async function publishLeadContent(input: {
       headers: getAuthHeaders(input.accessToken),
       body: JSON.stringify({
         targets: input.targets,
+        executionMode: input.executionMode,
       }),
     },
   );
+}
+
+export async function startExtensionPublishJob(input: { accessToken: string; jobId: string }) {
+  return requestJson<PlatformExtensionPublishSession>("/api/publishing/extension/publish-jobs/start", {
+    method: "POST",
+    headers: getAuthHeaders(input.accessToken),
+    body: JSON.stringify({ jobId: input.jobId }),
+  });
+}
+
+export async function syncExtensionPublishJob(input: {
+  sessionToken: string;
+  status: "running" | "success" | "failed";
+  draftUrl?: string;
+  lastError?: string;
+  authPayload?: string;
+  accountName?: string;
+  displayName?: string;
+  sourceUrl?: string;
+}) {
+  return requestJson<PublishingJobItem>("/api/publishing/extension/publish-jobs/sync", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
 }
 
 export async function listPublishingJobs(input: {
@@ -296,6 +341,19 @@ export async function startHostedPlatformLogin(input: {
 }) {
   const { accessToken, ...payload } = input;
   return requestJson<PlatformAccountItem>("/api/publishing/platform-accounts/hosted-login/start", {
+    method: "POST",
+    headers: getAuthHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function startExtensionPlatformLogin(input: {
+  accessToken: string;
+  platform: LeadPlatformStyle;
+  accountId?: string;
+}) {
+  const { accessToken, ...payload } = input;
+  return requestJson<PlatformExtensionLoginSession>("/api/publishing/platform-accounts/extension-login/start", {
     method: "POST",
     headers: getAuthHeaders(accessToken),
     body: JSON.stringify(payload),

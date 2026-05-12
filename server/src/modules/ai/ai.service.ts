@@ -871,6 +871,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateCopy(user: SessionUser, dto: GenerateCopyDto) {
+    const scene = dto.scene ?? 'social_post';
     const style = dto.style ?? 'xhs';
     const productName = dto.productName?.trim() || '产品';
     const sellingPoints = dto.sellingPoints?.trim() || '更智能/更高效';
@@ -884,8 +885,9 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     this.ensureBaseUrl(resolvedConfig.baseUrl);
 
     try {
-      const system = this.buildGenerateCopySystemPrompt();
+      const system = this.buildGenerateCopySystemPrompt(scene);
       const user = this.buildGenerateCopyUserPrompt({
+        scene,
         styleLabel,
         prompt,
         productName,
@@ -1157,7 +1159,9 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateImages(user: SessionUser, dto: GenerateImagesDto) {
-    const prompt = dto.prompt?.trim() || '请生成一组商品营销图片';
+    const scene = dto.scene ?? 'product_image';
+    const rawPrompt = dto.prompt?.trim() || '请生成一组商品营销图片';
+    const prompt = this.buildGenerateImagesPrompt(scene, rawPrompt);
     const sizePreset = dto.sizePreset ?? '3_4';
     const resolution = dto.resolution ?? '1k';
     const referenceImages = (dto.referenceImages ?? []).filter(Boolean).slice(0, 3);
@@ -3418,12 +3422,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const [copyResult, imageResult] = await Promise.all([
       this.generateCopy(user, {
         prompt,
+        scene: 'social_post',
         style: style === 'xiaohongshu' ? 'xhs' : style,
         format: 'text',
         modelConfig: dto.textModelConfig,
       }),
       this.generateImages(user, {
         prompt,
+        scene: 'social_post',
         sizePreset,
         resolution,
         referenceImages,
@@ -3914,7 +3920,61 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return [`当前场景：${sceneLabel}`, '请直接润色下面这段提示词，并输出可直接继续用于生成的版本：', prompt].join('\n');
   }
 
-  private buildGenerateCopySystemPrompt() {
+  private buildGenerateImagesPrompt(scene: 'social_post' | 'product_image', prompt: string) {
+    if (scene === 'social_post') {
+      return prompt;
+    }
+
+    const systemPrompt = [
+      '你是一名资深电商商品视觉生成助手，负责基于用户提供的商品原图，生成高清、真实、可直接用于电商详情页的商品详情长图。',
+      '你的任务目标：',
+      '根据商品原图，输出符合电商详情页使用场景的高质量商品视觉画面，重点展示商品整体外观、细节结构、材质纹理、真实颜色和品质感。',
+      '输出要求：',
+      '1. 画面必须围绕原商品主体展开，保持商品核心外观、颜色、结构、比例和材质特征真实一致，不得随意改款、变形、增删主体结构或偏离实物原色。',
+      '2. 整体风格需简约、高级、干净、有质感，画面统一配色，视觉协调，避免花哨、杂乱、廉价感设计。',
+      '3. 构图要整洁且有层次，适合电商详情页长图展示，排版舒适大气，留白合理，重点信息区域清晰，主体突出。',
+      '4. 要体现多角度展示能力，可合理呈现商品整体图、局部细节图、材质特写、结构展示图，但都必须服务于商品本身，不喧宾夺主。',
+      '5. 强调商品细节表现，包括但不限于材质纹理、边缘做工、表面质感、局部结构、真实光泽和层次细节，确保细节拉满。',
+      '6. 光影表现必须自然、真实、写实，质感明确，不要过曝、死黑、塑料感、伪3D感或明显AI合成痕迹。',
+      '7. 背景要简洁干净，无多余杂物、无干扰元素、无复杂噪点，避免抢占主体视觉，可使用高级简洁场景或纯净布景，但必须服务商品展示。',
+      '8. 画面不得出现畸变、比例异常、透视错误、边缘融化、重复结构、悬浮感、错位、穿模、模糊失焦等问题。',
+      '9. 输出结果必须适合电商详情页使用，具备专业商品展示效果，真实可信，有购买转化感。',
+      '10. 严禁出现水印、文字、乱码、Logo污染、无关装饰、虚假配件、错误道具或与商品无关的内容。',
+      '风格基调：',
+      '简约高级、干净通透、真实写实、质感明确、层次分明、统一色调、自然光影、电商专业感强。',
+      '生成原则：',
+      '- 第一优先级是还原商品真实感',
+      '- 第二优先级是提升商品高级感和展示力',
+      '- 第三优先级是保证电商详情页长图构图的整洁、耐看和可用性',
+      '请始终基于“商品原图真实还原 + 电商详情页高级展示”来完成生成。',
+    ].join('\n');
+
+    return [systemPrompt, `用户补充要求：${prompt}`].join('\n\n');
+  }
+
+  private buildGenerateCopySystemPrompt(scene: 'social_post' | 'product_image' = 'social_post') {
+    if (scene === 'product_image') {
+      return [
+        '你是一名专业电商商品文案助手。',
+        '请根据用户提供的商品信息生成适合电商详情页、商品介绍和种草展示使用的商品详情文案。',
+        '输出内容必须贴合现有输入，不得编造不存在的材质、功能、参数、功效、体验或承诺。',
+        '如果部分参数未提供，可根据现有文字信息做稳妥补全；无法明确判断时使用保守表达，不要强行下结论。',
+        '你必须只返回 JSON 对象，不要返回代码块，不要补充解释。',
+        'JSON 固定字段为：title、body、tags。',
+        'title：一个标题，限制 20 个字符以内；简洁自然，突出商品核心特点，不要夸张。',
+        'body：只生成正文文案，不要包含标题，不要包含任何标签，不要包含额外说明。',
+        'body 必须按以下固定结构输出，并保持分段清晰：',
+        '【产品整体介绍】',
+        '【核心卖点】',
+        '【材质优势】',
+        '【适用人群】',
+        '【使用场景】',
+        '【亮点优势】',
+        '文案风格要求：简洁易懂、接地气、逻辑清晰、重点突出、不浮夸、不虚假宣传，贴合商品真实特征。',
+        'tags：生成 3-6 个适合商品介绍或种草整理的 #标签，多个标签用单个空格分隔。',
+      ].join('');
+    }
+
     return [
       '你是一个擅长写“小红书软种草”图文的中文内容创作助手。',
       '无论发布平台是什么，图文正文都统一采用小红书软种草风格，不写硬广，不写官方宣传腔，不写说明书口吻。',
@@ -3934,12 +3994,28 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   private buildGenerateCopyUserPrompt(input: {
+    scene: 'social_post' | 'product_image';
     styleLabel: string;
     prompt: string;
     productName: string;
     audience: string;
     sellingPoints: string;
   }) {
+    if (input.scene === 'product_image') {
+      return [
+        '请生成一份商品详情文案。',
+        '优先使用已提供的商品信息；若部分参数缺失，请根据现有输入做合理补全，无法确认时使用稳妥表达。',
+        input.prompt ? `补充提示词：${input.prompt}` : '',
+        `产品名称：${input.productName}`,
+        `目标人群：${input.audience}`,
+        `核心卖点：${input.sellingPoints}`,
+        '正文输出为纯文本，严格按固定结构分段。',
+        '请严格返回 JSON，例如：{"title":"示例标题","body":"【产品整体介绍】...","tags":"#标签1 #标签2 #标签3"}',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+
     return [
       `请生成一条图文种草内容，发布平台：${input.styleLabel}。`,
       '正文风格统一按“小红书软种草”输出；发布平台信息仅用于帮助你判断标签方向，不改变正文风格。',

@@ -364,6 +364,7 @@ export default function StudioImages() {
         generateAiCopy({
           accessToken,
           prompt,
+          scene: "product_image",
           productName: productName || titleSeed,
           sellingPoints,
           audience,
@@ -374,6 +375,7 @@ export default function StudioImages() {
         generateAiImages({
           accessToken,
           prompt: prompt || titleSeed,
+          scene: "product_image",
           sizePreset,
           resolution,
           referenceImages,

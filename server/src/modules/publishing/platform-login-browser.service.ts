@@ -28,6 +28,7 @@ type PlatformDraftSaveInput = {
   sessionPath: string;
   platform: LeadPublishPlatform;
   jobId: string;
+  authPayload?: string | null;
   title: string;
   body: string;
   tags: string[];
@@ -37,6 +38,9 @@ type PlatformDraftSaveInput = {
 
 type PlatformDraftSaveResult = {
   draftUrl: string;
+  authPayload?: string;
+  accountName?: string;
+  displayName?: string | null;
 };
 
 type PageActionWaitOptions = {
@@ -72,32 +76,38 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await this.closeSession(input.accountId);
     this.ensureDirectory(input.sessionPath);
 
-    const context = await chromium.launchPersistentContext(input.sessionPath, {
-      headless: false,
-      executablePath: this.resolveExecutablePath(),
+    const context = await this.launchBrowserContext(input.sessionPath, {
+      preferVisible: true,
+      purpose: 'login',
     });
 
-    const page = context.pages()[0] ?? (await context.newPage());
-    await page.goto(this.getPlatformLoginUrl(input.platform), {
-      waitUntil: 'domcontentloaded',
-    });
-    await page.bringToFront();
+    try {
+      const page = context.pages()[0] ?? (await context.newPage());
+      await page.goto(this.getPlatformLoginUrl(input.platform), {
+        waitUntil: 'domcontentloaded',
+      });
+      await page.bringToFront();
 
-    this.sessions.set(input.accountId, {
-      context,
-      sessionPath: input.sessionPath,
-    });
+      this.sessions.set(input.accountId, {
+        context,
+        sessionPath: input.sessionPath,
+      });
 
-    return {
-      loginUrl: page.url(),
-      sessionPath: input.sessionPath,
-    };
+      return {
+        loginUrl: page.url(),
+        sessionPath: input.sessionPath,
+      };
+    } catch (error) {
+      await context.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   async collectLoginResult(input: {
     accountId: string;
     sessionPath: string;
     platform: LeadPublishPlatform;
+    authPayload?: string | null;
     loginUrl?: string | null;
     fallbackAccountName?: string;
   }): Promise<PlatformLoginResult> {
@@ -114,8 +124,11 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         throw new ConflictException('未读取到登录 Cookie，请先在浏览器完成登录');
       }
 
-      const profile = await this.readAccountProfile(page, input.platform, input.fallbackAccountName);
-      this.assertAuthenticatedProfile(profile, input.platform, currentUrl);
+      const profile = this.assertAuthenticatedProfile(
+        await this.readAccountProfile(page, input.platform, input.fallbackAccountName),
+        input.platform,
+        currentUrl,
+      );
 
       return {
         authPayload: cookiePairs.join('; '),
@@ -144,40 +157,45 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
           visible: true,
         },
         async ({ page }) => {
-        await this.ensurePublishPageReady(page, input.platform, Boolean(input.videoUrl));
+          const recoveredAuth = await this.ensurePublishPageReady(
+            page,
+            input.platform,
+            Boolean(input.videoUrl),
+          );
 
-        switch (input.platform) {
-          case LeadPublishPlatform.xiaohongshu:
-            if (input.videoUrl) {
-              await this.publishXiaohongshuVideoPost(page, input, uploadFiles);
-            } else {
-              await this.publishXiaohongshuImagePost(page, input, uploadFiles);
-            }
-            break;
-          case LeadPublishPlatform.douyin:
-            await this.publishDouyinContent(page, input, uploadFiles);
-            break;
-          case LeadPublishPlatform.wechat_mp:
-            if (input.videoUrl) {
-              await this.publishWechatMpVideoPost(page, input, uploadFiles);
-            } else {
-              await this.publishWechatMpImagePost(page, input, uploadFiles);
-            }
-            break;
-          case LeadPublishPlatform.kuaishou:
-            if (input.videoUrl) {
-              await this.publishKuaishouVideoPost(page, input, uploadFiles);
-            } else {
-              await this.publishKuaishouImagePost(page, input, uploadFiles);
-            }
-            break;
-          default:
-            throw new ConflictException('当前平台暂不支持自动发布');
-        }
+          switch (input.platform) {
+            case LeadPublishPlatform.xiaohongshu:
+              if (input.videoUrl) {
+                await this.publishXiaohongshuVideoPost(page, input, uploadFiles);
+              } else {
+                await this.publishXiaohongshuImagePost(page, input, uploadFiles);
+              }
+              break;
+            case LeadPublishPlatform.douyin:
+              await this.publishDouyinContent(page, input, uploadFiles);
+              break;
+            case LeadPublishPlatform.wechat_mp:
+              if (input.videoUrl) {
+                await this.publishWechatMpVideoPost(page, input, uploadFiles);
+              } else {
+                await this.publishWechatMpImagePost(page, input, uploadFiles);
+              }
+              break;
+            case LeadPublishPlatform.kuaishou:
+              if (input.videoUrl) {
+                await this.publishKuaishouVideoPost(page, input, uploadFiles);
+              } else {
+                await this.publishKuaishouImagePost(page, input, uploadFiles);
+              }
+              break;
+            default:
+              throw new ConflictException('当前平台暂不支持自动发布');
+          }
 
-        return {
-          draftUrl: page.url(),
-        };
+          return {
+            draftUrl: page.url(),
+            ...recoveredAuth,
+          };
         },
       );
     } finally {
@@ -190,7 +208,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       case LeadPublishPlatform.xiaohongshu:
         return 'https://creator.xiaohongshu.com/login';
       case LeadPublishPlatform.douyin:
-        return 'https://creator.douyin.com/creator-micro/content/publish';
+        return 'https://creator.douyin.com/';
       case LeadPublishPlatform.wechat_mp:
         return 'https://channels.weixin.qq.com/';
       case LeadPublishPlatform.kuaishou:
@@ -261,11 +279,98 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     return executablePath;
   }
 
+  private async launchBrowserContext(
+    sessionPath: string,
+    options: { preferVisible: boolean; purpose: 'login' | 'publish' | 'read' },
+  ) {
+    const headless = this.resolveHeadlessMode(options.preferVisible, options.purpose);
+
+    try {
+      return await chromium.launchPersistentContext(sessionPath, {
+        headless,
+        executablePath: this.resolveExecutablePath(),
+      });
+    } catch (error) {
+      throw this.buildBrowserLaunchError(error, options.purpose, headless);
+    }
+  }
+
+  private resolveHeadlessMode(preferVisible: boolean, purpose: 'login' | 'publish' | 'read') {
+    const configuredHeadless = this.configService
+      .get<string>('PUBLISHING_BROWSER_HEADLESS')
+      ?.trim()
+      .toLowerCase();
+
+    if (configuredHeadless === 'true' || configuredHeadless === '1' || configuredHeadless === 'yes') {
+      return true;
+    }
+
+    if (configuredHeadless === 'false' || configuredHeadless === '0' || configuredHeadless === 'no') {
+      return false;
+    }
+
+    if (!preferVisible) {
+      return true;
+    }
+
+    if (this.canLaunchVisibleBrowser()) {
+      return false;
+    }
+
+    if (purpose === 'login') {
+      throw new ConflictException(
+        '当前服务器未配置桌面显示环境，无法打开平台登录浏览器。请安装 Xvfb/桌面环境，或在有图形界面的机器上运行后端服务。',
+      );
+    }
+
+    this.logger.warn(`[publishing-browser] visible browser unavailable, fallback to headless purpose=${purpose}`);
+    return true;
+  }
+
+  private canLaunchVisibleBrowser() {
+    if (process.platform !== 'linux') {
+      return true;
+    }
+
+    return Boolean(process.env.DISPLAY?.trim() || process.env.WAYLAND_DISPLAY?.trim());
+  }
+
+  private buildBrowserLaunchError(
+    error: unknown,
+    purpose: 'login' | 'publish' | 'read',
+    headless: boolean,
+  ) {
+    if (error instanceof ConflictException) {
+      return error;
+    }
+
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const missingDisplay =
+      /Missing X server|Looks like you launched a headed browser|no XServer|\$DISPLAY|The platform failed to initialize/i.test(
+        message,
+      );
+
+    if (missingDisplay && !headless) {
+      if (purpose === 'login') {
+        return new ConflictException(
+          '当前服务器未配置桌面显示环境，无法打开平台登录浏览器。请安装 Xvfb/桌面环境，或在有图形界面的机器上运行后端服务。',
+        );
+      }
+
+      return new ConflictException(
+        '当前服务器未配置桌面显示环境，浏览器无法以可视模式启动。请安装 Xvfb/桌面环境，或配置 PUBLISHING_BROWSER_HEADLESS=true。',
+      );
+    }
+
+    return new ConflictException(`浏览器启动失败：${message || 'unknown_error'}`);
+  }
+
   private async withReadableContext<T>(
     input: {
       accountId: string;
       sessionPath: string;
       platform: LeadPublishPlatform;
+      authPayload?: string | null;
       loginUrl?: string | null;
       fallbackAccountName?: string;
       visible?: boolean;
@@ -292,15 +397,17 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     this.ensureDirectory(input.sessionPath);
-    const keepContextOpen = Boolean(input.visible);
-    const context = await chromium.launchPersistentContext(input.sessionPath, {
-      headless: input.visible ? false : true,
-      executablePath: this.resolveExecutablePath(),
+    const headless = this.resolveHeadlessMode(Boolean(input.visible), input.visible ? 'publish' : 'read');
+    const keepContextOpen = Boolean(input.visible && !headless);
+    const context = await this.launchBrowserContext(input.sessionPath, {
+      preferVisible: Boolean(input.visible),
+      purpose: input.visible ? 'publish' : 'read',
     });
 
     try {
+      await this.applyAuthPayloadToContext(context, input.platform, input.authPayload);
       const page = await this.getOrCreatePage(context);
-      if (input.visible) {
+      if (input.visible && !headless) {
         await page.bringToFront().catch(() => undefined);
       }
       if (keepContextOpen) {
@@ -340,6 +447,102 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => undefined);
   }
 
+  private async applyAuthPayloadToContext(
+    context: BrowserContext,
+    platform: LeadPublishPlatform,
+    authPayload?: string | null,
+  ) {
+    const parsedCookies = this.parseCookieHeader(authPayload);
+    if (parsedCookies.length === 0) {
+      return;
+    }
+
+    const cookiesToAdd = this.buildPlatformCookiesForInjection(parsedCookies, platform);
+
+    if (cookiesToAdd.length === 0) {
+      return;
+    }
+
+    await context.addCookies(cookiesToAdd).catch(() => undefined);
+  }
+
+  private buildPlatformCookiesForInjection(
+    cookies: Array<{ name: string; value: string; path: string }>,
+    platform: LeadPublishPlatform,
+  ) {
+    const publishUrl = this.getPlatformPublishUrl(platform, false);
+    const targets =
+      platform === LeadPublishPlatform.kuaishou
+        ? [
+            { kind: 'url' as const, value: publishUrl },
+            { kind: 'domain' as const, value: 'cp.kuaishou.com' },
+            { kind: 'domain' as const, value: 'passport.kuaishou.com' },
+            { kind: 'domain' as const, value: '.kuaishou.com' },
+          ]
+        : [{ kind: 'url' as const, value: publishUrl }];
+
+    const mapped = targets.flatMap((target) =>
+      cookies.map((cookie) =>
+        target.kind === 'url'
+          ? {
+              ...cookie,
+              url: target.value,
+            }
+          : {
+              ...cookie,
+              domain: target.value,
+            },
+      ),
+    );
+
+    const deduplicated = new Map<string, (typeof mapped)[number]>();
+    for (const item of mapped) {
+      const scope = 'domain' in item ? `domain:${item.domain}` : `url:${item.url}`;
+      deduplicated.set(`${scope}|${item.path}|${item.name}`, item);
+    }
+
+    return Array.from(deduplicated.values());
+  }
+
+  private parseCookieHeader(value?: string | null) {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return [];
+    }
+
+    return normalized
+      .split(';')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const separatorIndex = item.indexOf('=');
+        if (separatorIndex <= 0) {
+          return null;
+        }
+
+        const name = item.slice(0, separatorIndex).trim();
+        const cookieValue = item.slice(separatorIndex + 1).trim();
+        if (!name || !cookieValue) {
+          return null;
+        }
+
+        return {
+          name,
+          value: cookieValue,
+          path: '/',
+        };
+      })
+      .filter(
+        (
+          item,
+        ): item is {
+          name: string;
+          value: string;
+          path: string;
+        } => Boolean(item),
+      );
+  }
+
   private getPlatformPublishUrl(platform: LeadPublishPlatform, hasVideo: boolean) {
     switch (platform) {
       case LeadPublishPlatform.xiaohongshu:
@@ -363,7 +566,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     page: Page,
     platform: LeadPublishPlatform,
     hasVideo: boolean,
-  ) {
+  ): Promise<Pick<PlatformDraftSaveResult, 'authPayload' | 'accountName' | 'displayName'> | null> {
     const targetUrl = this.getPlatformPublishUrl(platform, hasVideo);
     if (!page.url() || page.url() === 'about:blank') {
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
@@ -372,6 +575,9 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
+    const recoveredAuth = this.isLoginPageUrl(page.url(), platform)
+      ? await this.waitForPublishLoginRecovery(page, platform, hasVideo)
+      : null;
     this.assertNotOnLoginPageDuringPublish(page, platform);
 
     if (platform === LeadPublishPlatform.xiaohongshu) {
@@ -390,10 +596,18 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
             ],
       ).catch(() => undefined);
     }
+
+    return recoveredAuth;
   }
 
   private assertNotOnLoginPageDuringPublish(page: Page, platform: LeadPublishPlatform) {
-    const normalizedUrl = (page.url() || '').toLowerCase();
+    if (this.isLoginPageUrl(page.url(), platform)) {
+      throw new ConflictException('当前平台账号登录已失效，请重新登录后再发布');
+    }
+  }
+
+  private isLoginPageUrl(url: string, platform: LeadPublishPlatform) {
+    const normalizedUrl = (url || '').toLowerCase();
     const loginUrlKeywords = ['login', 'signin', 'passport', 'oauth', 'scan', 'qrcode'];
     const looksLikeKuaishouLoginPage =
       platform === LeadPublishPlatform.kuaishou &&
@@ -403,9 +617,74 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       normalizedUrl.includes(keyword),
     );
 
-    if (looksLikeKuaishouLoginPage || looksLikeGenericLoginPage) {
-      throw new ConflictException('当前平台账号登录已失效，请重新登录后再发布');
+    return looksLikeKuaishouLoginPage || looksLikeGenericLoginPage;
+  }
+
+  private async waitForPublishLoginRecovery(
+    page: Page,
+    platform: LeadPublishPlatform,
+    hasVideo: boolean,
+  ): Promise<Pick<PlatformDraftSaveResult, 'authPayload' | 'accountName' | 'displayName'>> {
+    const recoveryTimeoutMs = 180000;
+    const startedAt = Date.now();
+    const loginUrl = this.getPlatformLoginUrl(platform);
+    const targetUrl = this.getPlatformPublishUrl(platform, hasVideo);
+
+    if (!page.url() || !page.url().startsWith(loginUrl)) {
+      await page.goto(loginUrl, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
     }
+
+    await page.bringToFront().catch(() => undefined);
+    this.logger.warn(
+      `[publishing-browser] publish requires re-login platform=${platform}, waiting for manual login`,
+    );
+
+    while (Date.now() - startedAt < recoveryTimeoutMs) {
+      await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => undefined);
+
+      const currentUrl = page.url();
+      if (this.isLoginPageUrl(currentUrl, platform)) {
+        await page.waitForTimeout(1500).catch(() => undefined);
+        continue;
+      }
+
+      try {
+        const profile = this.assertAuthenticatedProfile(
+          await this.readAccountProfile(page, platform),
+          platform,
+          currentUrl,
+        );
+        const authPayload = await this.collectContextCookies(page.context());
+
+        if (!currentUrl.startsWith(targetUrl)) {
+          await page.goto(targetUrl, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
+          await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
+        }
+
+        return {
+          authPayload,
+          accountName: profile.accountName,
+          displayName: profile.displayName,
+        };
+      } catch {
+        await page.waitForTimeout(1500).catch(() => undefined);
+      }
+    }
+
+    throw new ConflictException('当前平台账号需要重新登录，请在浏览器中完成登录后再重新发布');
+  }
+
+  private async collectContextCookies(context: BrowserContext) {
+    const cookies = await context.cookies();
+    const cookiePairs = cookies
+      .filter((item) => item.name.trim() && item.value.trim())
+      .map((item) => `${item.name}=${item.value}`);
+
+    if (cookiePairs.length === 0) {
+      throw new ConflictException('未读取到登录 Cookie，请先在浏览器完成登录');
+    }
+
+    return cookiePairs.join('; ');
   }
 
   private async publishXiaohongshuImagePost(
@@ -501,6 +780,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     uploadFiles: string[],
   ) {
     let douyinBody = input.body;
+    this.logger.log(`[douyin-publish] start job=${input.jobId} video=${Boolean(input.videoUrl)} tags=${input.tags.length}`);
     await this.prepareDouyinPublishMode(page, Boolean(input.videoUrl));
     if (!input.videoUrl) {
       await this.openDouyinImageUpload(page).catch(() => undefined);
@@ -544,7 +824,9 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         'input[type="file"]',
       ]);
     }
+    this.logger.log(`[douyin-publish] upload-finished job=${input.jobId}`);
     await this.waitForDouyinUploadSettled(page, Boolean(input.videoUrl));
+    this.logger.log(`[douyin-publish] upload-settled job=${input.jobId}`);
     const normalizedTitle = input.title.trim();
     if (normalizedTitle) {
       const filledTitle = await this.fillFirst(
@@ -578,8 +860,11 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     const editor = await this.fillDouyinDescription(page, douyinBody);
-    await this.appendPlainTagsAfterBody(page, editor, input.tags);
+    this.logger.log(`[douyin-publish] description-filled job=${input.jobId}`);
+    await this.appendDouyinTopicsAfterBody(page, editor, input.tags);
+    this.logger.log(`[douyin-publish] topics-finished job=${input.jobId}`);
     await this.selectDouyinNoDeclaration(page);
+    this.logger.log(`[douyin-publish] declaration-selected job=${input.jobId}`);
     const publishButton = await this.findAndHighlightFirst(page, [
       'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
       'button:has-text("发布")',
@@ -588,6 +873,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     ]);
     await page.waitForTimeout(800);
     await this.humanClick(publishButton);
+    this.logger.log(`[douyin-publish] publish-clicked job=${input.jobId}`);
     await this.waitForDouyinPublishFinished(page);
   }
 
@@ -845,7 +1131,9 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     input: PlatformDraftSaveInput,
     uploadFiles: string[],
   ) {
+    this.logger.log(`[kuaishou-publish] start job=${input.jobId} imageCount=${uploadFiles.length}`);
     await this.enterKuaishouImagePublish(page);
+    this.logger.log(`[kuaishou-publish] entered-image-page job=${input.jobId} url=${page.url()}`);
 
     const uploadTrigger = await this.findFirstLocator(
       page,
@@ -867,7 +1155,9 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       'input[accept*="image/webp"]',
       'input[accept*="image/*"]',
     ]);
+    this.logger.log(`[kuaishou-publish] upload-finished job=${input.jobId}`);
     await this.waitForUploadSettled(page);
+    this.logger.log(`[kuaishou-publish] upload-settled job=${input.jobId}`);
     await this.fillEditor(
       page,
       [
@@ -884,12 +1174,15 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       input.body,
       { humanizedMode: 'kuaishou-fast' },
     );
+    this.logger.log(`[kuaishou-publish] description-filled job=${input.jobId}`);
     await this.clickKuaishouPublish(page);
+    this.logger.log(`[kuaishou-publish] publish-clicked job=${input.jobId}`);
     await this.waitForActionFinished(page, {
       successHints: ['发布成功', '作品发布成功', '发布完成', '审核中', '正在审核', '已发布'],
       failureHints: ['发布失败', '上传失败', '请先上传', '请完善', '请填写内容'],
       timeoutErrorMessage: '未识别到快手发布成功状态，请确认页面是否仍停留在发布页。',
     });
+    this.logger.log(`[kuaishou-publish] finished job=${input.jobId} url=${page.url()}`);
   }
 
   private async publishKuaishouVideoPost(
@@ -1303,12 +1596,11 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const locator = await this.findFirstLocator(page, douyinEditorSelectors, true);
+      const locator =
+        (await this.findFirstLocator(page, douyinEditorSelectors, true)) ??
+        (await this.findFirstLocator(page, douyinEditorSelectors, false));
       if (locator) {
-        await this.fillRichTextValue(page, douyinEditorSelectors, normalized, '未找到正文输入框', {
-          preferHumanType: true,
-          perCharDelay: 85,
-        });
+        await this.fillDouyinDescriptionValue(page, locator, normalized);
         return locator;
       }
 
@@ -1316,12 +1608,11 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       if (trigger) {
         await this.humanClick(trigger).catch(() => undefined);
         await page.waitForTimeout(400);
-        const activatedLocator = await this.findFirstLocator(page, douyinEditorSelectors, true);
+        const activatedLocator =
+          (await this.findFirstLocator(page, douyinEditorSelectors, true)) ??
+          (await this.findFirstLocator(page, douyinEditorSelectors, false));
         if (activatedLocator) {
-          await this.fillRichTextValue(page, douyinEditorSelectors, normalized, '未找到正文输入框', {
-            preferHumanType: true,
-            perCharDelay: 85,
-          });
+          await this.fillDouyinDescriptionValue(page, activatedLocator, normalized);
           return activatedLocator;
         }
       }
@@ -1332,6 +1623,76 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     const pageText = (await this.readPageText(page)).slice(0, 240);
     this.logger.warn(`[douyin-editor] description editor not found current=${page.url()} body=${pageText}`);
     throw new ConflictException('未找到正文输入框');
+  }
+
+  private async fillDouyinDescriptionValue(page: Page, locator: Locator, value: string) {
+    const normalized = value.trim();
+    if (!normalized) {
+      return;
+    }
+
+    await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+    await locator.click({ timeout: 5000, force: true, delay: 80 }).catch(() => undefined);
+    await this.humanClick(locator).catch(() => undefined);
+    await page.keyboard.press('Control+A').catch(() => undefined);
+    await page.keyboard.press('Backspace').catch(() => undefined);
+    await page.keyboard.type(normalized, { delay: 85 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+
+    if (await this.hasDouyinDescriptionText(page, normalized)) {
+      return;
+    }
+
+    const refreshedLocator = await this.findFirstLocator(page, [
+      'div.zone-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
+      'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
+      'div.zone-container[contenteditable="true"][data-placeholder*="描述"]',
+      'div.zone-container[contenteditable="true"][data-placeholder*="作品"]',
+      'div.zone-container [contenteditable="true"]',
+      '[data-e2e*="publish"] [contenteditable="true"]',
+      '[data-e2e*="content"] [contenteditable="true"]',
+      '[data-e2e*="publish"] textarea',
+      '[data-e2e*="content"] textarea',
+      'div[role="textbox"]',
+      'textarea[placeholder*="作品简介"]',
+      'textarea[placeholder*="添加简介"]',
+      'textarea[placeholder*="添加描述"]',
+      'textarea[placeholder*="作品"]',
+      'textarea[placeholder*="描述"]',
+      'div[contenteditable="true"][data-placeholder*="作品"]',
+      'div[contenteditable="true"][data-placeholder*="描述"]',
+      '[class*="DraftEditor"] [contenteditable="true"]',
+      '[class*="editor-kit"] [contenteditable="true"]',
+      'div[contenteditable="plaintext-only"]',
+      'div[contenteditable="true"]',
+    ], false);
+
+    if (!refreshedLocator) {
+      throw new ConflictException('未找到正文输入框');
+    }
+
+    await refreshedLocator.click({ timeout: 5000, force: true, delay: 80 }).catch(() => undefined);
+    await page.keyboard.press('Control+A').catch(() => undefined);
+    await page.keyboard.press('Backspace').catch(() => undefined);
+    await page.keyboard.type(normalized, { delay: 60 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+
+    if (await this.hasDouyinDescriptionText(page, normalized)) {
+      return;
+    }
+
+    throw new ConflictException('未找到正文输入框');
+  }
+
+  private async hasDouyinDescriptionText(page: Page, value: string) {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return true;
+    }
+
+    const excerpt = normalized.slice(0, Math.min(24, normalized.length));
+    const pageText = (await this.readPageText(page)).replace(/\s+/g, ' ').trim();
+    return pageText.includes(excerpt);
   }
 
   private async fillInputValue(
@@ -1504,17 +1865,22 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await this.moveCursorToTagLine(page, undefined, editor);
 
     for (const tag of normalizedTags) {
+      this.logger.log(`[douyin-topic] start tag=${tag}`);
       await this.humanClick(editor).catch(() => undefined);
       await page.keyboard.press('Control+End').catch(() => undefined);
       await page.waitForTimeout(100);
       await this.humanClick(topicButton).catch(() => undefined);
+      this.logger.log(`[douyin-topic] topic-button-clicked tag=${tag}`);
       await page.waitForTimeout(300);
       await page.keyboard.type(tag, { delay: 60 }).catch(() => undefined);
+      this.logger.log(`[douyin-topic] typed tag=${tag}`);
       await page.waitForTimeout(400);
       const applied = await this.clickDouyinTopicOption(page, editor, tag);
       if (applied) {
+        this.logger.log(`[douyin-topic] applied tag=${tag}`);
         await this.finalizeDouyinTagInput(page, editor);
       } else {
+        this.logger.warn(`[douyin-topic] fallback-plain tag=${tag}`);
         await this.fallbackAppendPlainTag(page, editor, tag);
       }
       await page.waitForTimeout(300);
@@ -1844,56 +2210,67 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
   private async clickDouyinTopicOption(page: Page, editor: Locator, tag: string) {
     const normalizedTag = tag.replace(/^#+/, '').trim();
-    const exactMatchers = [
-      new RegExp(`^\\s*${this.escapeRegex(normalizedTag)}\\s*$`),
-      new RegExp(`^\\s*#\\s*${this.escapeRegex(normalizedTag)}\\s*$`),
-    ];
-    const partialMatchers = [
-      new RegExp(`^\\s*${this.escapeRegex(normalizedTag)}`),
-      new RegExp(`#\\s*${this.escapeRegex(normalizedTag)}`),
-      new RegExp(this.escapeRegex(normalizedTag)),
-    ];
-
-    const topicNameGroups = [
-      page.locator('.mention-suggest-mount-dom .tag-hash-view-name-DwMEe8'),
-      page.locator('.mention-suggest-mount-dom .tag-dVUDkJ.tag-hash-o0tpyE'),
-      page.locator('.mention-suggest-mount-dom [class*="tag-hash-view-name"]'),
-      page.locator('.mention-suggest-mount-dom [class*="tag-hash"]'),
-    ];
-
-    for (const group of topicNameGroups) {
-      for (const matcher of exactMatchers) {
-        if (await this.clickFirstVisibleMatchingText(group, matcher)) {
-          await page.waitForTimeout(350);
-          return this.hasAppliedDouyinTopic(page, editor, normalizedTag);
-        }
-      }
-    }
-
-    for (const group of topicNameGroups) {
-      for (const matcher of partialMatchers) {
-        if (await this.clickFirstVisibleMatchingText(group, matcher)) {
-          await page.waitForTimeout(350);
-          return this.hasAppliedDouyinTopic(page, editor, normalizedTag);
-        }
-      }
-    }
-
+    this.logger.log(`[douyin-topic] try-enter tag=${normalizedTag}`);
     await page.keyboard.press('Enter').catch(() => undefined);
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(200);
     if (await this.hasAppliedDouyinTopic(page, editor, normalizedTag)) {
+      this.logger.log(`[douyin-topic] enter-applied tag=${normalizedTag}`);
       return true;
     }
 
+    this.logger.log(`[douyin-topic] try-first-candidate tag=${normalizedTag}`);
     await page.keyboard.press('ArrowDown').catch(() => undefined);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(120);
     await page.keyboard.press('Enter').catch(() => undefined);
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(300);
+    if (await this.hasAppliedDouyinTopic(page, editor, normalizedTag)) {
+      this.logger.log(`[douyin-topic] first-candidate-applied tag=${normalizedTag}`);
+      return true;
+    }
+
+    this.logger.log(`[douyin-topic] try-second-enter tag=${normalizedTag}`);
+    await page.keyboard.press('ArrowDown').catch(() => undefined);
+    await page.waitForTimeout(120);
+    await page.keyboard.press('Enter').catch(() => undefined);
+    await page.waitForTimeout(300);
     return this.hasAppliedDouyinTopic(page, editor, normalizedTag);
   }
 
-  private escapeRegex(value: string) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  private async clickFirstVisibleDouyinTopicCandidate(page: Page) {
+    const topicNameGroups = [
+      page.locator('.mention-suggest-mount-dom .tag-dVUDkJ'),
+      page.locator('.mention-suggest-mount-dom [class*="tag-hash-view-name"]'),
+      page.locator('.mention-suggest-mount-dom [class*="tag-hash"]'),
+      page.locator('.mention-suggest-mount-dom [role="option"]'),
+    ];
+
+    for (const group of topicNameGroups) {
+      const count = await group.count().catch(() => 0);
+      for (let index = 0; index < count; index += 1) {
+        const candidate = group.nth(index);
+        const text = ((await candidate.textContent().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+        if (!text) {
+          continue;
+        }
+
+        const isVisible = await candidate.isVisible().catch(() => false);
+        if (!isVisible) {
+          continue;
+        }
+
+        await this.humanClick(candidate).catch(async () => {
+          const clickableParent = candidate
+            .locator('xpath=ancestor-or-self::div[contains(@class,"tag-dVUDkJ")][1]')
+            .first();
+          if (await clickableParent.count().catch(() => 0)) {
+            await this.humanClick(clickableParent).catch(() => undefined);
+          }
+        });
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private async clickFirstVisibleMatchingText(
@@ -1988,14 +2365,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private async editorContainsTag(editor: Locator, tag: string) {
-    const currentValue = await editor
-      .evaluate((node) => {
-        if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
-          return node.value;
-        }
-        return node.textContent ?? '';
-      })
-      .catch(() => '');
+    const currentValue = ((await editor.textContent({ timeout: 800 }).catch(() => '')) || '');
     const normalizedText = currentValue.replace(/\s+/g, ' ').trim();
     return normalizedText.includes(tag) || normalizedText.includes(`#${tag}`);
   }
@@ -2531,6 +2901,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       [LeadPublishPlatform.xiaohongshu]: [
         '.account-name',
         'div.account-name',
+        'div.account-name[data-v-bf295dc2]',
         '[class*="avatar"] ~ div',
         '[class*="user-name"]',
         '[class*="username"]',
@@ -2538,6 +2909,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         '[class*="avatar"] + span',
       ],
       [LeadPublishPlatform.douyin]: [
+        'div.name-_lSSDc',
         '[class*="semi-avatar"] ~ div',
         '[class*="user-name"]',
         '[class*="creator-name"]',
@@ -2546,6 +2918,9 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         '[data-e2e*="user-name"]',
       ],
       [LeadPublishPlatform.wechat_mp]: [
+        'h2.finder-nickname',
+        '.finder-nickname',
+        '[class*="finder-nickname"]',
         '[class*="avatar"] ~ div',
         '.weui-desktop-account__info-name',
         '.account_meta_primary',
@@ -2557,6 +2932,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         '.type-info',
       ],
       [LeadPublishPlatform.kuaishou]: [
+        'div.user-info-name',
         '[class*="avatar"] ~ div',
         '[class*="user-name"]',
         '[class*="account-name"]',
@@ -2702,6 +3078,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         }
 
         if (currentPlatform === 'wechat_mp') {
+          const nicknameNode = document.querySelector<HTMLElement>('h2.finder-nickname');
           const getXPathText = (xpath: string) => {
             const result = document.evaluate(
               xpath,
@@ -2748,9 +3125,11 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
             return { accountId: '', rawText: '' };
           };
 
-          const displayName = getXPathText(
+          const displayName =
+            normalize(nicknameNode?.innerText || nicknameNode?.textContent) ||
+            getXPathText(
             '/html/body/div[1]/div/div[2]/div[2]/div/div[2]/div[1]/div[1]/div/div/div/h2',
-          );
+            );
           const accountIdXPathText = getXPathText(
             '/html/body/div[1]/div/div[2]/div[2]/div/div[2]/div[1]/div[1]/div/div/div/div[2]/div[1]/span[2]',
           );
@@ -3066,15 +3445,16 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   ) {
     const accountId = this.normalizeProfileText(profile.accountName);
     const displayName = this.normalizeProfileText(profile.displayName);
-    if (!accountId || !displayName) {
+    const identifiers = [accountId, displayName].filter((item): item is string => Boolean(item));
+    if (identifiers.length === 0) {
       throw new ConflictException('尚未识别到登录后的真实账号信息，请先完成登录并停留在账号后台首页');
     }
 
-    if (this.isPendingPlaceholder(accountId) || this.isPendingPlaceholder(displayName)) {
+    if (identifiers.some((item) => this.isPendingPlaceholder(item))) {
       throw new ConflictException('当前仍是登录中占位状态，请先完成平台登录');
     }
 
-    if (this.looksLikePlatformLabel(accountId, platform) || this.looksLikePlatformLabel(displayName, platform)) {
+    if (identifiers.every((item) => this.looksLikePlatformLabel(item, platform))) {
       throw new ConflictException('当前页面仍未进入账号后台，请完成登录后停留在后台首页');
     }
 
@@ -3083,6 +3463,16 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     if (loginUrlKeywords.some((keyword) => normalizedUrl.includes(keyword))) {
       throw new ConflictException('当前仍在登录页，请完成登录后再自动回收');
     }
+
+    const resolvedAccountName = accountId || displayName;
+    if (!resolvedAccountName) {
+      throw new ConflictException('尚未识别到登录后的真实账号信息，请先完成登录并停留在账号后台首页');
+    }
+    const resolvedDisplayName = displayName || accountId || null;
+    return {
+      accountName: resolvedAccountName,
+      displayName: resolvedDisplayName,
+    };
   }
 
   private looksLikePlatformLabel(value: string, platform: LeadPublishPlatform) {

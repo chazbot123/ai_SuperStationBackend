@@ -47,7 +47,7 @@
 - [completed] 阶段 126：输出跨仓库根目录迁移执行方案或等待用户放开路径限制
 - [completed] 阶段 127：确认知识库管理删除入口与切片链路现状
 - [completed] 阶段 128：补知识库列表/详情统一删除入口并核对切片是否调用大模型
-- [in_progress] 阶段 129：核对知识库切片当前真实实现与目标差异
+- [completed] 阶段 129：核对知识库切片当前真实实现与目标差异
 - [completed] 阶段 130：改造后端切片顺序与固定切片策略
 - [completed] 阶段 131：补页面说明并执行最小验证
 - [completed] 阶段 132：盘点前台产品模块、后台产品页面与后端产品接口现状
@@ -70,6 +70,19 @@
 - [completed] 阶段 149：执行诊断与最小验证
 - [completed] 阶段 150：梳理 Ubuntu 上线架构与现有部署资料缺口
 - [completed] 阶段 151：输出“沿用测试库数据”的 Ubuntu 安装到上线完整手册
+- [completed] 阶段 152：确认当前 PostgreSQL / Redis / MinIO 运行容器与真实数据目录
+- [completed] 阶段 153：执行 SQL 导出与 Redis / MinIO 数据备份
+- [completed] 阶段 154：核对备份目录与文件真实存在
+- [completed] 阶段 155：定位超级站前台卡在加载层的真实根因
+- [completed] 阶段 156：将超级站外部脚本依赖改为本地静态资源并补加载兜底
+- [completed] 阶段 157：重新打包超级站前端并同步运行包验证产物
+- [completed] 阶段 158：补当前工作区最小验证并确认关键改动无新增报错
+- [completed] 阶段 159：梳理现有 Ubuntu 运行包部署文档与后端 PM2 启动方式
+- [completed] 阶段 160：设计服务器 `Xvfb + PM2 + Chrome` 托管浏览器部署方案
+- [completed] 阶段 161：补服务器安装脚本与后端启动脚本
+- [completed] 阶段 162：将部署文档切到 `Xvfb + PM2` 正式启动方式
+- [completed] 阶段 163：核对脚本、文档与执行顺序一致性
+- [completed] 阶段 164：同步运行包中的后端产物、脚本与部署文档
 
 ## 当前决定
 - 保留现有 `personalization` 路由与权限键，优先改展示文案，避免扩大 RBAC 影响面
@@ -118,6 +131,15 @@
 - Ubuntu 上线方案本轮优先沿用当前项目实际架构：前后端应用跑宿主机，`PostgreSQL / Redis / MinIO` 继续用 Docker Compose
 - 当前两个前端默认更适合部署在各自域名根路径，不优先收口到同域名子路径，避免额外改 Vite `base`
 - 若要沿用当前测试环境“可正常使用”的完整业务状态，除 PostgreSQL 外还应同步 MinIO 对象文件；若要保留当前 AI 模型配置，还应同步 Redis 数据
+- 当前项目基础运行数据分别位于 `PostgreSQL / Redis / MinIO` 三处；完整备份需同时导出 SQL、复制 Redis 数据目录、复制 MinIO 数据目录
+- 超级站前台当前不再依赖 `cdnjs / jsdelivr` 才能完成首屏启动，改为优先加载 `public/vendor/*` 本地脚本
+- 超级站加载层本轮补最小兜底：即使启动链路异常或超时，也要强制隐藏 loader，避免页面一直卡白屏
+- 本地前台乱码根因不是浏览器或 Vite，而是 `legacy-home-body.html` 模板文件内容本身发生错误转码
+- `legacy home bootstrap timeout` 之前存在误报；启动成功后需要清理超时器，避免控制台持续出现假告警
+- 服务器平台登录链路本轮改为依赖 `Xvfb + Chrome` 提供虚拟显示，再由 `PM2` 托管启动脚本
+- `PM2` 不再直接启动 `server/dist/main.js`，而是启动仓库内 `scripts/start-server-with-xvfb.sh`
+- 后端 `server/.env` 需显式配置 `PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome` 与 `PUBLISHING_BROWSER_HEADLESS=false`
+- 运行包 `backups/deploy_bundle_20260509_143128/project-root` 也需要同步携带 `scripts/*.sh`、`docs/ubuntu-install-and-deploy-with-test-data.md` 与最新 `server/dist`
 
 ## 风险
 - 当前 `Personalization` 仍同时承载布局、运营指标、行业招商，继续加逻辑仍可能变重，需要适度拆分
@@ -143,6 +165,9 @@
 - `Personalization.tsx` 当前写死仅主公司可见，且后端 `level1_agent` 默认 `personalization` 权限仍为 false；若只加字段不改权限，一级代理仍进不去设置页
 - `rbac` 默认权限只在默认角色/权限数量不足时自动补种子；已有库里的旧权限记录可能不会因常量变更自动更新
 - 当前后端 `CORS_ORIGIN` 只支持单值字符串；若未来强行切到多个跨域前端域名，需要额外改后端 CORS 处理
+- 超级站首页和 `/products` 路径都依赖前端启动脚本；若脚本链路被外部 CDN 阻断，页面会一直停在 `CHILINTECH` 加载层
+- `public/legacy-home.html` 静态入口文件当前仍可能保留旧乱码文本；若未来重新启用该独立静态入口，还需同步清理
+- 服务器若未安装 `Xvfb` 或 `Chrome`，即使后端代码已支持无显示环境判断，平台登录仍无法以可视浏览器方式启动
 
 ## 完成结果
 - 前端“超级站配置中心”与“运营指标”第一版已完成
@@ -185,6 +210,13 @@
 - 发布记录页已增加 `queued/running` 状态自动轮询
 - 抖音发布已增强图文模式回退、上传完成识别和结果页识别
 - 已新增 `docs/ubuntu-install-and-deploy-with-test-data.md`，覆盖 Ubuntu 装机、Docker/Node/Nginx/PM2、测试库恢复、MinIO/Redis 同步、双前端上线、Nginx 配置、上线验证与回滚
+- 已在 `D:\zhilin_project\backups\20260508_231808` 下完成当前项目的 SQL、Redis、MinIO 数据备份
+- 已定位超级站前台卡白屏根因：`LegacyHomePage.tsx` 启动链路串行依赖 `GSAP / ScrollTrigger / Lenis / p5` 外部 CDN，任一失败都会导致 `legacy-home.js` 未正常完成初始化
+- 已将超级站启动脚本改为本地 `vendor` 资源，并在启动失败或超时时强制隐藏加载层
+- 已将 `legacy-home-body.html` 重建为干净 UTF-8 模板，并保留 `heroMetrics / offersGrid / 行业新闻弹层` 等当前运行节点
+- 已修正 `legacy-home.js` 中仍会显示到页面的乱码文案，`/` 与 `/products` 本地预览中文显示正常
+- 已修正 `LegacyHomePage.tsx` 启动成功后未清理超时器的问题，控制台不再误报 `bootstrap timeout`
+- 已将最新超级站前端 `dist` 覆盖到 `D:\zhilin_project\backups\deploy_bundle_20260509_143128\project-root\ZL_Supersite\dist`
 
 ## 冲突处理记录
 | 文件 | 冲突主题 | 处理原则 |
@@ -201,3 +233,51 @@
 - 后端 `prisma:generate` 与后端构建已通过
 - 当前只差执行 `git commit` 结束 merge
 | `src/pages/VideoDrafts.tsx` | 本地同步获客逻辑 vs 远端视频任务状态展示 | 页面同时保留 |
+- [completed] 阶段 165：梳理平台登录现有前后端链路并确认服务端浏览器依赖点
+- [completed] 阶段 166：设计“前端发起、本地浏览器登录、后端保存结果”的最小改造方案
+- [completed] 阶段 167：实现前后端最小改造并保留现有发布账号数据结构
+- [completed] 阶段 168：执行定向验证并更新部署/使用说明
+- [in_progress] 阶段 169：设计浏览器扩展自动回传 Cookie/Token 的最小落地方案
+- [pending] 阶段 170：实现扩展专用后端接收接口与登录会话约束
+- [pending] 阶段 171：实现最小 Chrome MV3 扩展并打通页面到扩展的授权流程
+- [pending] 阶段 172：联调扩展自动保存平台账号并补使用说明
+- [completed] 阶段 169：设计浏览器扩展自动回传 Cookie/Token 的最小落地方案
+- [completed] 阶段 170：实现扩展专用后端接收接口与登录会话约束
+- [completed] 阶段 171：实现最小 Chrome MV3 扩展并打通页面到扩展的授权流程
+- [completed] 阶段 172：联调扩展自动保存平台账号并补使用说明
+- [completed] 阶段 173：核对 4 平台自动发布是否真实接通到浏览器脚本
+- [completed] 阶段 174：定位扩展登录账号与自动发布浏览器会话的断点
+- [completed] 阶段 175：为自动发布补平台 Cookie 注入浏览器上下文
+- [in_progress] 阶段 176：梳理本地扩展执行的一键发布入口、扩展能力与旧发布步骤映射
+- [pending] 阶段 177：设计“前端发起 + 扩展本地执行 + 后端仅记状态”的最小改造方案
+- [completed] 阶段 178：实现扩展一键发布消息协议与前端触发链路
+- [completed] 阶段 179：按旧步骤迁移 4 平台本地发布脚本并打通结果回传
+- [in_progress] 阶段 180：收口服务端发布链路职责并完成最小验证
+
+## 阶段 173 结果
+- 已确认 4 平台自动发布任务创建后会真实调用 `PlatformLoginBrowserService.publish()`，不是只落库不执行
+- 已确认各平台发布脚本入口仍沿用本地跑通过的浏览器自动化实现
+
+## 阶段 174 结果
+- 已确认当前扩展登录只保存 `Cookie/Token` 到平台账号，不会生成 `browserSessionPath`
+- 已确认自动发布此前仍默认按 `sessionPath` 启动持久浏览器上下文，未把扩展保存的 Cookie 注入上下文
+- 该断点会同时影响抖音、小红书、视频号、快手，不只影响抖音
+
+## 阶段 175 结果
+- 已在自动发布浏览器上下文启动后优先把平台账号里的 Cookie 注入浏览器，再进入各平台发布页
+- 发布任务查询已补 `authType / authPayloadEncrypted`，可在执行发布前读取并解密平台登录信息
+
+## 阶段 176 结果
+- 用户已明确：一键发布应由用户自己桌面浏览器执行，不再以服务端浏览器为主执行端
+- 用户已明确：本轮“发布步骤按照以前”，需尽量复用现有 4 平台发布步骤顺序和差异处理
+- 当前前端一键发布入口、扩展桥接能力、旧发布步骤实现位置已开始梳理，下一步进入本地发布协议设计
+
+## 阶段 178 结果
+- 前端一键发布已默认带 `executionMode=extension`
+- 后端已补本地扩展发布启动与状态回传接口
+- 扩展桥接层已新增 `START_PUBLISH` 协议，能从前端启动本地发布会话
+
+## 阶段 179 结果
+- 扩展已新增 `publish-automation.js`，开始承接 4 平台本地发布步骤
+- `background.js` 已能打开对应平台发布页并把执行命令下发给内容脚本
+- 发布成功/失败状态已可从扩展回传到后端发布记录

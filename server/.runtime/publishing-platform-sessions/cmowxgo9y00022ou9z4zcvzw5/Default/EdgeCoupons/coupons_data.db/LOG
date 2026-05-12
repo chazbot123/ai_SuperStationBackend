@@ -1,0 +1,6 @@
+2026/05/08-22:21:33.023 9e74 Reusing MANIFEST D:\zhilin_project\server\.runtime\publishing-platform-sessions\cmowxgo9y00022ou9z4zcvzw5\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/05/08-22:21:33.024 9e74 Recovering log #7
+2026/05/08-22:21:33.024 9e74 Reusing old log D:\zhilin_project\server\.runtime\publishing-platform-sessions\cmowxgo9y00022ou9z4zcvzw5\Default\EdgeCoupons/coupons_data.db/000007.log 
+2026/05/08-22:21:33.081 8c3c Level-0 table #11: started
+2026/05/08-22:21:33.084 8c3c Level-0 table #11: 682248 bytes OK
+2026/05/08-22:21:33.086 8c3c Delete type=0 #7

@@ -9,6 +9,7 @@ import { ListPublishingJobsQueryDto } from './dto/list-publishing-jobs-query.dto
 import { ListPlatformAccountsQueryDto } from './dto/list-platform-accounts-query.dto';
 import { PublishLeadContentDto } from './dto/publish-lead-content.dto';
 import { SearchGaodeStoresDto } from './dto/search-gaode-stores.dto';
+import { StartPlatformExtensionLoginDto } from './dto/start-platform-extension-login.dto';
 import { StartPlatformLoginDto } from './dto/start-platform-login.dto';
 import { SyncPublishingContentDto } from './dto/sync-publishing-content.dto';
 import { UpdateStoreSearchConfigDto } from './dto/update-store-search-config.dto';
@@ -134,6 +135,14 @@ export class PublishingController {
     @Body() dto: StartPlatformLoginDto,
   ) {
     return this.publishingService.startPlatformLogin(req.user, dto);
+  }
+
+  @Post('platform-accounts/extension-login/start')
+  startPlatformExtensionLogin(
+    @Req() req: { user: SessionUser },
+    @Body() dto: StartPlatformExtensionLoginDto,
+  ) {
+    return this.publishingService.startPlatformExtensionLogin(req.user, dto);
   }
 
   @Post('platform-accounts/:id/update')

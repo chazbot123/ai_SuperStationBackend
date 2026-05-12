@@ -99,3 +99,55 @@
 - 后端 `server/src/main.ts` 中 `CORS_ORIGIN` 当前直接作为单值 `origin` 传入 `enableCors()`，没有现成多域名白名单解析
 - `AiModelConfigCacheService` 当前把模型配置直接存进 Redis `ai:model-config:*` 键；如果要保留测试环境现有模型配置，Redis 也应纳入迁移范围
 - 当前业务文件和图片资源由 MinIO 承载，数据库中的 `storageUrl / objectKey` 仅保存引用；若只恢复 PostgreSQL 不同步 MinIO，对应资源会在新环境失效
+- 当前本地 `docker-compose.yml` 使用宿主机目录挂载：`PostgreSQL -> D:\zhilin_project\data\postgres`、`Redis -> D:\zhilin_project\data\redis`、`MinIO -> D:\zhilin_project\data\minio`
+- 本次实际备份目录已落在 `D:\zhilin_project\backups\20260508_231808`；其中 SQL 采用 `pg_dump` 导出，Redis 与 MinIO 采用宿主机数据目录复制
+
+## 2026-05-09
+- 当前运行包部署已可不依赖 `git clone`；服务器只需接收本机整理好的 `dist + server/dist + server/node_modules + docker-compose.yml + .env.example`
+- 本轮真实可用的本地运行包目录为 `D:\zhilin_project\backups\deploy_bundle_20260509_143128\project-root`
+- 当前可直接用于迁移的备份真实结构是 `backups/sql/ai_superweb.sql`、`backups/redis/data`、`backups/minio/data`，不再是之前文档里的 `.dump / .tar.gz`
+- 当前普通 SQL 备份应通过 `psql` 恢复；`Redis` 与 `MinIO` 备份应通过停服务后覆盖数据目录恢复
+- 按用户最新要求，本轮服务器项目部署根目录应统一使用 `/data/ai-superweb`
+- 超级站前台 `LegacyHomePage.tsx` 当前会串行加载 `gsap / ScrollTrigger / lenis / p5 / legacy-home.js`；此前 `gsap / ScrollTrigger / lenis / p5` 都依赖外部 CDN
+- 若任一外部脚本加载失败，`legacy-home.js` 启动链路会中断，`.page-loader` 无法被关闭，页面会一直停在 `CHILINTECH` 加载层
+- 本地浏览器复测显示 `/` 与 `/products` 路径都能渲染完整页面，但该问题在服务器环境具有明显的 CDN 依赖敏感性
+- 最小稳定修复方案是把依赖脚本改为 `ZL_Supersite/public/vendor/*` 本地静态资源，并为加载层增加失败/超时兜底隐藏
+
+## 2026-05-11
+- 当前工作区仍有多处历史未提交改动，但本轮关键链路的最小验证已通过，可继续基于现状推进
+- `task_plan.md` 此前存在阶段 `129` 已完成但状态仍写成 `in_progress` 的记录残留，已修正
+- 本轮追加复核显示后台前端类型检查、后端构建、超级站前端类型检查均通过，当前更适合进入下一项明确需求，而不是继续追加无目标改动
+- 现有 Ubuntu 运行包部署文档仍按 `pm2 start dist/main.js` 托管后端，尚未覆盖 `Xvfb`、Chrome 和虚拟显示
+- 平台登录当前要想在 Linux 服务器使用可视浏览器，部署侧需要同时满足 `Xvfb + Chrome + DISPLAY`
+- 适合当前项目的最小落地方案是：`PM2` 托管 shell 脚本，脚本先确保 `Xvfb :99` 存在，再导出 `DISPLAY=:99` 启后端
+- 后端部署时应显式配置 `PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome` 与 `PUBLISHING_BROWSER_HEADLESS=false`
+
+## 2026-05-11 平台登录链路补充
+- 当前 PublishingPlatformLogin.tsx 原实现并不是本地浏览器登录，而是调用 /api/publishing/platform-accounts/*/hosted-login/*，由服务端 Playwright 托管浏览器。
+- 后端其实早已支持直接保存 Cookie/Token：createPlatformAccount() 与 updatePlatformAccount() 可直接写入 uthPayload，alidatePlatformAccount() 负责最小格式校验并更新状态。
+- 因此最小可交付方案不是继续折腾服务器可视浏览器，而是前端直接在本机打开平台登录页，再把用户手动获取的 Cookie/Token 提交给现有后端保存。
+
+## 2026-05-11 浏览器扩展方案补充
+- 仓库当前没有现成浏览器扩展实现，也没有 manifest、content script、cookies 权限声明。
+- 后端已有可复用存储层：createPlatformAccount / updatePlatformAccount / validatePlatformAccount 已支持接收并保存 Cookie/Token。
+- 若走扩展自动回传，建议新增扩展专用最小接口，而不是继续复用服务端托管浏览器登录。
+- 浏览器扩展方案当前采用 Chrome/Edge Manifest V3 最小实现：页面按钮保持不变，点击后打开平台官网；扩展通过 content script + background 监听平台页并读取 Cookie，再调用后端扩展同步接口保存。
+- 后端新增两段式接口：受 JWT 保护的 extension-login/start 负责签发 5 分钟短时会话 token；不带 JWT 的 extension-login/sync 只接受短时 token 回传 Cookie。
+- 平台登录页当前已不再依赖服务端托管浏览器完成登录，服务端浏览器继续仅用于后续自动发布。
+- 浏览器扩展已补 4 平台账号识别：在平台页直接按 DOM + 页面文本提取 ccountName/displayName，再随 Cookie 一起回传后端。
+- 识别口径沿用原先后端 PlatformLoginBrowserService.readAccountProfile() 的平台关键词和正则思路：小红书号 / 抖音号 / 视频号ID / 快手号。
+
+## 2026-05-12 自动发布与扩展登录断点补充
+- 当前 4 平台自动发布链路已真实接通到 `PlatformLoginBrowserService.publish()`，不是只创建任务或只落草稿记录
+- 扩展登录保存的是平台账号 `authPayloadEncrypted`，不会自动生成 `browserSessionPath`
+- 自动发布此前仍依赖 `sessionPath` 启动 Playwright 持久上下文，未把扩展保存的 Cookie 注入上下文；若账号只有 Cookie、没有会话目录，自动发布会天然失去登录态
+- 最小修复方案是在发布前将账号 Cookie 按平台发布域名注入 Playwright `BrowserContext`
+- 该修复为平台通用逻辑，同时覆盖抖音、小红书、视频号、快手
+
+## 2026-05-12 本地扩展发布链路补充
+- 用户已明确最新目标：一键发布应由用户自己桌面浏览器执行，不再以服务端 Playwright 作为主执行端
+- 用户要求“发布步骤按照以前”，即 4 平台现有自动发布主链路的步骤顺序和平台差异逻辑需要尽量沿用
+- 前端一键发布入口仍在 `src/pages/Publishing.tsx -> confirmPublish()`，调用的是 `src/lib/publishing.ts -> publishLeadContent()`
+- 浏览器扩展当前只具备 `PING / START_LOGIN` 登录回传能力，相关桥接在 `src/lib/platformLoginExtension.ts`，扩展目录在 `scripts/browser-extension/platform-login-helper`
+- 扩展 background/content 目前只处理 Cookie 读取和登录回传，没有“本地执行发布脚本”的消息协议
+- 旧的 4 平台发布步骤仍集中在 `server/src/modules/publishing/platform-login-browser.service.ts`：`publishXiaohongshu* / publishDouyinContent / publishWechatMp* / publishKuaishou*`

@@ -1,4 +1,4 @@
-let particles = [];
+﻿let particles = [];
     const numParticles = 800;
     const noiseScale = 0.01;
     let customSeed;
@@ -123,7 +123,7 @@ let particles = [];
       },
       {
         key: 'signing_rate',
-        label: '招商签约率',
+        label: '签约率',
         enabled: true,
         valueMode: 'fixed',
         startValue: '',
@@ -690,10 +690,10 @@ let particles = [];
     });
 
     // ==========================================
-    // 核心区块重度滚动交互 (Heavy Scroll Scrub)
+    // 鏍稿績鍖哄潡閲嶅害婊氬姩浜や簰 (Heavy Scroll Scrub)
     // ==========================================
 
-    // 5. Special Offers (特价爆款) - 3D 浮现与视差
+    // 5. Special Offers - 3D reveal
     const gsOfferCards = gsap.utils.toArray(".offers-grid .offer-card");
     gsOfferCards.forEach((card, index) => {
       card.style.transition = 'none';
@@ -714,7 +714,7 @@ let particles = [];
       );
     });
 
-    // 作品集分类过滤逻辑
+    // 浣滃搧闆嗗垎绫昏繃婊ら€昏緫
     const filterBtns = document.querySelectorAll('.pf-btn');
     const portfolioFilters = document.querySelector('.portfolio-filters');
     const portfolioGrid = document.getElementById('portfolioGrid');
@@ -767,15 +767,15 @@ let particles = [];
     let dragDeltaX = 0;
 
     const extraGalleryPool = [
-      "assets/images/landing/img_18.png",
-      "assets/images/landing/img_19.jpeg",
-      "assets/images/landing/img_0.jpeg",
-      "assets/images/landing/img_1.png",
-      "assets/images/landing/img_2.jpeg",
-      "assets/images/landing/img_3.jpeg",
-      "assets/images/landing/img_4.jpeg",
-      "assets/images/landing/img_5.jpeg",
-      "assets/images/landing/img_6.jpeg",
+      "/assets/images/landing/img_18.png",
+      "/assets/images/landing/img_19.jpeg",
+      "/assets/images/landing/img_0.jpeg",
+      "/assets/images/landing/img_1.png",
+      "/assets/images/landing/img_2.jpeg",
+      "/assets/images/landing/img_3.jpeg",
+      "/assets/images/landing/img_4.jpeg",
+      "/assets/images/landing/img_5.jpeg",
+      "/assets/images/landing/img_6.jpeg",
     ];
 
     function getBgUrl(styleValue){
@@ -818,7 +818,7 @@ let particles = [];
     }
 
     function renderOfferCard(product, index){
-      const primaryImage = product.images?.[0] || extraGalleryPool[index % extraGalleryPool.length] || 'assets/images/landing/img_14.jpeg';
+      const primaryImage = product.images?.[0] || extraGalleryPool[index % extraGalleryPool.length] || '/assets/images/landing/img_14.jpeg';
       const price = buildOfferPrice(product);
       const englishName = product.englishName
         ? product.englishName.replace(/-/g, ' ').toUpperCase()
@@ -835,7 +835,7 @@ let particles = [];
             <p class="desc">${escapeHtml(product.summary || product.description || '欢迎咨询该商品的适用场景、规格方案和合作方式。')}</p>
             <div class="price-row">
               <div class="price">
-                <span class="currency">¥</span><strong>${escapeHtml((price.currentText || '').replace(/^¥\s*/, ''))}</strong>${price.originalText ? `<del>${escapeHtml(price.originalText)}</del>` : ''}
+                <span class="currency">¥</span><strong>${escapeHtml((price.currentText || '').replace(/^[¥楼]\s*/, ''))}</strong>${price.originalText ? `<del>${escapeHtml(price.originalText)}</del>` : ''}
               </div>
               <button class="buy-btn" type="button">立即抢购</button>
             </div>
@@ -845,7 +845,7 @@ let particles = [];
     }
 
     function renderPortfolioCard(product, index){
-      const primaryImage = product.images?.[0] || extraGalleryPool[(index + 3) % extraGalleryPool.length] || 'assets/images/landing/img_8.jpeg';
+      const primaryImage = product.images?.[0] || extraGalleryPool[(index + 3) % extraGalleryPool.length] || '/assets/images/landing/img_8.jpeg';
       const categoryLabel = String(product.summary || product.description || '')
         .replace(/\s+/g, ' ')
         .trim()
@@ -883,7 +883,7 @@ let particles = [];
         const cat = item.querySelector('.p-cat')?.textContent?.trim() || '项目';
         const primary = getBgUrl(item.querySelector('.p-image')?.style?.backgroundImage);
         const images = [primary, ...uniqueSample(extraGalleryPool, 2, primary)].filter(Boolean);
-        const desc = item.dataset.desc?.trim() || `以“装饰 + 供暖 + 健康”一体化为导向，将石墨烯远红外发热层融入空间肌理。我们以隐形供暖、静音舒适与可定制饰面，完成从功能到情绪的整体交付。`;
+        const desc = item.dataset.desc?.trim() || '以“装饰 + 供暖 + 健康”一体化为导向，将石墨烯远红外发热层融入空间肌理，完成从功能到情绪的整体交付。';
         const specLabel = item.dataset.priceLabel?.trim() || '价格';
         const specValue = item.dataset.priceValue?.trim() || '欢迎咨询';
         const specs = [
@@ -1212,9 +1212,9 @@ let particles = [];
 
     const marketData={
       national:{summary:'当前视图聚焦全领域应用。点击下面的场景标签，可以切换不同空间的数据重心和机会说明。',labels:['星级酒店','医院康养','高端住宅','机场/地铁','影院/教育'],values:[91,84,76,69,52]},
-      east:{summary:'星级酒店对供暖的隐形美观度和舒适度要求极高，石墨烯发热板无风无音的特性完美契合。',labels:['大堂/接待','客房/套房','洗浴中心','行政酒廊','会议中心'],values:[96,89,83,79,72]},
-      south:{summary:'医院与康养中心关注安全与健康，生命光波理疗与零甲醛、A2级防火成为核心竞争力。',labels:['康复病房','理疗中心','养老公寓','休闲区','医护值班室'],values:[94,88,81,77,70]},
-      north:{summary:'高端住宅业主更注重个性化定制与智能控制，志林科技提供丰富的饰面选择与变频技术。',labels:['客厅/大平层','卧室/书房','全屋地暖','浴室/桑拿','地下影音室'],values:[90,82,78,73,61]}
+      east:{summary:'星级酒店对供暖系统的隐形美观和舒适体验要求更高，石墨烯发热方案更适合高端商旅空间。',labels:['大堂/接待','客房/套房','洗浴中心','行政酒廊','会议中心'],values:[96,89,83,79,72]},
+      south:{summary:'医院与康养中心更关注安全和健康体验，稳定控温、低噪音和理疗属性是核心卖点。',labels:['康复病房','理疗中心','养老公寓','休闲区','医护值班室'],values:[94,88,81,77,70]},
+      north:{summary:'高端住宅业主更重视个性化定制与智能控制，可覆盖全屋多空间的舒适供暖体验。',labels:['客厅/大平层','卧室/书房','全屋地暖','浴室/桑拿','地下影音室'],values:[90,82,78,73,61]}
     };
     const marketSummary=document.getElementById('marketSummary');
     const labels=['A','B','C','D','E'].map((k)=>document.getElementById('label'+k));
@@ -1236,7 +1236,7 @@ let particles = [];
       huxiu_rss: '虎嗅',
       '36kr_rss': '36氪',
       qbitai_html: '量子位',
-      leiphone_html: '雷峰网',
+      leiphone_html: '雷锋网',
       infoq_rss: 'InfoQ',
       ifanr_rss: '爱范儿',
       sspai_rss: '少数派',
@@ -1451,7 +1451,7 @@ let particles = [];
         const payload = text ? JSON.parse(text) : null;
         if(!response.ok) {
           const message = payload?.message || payload?.error || '超级站编辑请求失败';
-          throw new Error(Array.isArray(message) ? message.join('；') : message);
+          throw new Error(Array.isArray(message) ? message.join('，') : message);
         }
         return payload;
       });
@@ -1562,7 +1562,7 @@ let particles = [];
         draftSiteImageSlots = savedSiteImageSlots.map((item) => ({ ...item }));
         applySiteImageSlots(savedSiteImageSlots);
         updateSiteEditorHotspots();
-        setSiteEditorStatus('已保存到超级站，刷新前台后仍会保持当前替换结果。', 'success');
+        setSiteEditorStatus('已保存到超级站，刷新前台后仍会保留当前替换结果。', 'success');
       } catch (error) {
         setSiteEditorStatus(error instanceof Error ? error.message : '保存超级站图片配置失败', 'error');
       }
@@ -1580,7 +1580,7 @@ let particles = [];
           </div>
           <button class="site-editor__close" id="siteEditorClose" type="button">退出</button>
         </div>
-        <p class="site-editor__desc">先选图，再点击首页或样板店的图片区；全部替换完成后统一保存。</p>
+        <p class="site-editor__desc">先选图，再点击首页或样板店的图片区域；全部替换完成后统一保存。</p>
         <div class="site-editor__status" id="siteEditorStatus"></div>
         <div class="site-editor__thumbs" id="siteEditorThumbs"></div>
         <div class="site-editor__actions">
@@ -1597,7 +1597,7 @@ let particles = [];
         draftSiteImageSlots = savedSiteImageSlots.map((item) => ({ ...item }));
         applySiteImageSlots(savedSiteImageSlots);
         updateSiteEditorHotspots();
-        setSiteEditorStatus('已撤销未保存修改。', 'normal');
+        setSiteEditorStatus('已撤销未保存修改。', 'normal');       
       });
       document.getElementById('siteEditorSave')?.addEventListener('click', () => {
         saveSiteEditorSlots();
@@ -1629,7 +1629,7 @@ let particles = [];
 
     initializeSiteEditor();
 
-    // 虚拟IP交互逻辑
+    // 铏氭嫙IP浜や簰閫昏緫
     const ipContainer = document.querySelector('.ip-avatar-container');
     const chatBubble = document.getElementById('chatBubble');
     const closeBtn = document.querySelector('.close-btn');
@@ -1643,7 +1643,7 @@ let particles = [];
       {
         id: 'local-welcome',
         role: 'ai',
-        content: '您好！我是志林科技的招商顾问小林。有什么我可以帮您的吗？',
+        content: '您好！我是志林科技的招商顾问小林，有什么我可以帮您的吗？',
       },
     ];
     const hiddenSupportSystemMessages = new Set([
@@ -1693,15 +1693,6 @@ let particles = [];
           : type === 'success'
             ? '#2e7d32'
             : 'var(--muted)';
-    }
-
-    function escapeHtml(value) {
-      return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
     }
 
     function getMessageClass(role) {
@@ -1761,7 +1752,7 @@ let particles = [];
 
       if (!response.ok) {
         const message = payload?.message || payload?.error || 'AI 客服请求失败';
-        throw new Error(Array.isArray(message) ? message.join('；') : message);
+        throw new Error(Array.isArray(message) ? message.join('，') : message);
       }
 
       return payload;
@@ -1884,7 +1875,7 @@ let particles = [];
       chatBubble.classList.toggle('is-open');
     });
 
-    // 关闭按钮
+    // 鍏抽棴鎸夐挳
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       chatBubble.classList.remove('is-open');
@@ -1924,7 +1915,7 @@ let particles = [];
       const data = isViewingOffer ? offerProjects[activeProjectIndex] : projects[activeProjectIndex];
       if(!data) return;
       closeProject();
-      openChatWithMessage(isViewingOffer ? `我想了解特价：${data.title}` : `我想了解案例：${data.title}（${data.cat}）`);
+      openChatWithMessage(isViewingOffer ? `我想了解特价：${data.title}` : `我想了解案例：${data.title}，${data.cat}`);
     });
 
     bindPortfolioItems();
@@ -1934,7 +1925,7 @@ let particles = [];
     setTimeout(() => {
       if (!chatBubble.classList.contains('is-open')) {
         chatBubble.classList.add('is-open');
-        // 5秒后自动关闭（如果用户没有交互的话）
+        // 5 秒后自动关闭，如果用户没有交互
         setTimeout(() => {
           chatBubble.classList.remove('is-open');
         }, 5000);

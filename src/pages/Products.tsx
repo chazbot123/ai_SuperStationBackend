@@ -8,7 +8,7 @@ import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { requestJson } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
-import { useProductsStore, type ProductItem } from "@/store/productsStore";
+import { useProductsStore, type ProductItem, type ProductStatus } from "@/store/productsStore";
 
 type Draft = {
   name: string;
@@ -26,6 +26,9 @@ type Draft = {
 type InferEnglishNameResponse = {
   englishName: string;
 };
+
+type ProductSortKey = "ownerName" | "price" | "status" | "updatedAt";
+type ProductSortDirection = "asc" | "desc";
 
 function emptyDraft(): Draft {
   return {
@@ -78,6 +81,10 @@ export default function Products() {
   const unpublishProduct = useProductsStore((s) => s.unpublishProduct);
 
   const [query, setQuery] = useState("");
+  const [creatorFilter, setCreatorFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | ProductStatus>("all");
+  const [sortKey, setSortKey] = useState<ProductSortKey>("updatedAt");
+  const [sortDirection, setSortDirection] = useState<ProductSortDirection>("desc");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [hint, setHint] = useState<string | null>(null);
@@ -93,16 +100,45 @@ export default function Products() {
     void loadProducts();
   }, [accessToken, loadProducts, user?.id, user?.roleKey]);
 
+  const scopedProducts = useMemo(
+    () => (isMainCompany ? products : products.filter((item) => item.ownerUserId === user?.id)),
+    [isMainCompany, products, user?.id],
+  );
+
+  const creatorOptions = useMemo(
+    () => Array.from(new Set(scopedProducts.map((item) => item.ownerName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "zh-CN")),
+    [scopedProducts],
+  );
+
   const visibleProducts = useMemo(() => {
-    const scoped = isMainCompany ? products : products.filter((item) => item.ownerUserId === user?.id);
     const keyword = query.trim().toLowerCase();
-    return scoped.filter((item) => {
-      if (!keyword) return true;
-      return `${item.name} ${item.englishName} ${item.summary} ${item.description ?? ""} ${item.ownerName}`
-        .toLowerCase()
-        .includes(keyword);
-    });
-  }, [isMainCompany, products, query, user?.id]);
+    return scopedProducts
+      .filter((item) => {
+        if (creatorFilter !== "all" && item.ownerName !== creatorFilter) {
+          return false;
+        }
+
+        if (statusFilter !== "all" && item.status !== statusFilter) {
+          return false;
+        }
+
+        if (!keyword) return true;
+        return `${item.name} ${item.englishName} ${item.summary} ${item.description ?? ""} ${item.ownerName}`
+          .toLowerCase()
+          .includes(keyword);
+      })
+      .sort((left, right) => compareProducts(left, right, sortKey, sortDirection));
+  }, [creatorFilter, query, scopedProducts, sortDirection, sortKey, statusFilter]);
+
+  function toggleSort(nextKey: ProductSortKey) {
+    if (sortKey === nextKey) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setSortKey(nextKey);
+    setSortDirection(nextKey === "updatedAt" ? "desc" : "asc");
+  }
 
   async function autofillEnglishName(name: string) {
     const trimmedName = name.trim();
@@ -274,25 +310,39 @@ export default function Products() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>产品管理</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm leading-6 text-zinc-300">
-          <div>当前商品前后台关系按“淘宝 / 千牛”模型呈现。</div>
-          <div>前台只展示所有已上架商品，后台负责商品创建、编辑、审核和上架。</div>
-          <div>
-            {isMainCompany
-              ? "主公司可查看所有一级代理商品，也可自己创建并直接上架商品。"
-              : "一级代理可管理自己的商品，但商品上架前必须提交主公司审核。"}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle>{isMainCompany ? "全局商品列表" : "我的商品"}</CardTitle>
-            <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索商品名称 / 创建人" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>{isMainCompany ? "全部商品列表" : "我的商品"}</CardTitle>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索商品名称 / 创建人"
+                className="w-[320px]"
+              />
+              <select
+                value={creatorFilter}
+                onChange={(event) => setCreatorFilter(event.target.value)}
+                className="h-10 rounded-[6px] border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-orange-500"
+              >
+                <option value="all">全部创建人</option>
+                {creatorOptions.map((ownerName) => (
+                  <option key={ownerName} value={ownerName}>
+                    {ownerName}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as "all" | ProductStatus)}
+                className="h-10 rounded-[6px] border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-orange-500"
+              >
+                <option value="all">全部状态</option>
+                <option value="draft">草稿</option>
+                <option value="submitted">待审核</option>
+                <option value="live">已上架</option>
+                <option value="rejected">审核驳回</option>
+                <option value="offline">已下架</option>
+              </select>
               <Button onClick={openCreate} disabled={!accessToken || submitting}>
                 新增产品
               </Button>
@@ -307,11 +357,31 @@ export default function Products() {
               <thead>
                 <tr>
                   <Th>商品</Th>
-                  <Th>创建人</Th>
-                  <Th>价格</Th>
+                  <Th>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-orange-300" onClick={() => toggleSort("ownerName")}>
+                      创建人
+                      <span className="text-[10px] text-zinc-500">{getSortIndicator(sortKey, sortDirection, "ownerName")}</span>
+                    </button>
+                  </Th>
+                  <Th>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-orange-300" onClick={() => toggleSort("price")}>
+                      价格
+                      <span className="text-[10px] text-zinc-500">{getSortIndicator(sortKey, sortDirection, "price")}</span>
+                    </button>
+                  </Th>
                   <Th>特价</Th>
-                  <Th>状态</Th>
-                  <Th>更新时间</Th>
+                  <Th>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-orange-300" onClick={() => toggleSort("status")}>
+                      状态
+                      <span className="text-[10px] text-zinc-500">{getSortIndicator(sortKey, sortDirection, "status")}</span>
+                    </button>
+                  </Th>
+                  <Th>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-orange-300" onClick={() => toggleSort("updatedAt")}>
+                      更新时间
+                      <span className="text-[10px] text-zinc-500">{getSortIndicator(sortKey, sortDirection, "updatedAt")}</span>
+                    </button>
+                  </Th>
                   <Th className="text-right">操作</Th>
                 </tr>
               </thead>
@@ -672,4 +742,50 @@ function StatusBadge(props: { status: "draft" | "submitted" | "live" | "rejected
   if (props.status === "rejected") return <Badge variant="red">审核驳回</Badge>;
   if (props.status === "offline") return <Badge variant="gray">已下架</Badge>;
   return <Badge variant="gray">草稿</Badge>;
+}
+
+function compareProducts(
+  left: ProductItem,
+  right: ProductItem,
+  sortKey: ProductSortKey,
+  sortDirection: ProductSortDirection,
+) {
+  const factor = sortDirection === "asc" ? 1 : -1;
+
+  if (sortKey === "ownerName") {
+    return left.ownerName.localeCompare(right.ownerName, "zh-CN") * factor;
+  }
+
+  if (sortKey === "price") {
+    return (getComparablePrice(left) - getComparablePrice(right)) * factor;
+  }
+
+  if (sortKey === "status") {
+    return (getStatusOrder(left.status) - getStatusOrder(right.status)) * factor;
+  }
+
+  return (new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()) * factor;
+}
+
+function getComparablePrice(item: ProductItem) {
+  const rawPrice = item.specialOfferEnabled ? item.specialPriceText || item.originalPriceText || item.priceText : item.priceText;
+  const normalized = Number.parseFloat((rawPrice || "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(normalized) ? normalized : 0;
+}
+
+function getStatusOrder(status: ProductStatus) {
+  if (status === "draft") return 1;
+  if (status === "submitted") return 2;
+  if (status === "rejected") return 3;
+  if (status === "offline") return 4;
+  return 5;
+}
+
+function getSortIndicator(
+  currentKey: ProductSortKey,
+  currentDirection: ProductSortDirection,
+  targetKey: ProductSortKey,
+) {
+  if (currentKey !== targetKey) return "↕";
+  return currentDirection === "asc" ? "↑" : "↓";
 }

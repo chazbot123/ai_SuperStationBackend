@@ -1,0 +1,7 @@
+2026/05/12-13:24:57.362 b4a0 Reusing MANIFEST D:\zhilin_project\server\.runtime\publishing-platform-sessions\cmp210e640000fku90qfz7ctu\Default\IndexedDB\https_creator.douyin.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/05/12-13:24:57.362 b4a0 Recovering log #3
+2026/05/12-13:24:57.363 b4a0 Reusing old log D:\zhilin_project\server\.runtime\publishing-platform-sessions\cmp210e640000fku90qfz7ctu\Default\IndexedDB\https_creator.douyin.com_0.indexeddb.leveldb/000003.log 
+2026/05/12-13:25:20.135 6c40 Level-0 table #5: started
+2026/05/12-13:25:20.141 6c40 Level-0 table #5: 1542 bytes OK
+2026/05/12-13:25:20.150 6c40 Delete type=0 #3
+2026/05/12-13:25:20.167 6c40 Manual compaction at level-0 from (begin) .. (end); will stop at (end)
