@@ -107,8 +107,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
       const cookies = await context.cookies();
       const cookiePairs = cookies
-        .filter((item) => item.name.trim() && item.value.trim())
-        .map((item) => `${item.name}=${item.value}`);
+        .filter((item: { name: string; value: string }) => item.name.trim() && item.value.trim())
+        .map((item: { name: string; value: string }) => `${item.name}=${item.value}`);
 
       if (cookiePairs.length === 0) {
         throw new ConflictException('未读取到登录 Cookie，请先在浏览器完成登录');
@@ -318,7 +318,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private getActivePage(context: BrowserContext) {
-    return context.pages().find((page) => !page.isClosed()) ?? context.pages()[0];
+    return context.pages().find((page: Page) => !page.isClosed()) ?? context.pages()[0];
   }
 
   private async getOrCreatePage(context: BrowserContext) {
@@ -1122,7 +1122,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     for (let index = 0; index < Math.min(count, 8); index += 1) {
       const item = locator.nth(index);
       const snapshot = await item
-        .evaluate((node) => ({
+        .evaluate((node: Element) => ({
           accept: (node.getAttribute('accept') || '').trim(),
           className: (node.getAttribute('class') || '').trim(),
           disabled: Boolean((node as HTMLInputElement).disabled),
@@ -1366,7 +1366,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await locator.scrollIntoViewIfNeeded().catch(() => undefined);
     await locator.click({ timeout: 5000, delay: 80 }).catch(() => undefined);
     await locator.focus().catch(() => undefined);
-    await locator.evaluate((node, text) => {
+    await locator.evaluate((node: Element, text: string) => {
       const element = node as HTMLInputElement | HTMLTextAreaElement;
       const prototype =
         element instanceof HTMLTextAreaElement
@@ -1413,7 +1413,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         perCharDelay: options.perCharDelay ?? 90,
       });
       const typedValue = await locator
-        .evaluate((node) => {
+        .evaluate((node: Element) => {
           if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
             return node.value;
           }
@@ -1429,7 +1429,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await locator.scrollIntoViewIfNeeded().catch(() => undefined);
     await locator.click({ timeout: 5000, delay: 80 }).catch(() => undefined);
     await locator.focus().catch(() => undefined);
-    await locator.evaluate((node, text) => {
+    await locator.evaluate((node: Element, text: string) => {
       const normalizedText = String(text);
       if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
         const prototype =
@@ -1454,7 +1454,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }, normalized);
 
     const currentValue = await locator
-      .evaluate((node) => {
+      .evaluate((node: Element) => {
         if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
           return node.value;
         }
@@ -1697,7 +1697,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     while (Date.now() - startedAt < 8000) {
       const matchedFrame = page
         .frames()
-        .find((frame) => frame.url().includes('/micro/content/post/finderNewLifeCreate'));
+        .find((frame: Frame) => frame.url().includes('/micro/content/post/finderNewLifeCreate'));
       if (matchedFrame) {
         const pageText = await this.readPageText(matchedFrame);
         if (
@@ -1721,7 +1721,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       const matchedFrame = page
         .frames()
         .find(
-          (frame) =>
+          (frame: Frame) =>
             frame.url().includes('/platform/post/create') ||
             frame.url().includes('channels.weixin.qq.com'),
         );
@@ -1989,7 +1989,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
   private async editorContainsTag(editor: Locator, tag: string) {
     const currentValue = await editor
-      .evaluate((node) => {
+      .evaluate((node: Element) => {
         if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
           return node.value;
         }
@@ -2015,7 +2015,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       throw new ConflictException('未找到目标操作按钮');
     }
 
-    await locator.evaluate((node) => {
+    await locator.evaluate((node: Element) => {
       if (!(node instanceof HTMLElement)) {
         return;
       }
@@ -2243,7 +2243,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       await this.humanClear(locator);
     }
 
-    const tagName = await locator.evaluate((node) => node.tagName.toLowerCase()).catch(() => '');
+    const tagName = await locator.evaluate((node: Element) => node.tagName.toLowerCase()).catch(() => '');
     if (tagName === 'input' || tagName === 'textarea') {
       await locator.pressSequentially(normalized, { delay: perCharDelay }).catch(async () => {
         await locator.fill(normalized, { timeout: 5000 });
@@ -2252,7 +2252,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     await locator.pressSequentially(normalized, { delay: perCharDelay }).catch(async () => {
-      await locator.evaluate((node, text) => {
+      await locator.evaluate((node: Element, text: string) => {
         if (node instanceof HTMLElement) {
           node.focus();
           node.innerText = String(text);
@@ -2282,7 +2282,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       await this.humanClear(locator);
     }
 
-    const tagName = await locator.evaluate((node) => node.tagName.toLowerCase()).catch(() => '');
+    const tagName = await locator.evaluate((node: Element) => node.tagName.toLowerCase()).catch(() => '');
     if (tagName === 'input' || tagName === 'textarea') {
       await locator.pressSequentially(normalized, { delay: perCharDelay }).catch(async () => {
         await locator.fill(normalized, { timeout: 5000 });
@@ -2291,7 +2291,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     await locator.pressSequentially(normalized, { delay: perCharDelay }).catch(async () => {
-      await locator.evaluate((node, text) => {
+      await locator.evaluate((node: Element, text: string) => {
         if (node instanceof HTMLElement) {
           node.focus();
           node.innerText = String(text);
@@ -2655,7 +2655,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       try {
         const locator = page.locator(`text=${anchorText}`).first();
         const blockText = this.normalizeProfileText(
-          await locator.evaluate((node, anchor) => {
+          await locator.evaluate((node: Element, anchor: string) => {
             let current: HTMLElement | null =
               node instanceof HTMLElement ? node : node.parentElement;
             while (current) {
@@ -2683,7 +2683,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
   private async readDirectProfile(page: Page, platform: LeadPublishPlatform): Promise<AccountProfile> {
     try {
-      const profile = await page.evaluate((currentPlatform) => {
+      const profile = await page.evaluate((currentPlatform: LeadPublishPlatform) => {
         const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
         const findDivByText = (keyword: string) =>
           Array.from(document.querySelectorAll<HTMLElement>('div, span, p'))
@@ -2832,7 +2832,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     };
 
     try {
-      const candidates = await page.evaluate((anchorTexts) => {
+      const candidates = await page.evaluate((anchorTexts: string[]) => {
         type Candidate = {
           text: string;
           score: number;
@@ -2852,7 +2852,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
             if (text.length < 8 || text.length > 280) {
               return null;
             }
-            const score = anchorTexts.reduce((sum, anchor) => sum + (text.includes(anchor) ? 2 : 0), 0);
+            const score = anchorTexts.reduce((sum: number, anchor: string) => sum + (text.includes(anchor) ? 2 : 0), 0);
             const avatarBonus =
               element.querySelector('img, [style*="background-image"], [class*="avatar"]') ? 2 : 0;
             const idBonus = /(小红书号|抖音号|视频号ID|视频号|快手号)/.test(text) ? 3 : 0;
@@ -2886,7 +2886,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       const best = candidates[0]?.text || null;
       if (best) {
         this.logger.log(
-          `[platform-login-profile-scan] platform=${platform} candidates=${JSON.stringify(candidates.map((item) => item.text))}`,
+          `[platform-login-profile-scan] platform=${platform} candidates=${JSON.stringify(candidates.map((item: { text: string }) => item.text))}`,
         );
       }
       return this.normalizeProfileText(best);

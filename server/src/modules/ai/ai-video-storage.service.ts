@@ -102,9 +102,13 @@ export class AiVideoStorageService {
   }
 
   private buildPublicBaseUrl(endpoint: string, port: number, useSSL: boolean) {
+    const explicit = this.configService.get<string>('MINIO_PUBLIC_BASE_URL')?.trim();
+    if (explicit) {
+      return explicit.replace(/\/+$/, '');
+    }
     const protocol = useSSL ? 'https' : 'http';
     const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
-    return `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}`;
+    return `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}`.replace(/\/+$/, '');
   }
 
   private encodeObjectKey(objectKey: string) {

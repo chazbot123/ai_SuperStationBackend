@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createClient } from 'redis';
 
 export type VideoTtsCacheEntry = {
+  userId?: string | null;
   voiceId?: string | null;
   text?: string;
   subtitleText?: string | null;

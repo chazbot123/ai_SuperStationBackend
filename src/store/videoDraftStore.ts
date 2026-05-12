@@ -45,6 +45,7 @@ export type VideoDraftItem = {
 
 type VideoDraftState = {
   items: VideoDraftItem[];
+  replaceItems: (items: VideoDraftItem[]) => void;
   prependItem: (item: VideoDraftItem) => void;
   updateItem: (id: string, patch: Partial<VideoDraftItem>) => void;
 };
@@ -53,6 +54,10 @@ export const useVideoDraftStore = create<VideoDraftState>()(
   persist(
     (set) => ({
       items: [],
+      replaceItems: (items) =>
+        set(() => ({
+          items,
+        })),
       prependItem: (item) =>
         set((state) => ({
           items: [item, ...state.items.filter((entry) => entry.id !== item.id)],

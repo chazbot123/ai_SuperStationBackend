@@ -45,7 +45,11 @@ export class RbacService {
       if (!permissionMatrix[permission.roleKey]) {
         permissionMatrix[permission.roleKey] = buildEmptyPermissionMap();
       }
-      permissionMatrix[permission.roleKey][permission.pageKey] = permission.allowed;
+      const pageKey = permission.pageKey as RbacPageKey;
+      if (!RBAC_PAGE_KEYS.includes(pageKey)) {
+        continue;
+      }
+      permissionMatrix[permission.roleKey][pageKey] = permission.allowed;
     }
 
     return {

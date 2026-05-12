@@ -2033,6 +2033,12 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const explicit = this.configService.get<string>('AI_BGM_PUBLIC_BASE_URL')?.trim();
     if (explicit) return explicit;
 
+    const minioPublicBaseUrl = this.configService.get<string>('MINIO_PUBLIC_BASE_URL')?.trim();
+    if (minioPublicBaseUrl) {
+      const bucket = this.configService.get<string>('MINIO_BUCKET') ?? 'ai-superweb';
+      return `${minioPublicBaseUrl.replace(/\/+$/, '')}/${bucket}`;
+    }
+
     const endpoint = this.configService.get<string>('MINIO_ENDPOINT') ?? '';
     const port = Number(this.configService.get<string>('MINIO_PORT') ?? '9000');
     const useSSL = String(this.configService.get<string>('MINIO_USE_SSL') ?? 'false') === 'true';

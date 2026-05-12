@@ -1,4 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -15,18 +17,24 @@ export type SubtitleCue = {
 
 @Injectable()
 export class AiVideoConcatService {
-  constructor() {
-    const resolvedFfmpegPath =
-      typeof ffmpegInstaller?.path === 'string' && ffmpegInstaller.path
-        ? ffmpegInstaller.path
-        : typeof ffmpegStaticPath === 'string' && ffmpegStaticPath
-          ? ffmpegStaticPath
-          : '';
+  constructor(private readonly configService: ConfigService) {
+    const resolvedFfmpegPath = this.resolveBinaryPath('FFMPEG_PATH', [
+      '/usr/bin/ffmpeg',
+      '/usr/local/bin/ffmpeg',
+      typeof ffmpegInstaller?.path === 'string' ? ffmpegInstaller.path : '',
+      typeof ffmpegStaticPath === 'string' ? ffmpegStaticPath : '',
+    ]);
+    const resolvedFfprobePath = this.resolveBinaryPath('FFPROBE_PATH', [
+      '/usr/bin/ffprobe',
+      '/usr/local/bin/ffprobe',
+      typeof ffprobeInstaller?.path === 'string' ? ffprobeInstaller.path : '',
+    ]);
+
     if (resolvedFfmpegPath) {
       ffmpeg.setFfmpegPath(resolvedFfmpegPath);
     }
-    if (typeof ffprobeInstaller?.path === 'string' && ffprobeInstaller.path) {
-      ffmpeg.setFfprobePath(ffprobeInstaller.path);
+    if (resolvedFfprobePath) {
+      ffmpeg.setFfprobePath(resolvedFfprobePath);
     }
   }
 
@@ -326,6 +334,22 @@ export class AiVideoConcatService {
         .on('end', () => resolve())
         .save(outputPath);
     });
+  }
+
+  private resolveBinaryPath(envKey: 'FFMPEG_PATH' | 'FFPROBE_PATH', candidates: string[]) {
+    const explicit = this.configService.get<string>(envKey)?.trim();
+    if (explicit && existsSync(explicit)) {
+      return explicit;
+    }
+
+    for (const candidate of candidates) {
+      const normalized = candidate?.trim();
+      if (normalized && existsSync(normalized)) {
+        return normalized;
+      }
+    }
+
+    return '';
   }
 
   private buildSrt(cues: SubtitleCue[]) {

@@ -191,6 +191,44 @@ export class KnowledgeService {
     };
   }
 
+  async retrieveRelevantChunks(query: string, scope: 'company' | 'personal' = 'company', topK = 5) {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      return [];
+    }
+
+    const vectorLiteral = this.toVectorLiteral(this.buildEmbedding(trimmedQuery));
+    const rows = await this.prisma.$queryRawUnsafe<RetrievalHitRow[]>(
+      `
+        SELECT
+          c.id AS "chunkId",
+          c."documentId" AS "documentId",
+          d.title AS "documentTitle",
+          c.content AS "content",
+          c."contentPreview" AS "contentPreview",
+          1 - (c.embedding <=> CAST($1 AS vector)) AS "score"
+        FROM "KnowledgeDocumentChunk" c
+        INNER JOIN "KnowledgeDocument" d ON d.id = c."documentId"
+        WHERE d."indexStatus" = 'ready'
+          AND d."kbScope" = $2
+        ORDER BY c.embedding <=> CAST($1 AS vector)
+        LIMIT $3
+      `,
+      vectorLiteral,
+      scope,
+      topK,
+    );
+
+    return rows.map((row) => ({
+      chunkId: row.chunkId,
+      documentId: row.documentId,
+      documentTitle: row.documentTitle,
+      score: Number(row.score ?? 0),
+      content: row.content,
+      snippet: row.contentPreview || row.content.slice(0, 200),
+    }));
+  }
+
   private async findDocumentOrThrow(id: string) {
     const document = await this.prisma.knowledgeDocument.findUnique({
       where: { id },

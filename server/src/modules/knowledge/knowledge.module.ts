@@ -9,5 +9,6 @@ import { PrismaModule } from '../prisma/prisma.module';
   imports: [PrismaModule],
   controllers: [KnowledgeController],
   providers: [KnowledgeService, KnowledgeStorageService, KnowledgeParserService],
+  exports: [KnowledgeService],
 })
 export class KnowledgeModule {}

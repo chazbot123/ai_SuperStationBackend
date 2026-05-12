@@ -1,46 +1,50 @@
 import { Injectable } from '@nestjs/common';
-import { BusinessCardTemplateKey } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
 import { UpdateBusinessCardDto } from './dto/update-business-card.dto';
+
+type BusinessCardRecord = {
+  userId: string;
+  companyName: string;
+  jobTitle: string;
+  phone: string;
+  email: string;
+  businessScope: string;
+  coverImageUrl?: string;
+  templateKey: string;
+};
 
 @Injectable()
 export class BusinessCardsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly cards = new Map<string, BusinessCardRecord>();
 
   async getMyCard(userId: string) {
-    const existingCard = await this.prisma.businessCard.findUnique({
-      where: { userId },
-    });
-
+    const existingCard = this.cards.get(userId);
     if (existingCard) {
       return existingCard;
     }
 
-    return this.prisma.businessCard.create({
-      data: {
-        userId,
-        companyName: '',
-        jobTitle: '',
-        phone: '',
-        email: '',
-        businessScope: '',
-        templateKey: BusinessCardTemplateKey.classic_blue,
-      },
-    });
+    const defaultCard: BusinessCardRecord = {
+      userId,
+      companyName: '',
+      jobTitle: '',
+      phone: '',
+      email: '',
+      businessScope: '',
+      templateKey: 'classic_blue',
+    };
+    this.cards.set(userId, defaultCard);
+    return defaultCard;
   }
 
   async updateMyCard(userId: string, dto: UpdateBusinessCardDto) {
-    return this.prisma.businessCard.upsert({
-      where: { userId },
-      create: {
-        userId,
-        ...dto,
-        templateKey: dto.templateKey as BusinessCardTemplateKey,
-      },
-      update: {
-        ...dto,
-        templateKey: dto.templateKey as BusinessCardTemplateKey,
-      },
-    });
+    const current = await this.getMyCard(userId);
+    const nextCard: BusinessCardRecord = {
+      ...current,
+      ...dto,
+      userId,
+      templateKey: dto.templateKey,
+      coverImageUrl: dto.coverImageUrl,
+    };
+    this.cards.set(userId, nextCard);
+    return nextCard;
   }
 }

@@ -14,17 +14,21 @@ import { usePageMeta } from "@/hooks/usePageMeta";
 import { estimateProductEta, formatClock, formatMmSs } from "@/lib/videoEta";
 import {
   createAvatarVideoTask,
+  createVideoDraft,
   expandAvatarVideoScript,
   generateAiCopy,
   generatePlatformMeta,
   generateAiVideo,
   getAvatarVideoTaskStatus,
   getVideoTaskStatus,
+  listVideoDrafts,
   polishPrompt,
   recommendBgm,
   retryAvatarVideoTask,
+  updateVideoDraft,
   type AvatarVideoTaskStatusResponse,
 } from "@/lib/ai";
+import { toVideoDraftItem } from "@/lib/videoDraftMapper";
 import { useAppStore } from "@/store/appStore";
 import { useAuthStore } from "@/store/authStore";
 import { useModelConfigStore } from "@/store/modelConfigStore";
@@ -256,6 +260,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   const videoModelConfig = useModelConfigStore((s) => s.configs.find((item) => item.type === "video") ?? null);
   const addContent = useAppStore((s) => s.addContent);
   const markContentSynced = useAppStore((s) => s.markContentSynced);
+  const replaceDrafts = useVideoDraftStore((s) => s.replaceItems);
   const prependDraft = useVideoDraftStore((s) => s.prependItem);
   const updateDraft = useVideoDraftStore((s) => s.updateItem);
   const draftItems = useVideoDraftStore((s) => s.items);
@@ -382,6 +387,26 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   };
 
   useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+
+    async function hydrateDrafts() {
+      try {
+        const records = await listVideoDrafts(accessToken);
+        if (cancelled) return;
+        replaceDrafts(records.map(toVideoDraftItem));
+      } catch {
+        // Ignore refresh errors here and keep the current local snapshot.
+      }
+    }
+
+    void hydrateDrafts();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, replaceDrafts]);
+
+  useEffect(() => {
     if (isProductMode) {
       setTtsEnabled(false);
     }
@@ -418,6 +443,61 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     if (!isProductMode) return null;
     return getProductDurationGuide(durationSec);
   }, [durationSec, isProductMode]);
+
+  async function persistDraftPatch(id: string, patch: Partial<VideoDraftItem>) {
+    updateDraft(id, patch);
+    if (!accessToken) {
+      return;
+    }
+    const saved = await updateVideoDraft({
+      accessToken,
+      id,
+      title: patch.title,
+      platformStyle: patch.platformStyle,
+      publishTitle: patch.publishTitle,
+      publishTags: patch.publishTags,
+      durationText: patch.durationText,
+      generatedScript: patch.generatedScript,
+      videoUrl: patch.videoUrl,
+      taskId: patch.taskId,
+      provider: patch.provider,
+      model: patch.model,
+      errorMessage: patch.errorMessage,
+      status: patch.status,
+      syncedToLeads: patch.syncedToLeads,
+      completedAt: patch.completedAt,
+    });
+    updateDraft(id, toVideoDraftItem(saved));
+  }
+
+  async function createPersistedDraft(input: {
+    source: VideoDraftSource;
+    title: string;
+    platformStyle?: string;
+    durationText: string;
+    generatedScript: string;
+    publishTitle?: string;
+    publishTags?: string[];
+    status?: VideoDraftItem["status"];
+  }) {
+    if (!accessToken) {
+      throw new Error("请先登录");
+    }
+    const created = await createVideoDraft({
+      accessToken,
+      source: input.source,
+      title: input.title,
+      platformStyle: input.platformStyle,
+      publishTitle: input.publishTitle,
+      publishTags: input.publishTags,
+      durationText: input.durationText,
+      generatedScript: input.generatedScript,
+      status: input.status ?? "processing",
+    });
+    const next = toVideoDraftItem(created);
+    prependDraft(next);
+    return next;
+  }
 
   useEffect(() => {
     if (!resolutionOptions.includes(resolution)) {
@@ -542,7 +622,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     setMetaEditorTitle(meta.title);
     setMetaEditorTags(meta.tags.map((tag) => `#${tag}`).join(" "));
     if (currentProductTask?.id) {
-      updateDraft(currentProductTask.id, {
+      await persistDraftPatch(currentProductTask.id, {
         publishTitle: meta.title,
         publishTags: meta.tags,
         title: `${props.cardTitle}｜${platformLabel(platformStyle)}｜${meta.title}`,
@@ -569,7 +649,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       }
       setDraftField(props.draftSource, "productCopyText", next);
       if (currentProductTask?.id) {
-        updateDraft(currentProductTask.id, { generatedScript: next });
+        await persistDraftPatch(currentProductTask.id, { generatedScript: next });
       }
       try {
         await syncProductMeta(next);
@@ -917,34 +997,54 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     const prompt = rawQuestion || props.defaultPrompt;
     const platformText = platformLabel(platformStyle);
     const avatarFullScript = avatarCopyText.trim();
-    const nextScript = isAvatarMode ? avatarFullScript : productCopyText.trim();
     const productSpeechText = isProductMode ? extractSpeechContentFromProductPrompt(prompt) : "";
-
-    const next: VideoDraftItem = {
-      id: makeId("video"),
-      source: props.draftSource,
-      title: `${props.cardTitle}｜${platformText}｜${(nextScript || prompt).slice(0, 16) || "新视频任务"}`,
-      platformStyle,
-      durationText: props.draftSource === "avatar_video" ? "长视频" : formatDurationText(durationSec <= 16 ? durationSec : 16),
-      status: "processing",
-      createdAt: new Date().toISOString(),
-      generatedScript: nextScript,
-      videoUrl: "",
-      reviewStage: isAgent ? "draft" : "approved",
-      syncedToLeads: false,
-    };
-
-    prependDraft(next);
-    setAssetHint(isProductMode ? "已提交生成任务，生成结果将显示在右侧。" : "已提交生成任务，结果将在视频草稿箱里自动更新。");
+    const productGeneratedScript = productCopyText.trim() || productSpeechText || rawQuestion;
+    const nextScript = isAvatarMode ? avatarFullScript : productGeneratedScript;
 
     setIsGenerating(true);
+    let createdDraftId: string | null = null;
     try {
-      const metaBaseText = isAvatarMode ? avatarFullScript : productCopyText.trim();
+      const draftTitle = `${props.cardTitle}｜${platformText}｜${(nextScript || prompt).slice(0, 16) || "新视频任务"}`;
+      const draftDurationText =
+        props.draftSource === "avatar_video" ? "长视频" : formatDurationText(durationSec <= 16 ? durationSec : 16);
+      let next: VideoDraftItem;
+
+      if (props.draftSource === "avatar_video") {
+        const referenceImages = assets
+          .filter((item) => item.kind === "image" && item.previewUrl)
+          .map((item) => item.previewUrl as string)
+          .filter(Boolean)
+          .slice(0, 3);
+        const imageDataUrl = referenceImages[0] ?? "";
+        if (!avatarFullScript) {
+          setAssetHint("请先生成或填写“文案内容”后再提交真人口播视频");
+          return;
+        }
+        if (!imageDataUrl) {
+          setAssetHint("请先上传一张人物头像/肖像图片作为参考图");
+          return;
+        }
+      }
+
+      next = await createPersistedDraft({
+        source: props.draftSource,
+        title: draftTitle,
+        platformStyle,
+        durationText: draftDurationText,
+        generatedScript: nextScript,
+        publishTitle: workspacePublishTitle.trim() || undefined,
+        publishTags: workspacePublishTags.length > 0 ? workspacePublishTags : undefined,
+        status: "processing",
+      });
+      createdDraftId = next.id;
+      setAssetHint(isProductMode ? "已提交生成任务，生成结果将显示在右侧。" : "已提交生成任务，结果将在视频草稿箱自动更新。");
+
+      const metaBaseText = isAvatarMode ? avatarFullScript : productGeneratedScript;
       if (metaBaseText) {
         try {
           const meta = await generateMeta(metaBaseText);
           if (meta) {
-            updateDraft(next.id, {
+            await persistDraftPatch(next.id, {
               publishTitle: meta.title,
               publishTags: meta.tags,
               title: `${props.cardTitle}｜${platformText}｜${meta.title}`,
@@ -965,23 +1065,6 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
           .filter(Boolean)
           .slice(0, 3);
         const imageDataUrl = referenceImages[0] ?? "";
-        if (!avatarFullScript) {
-          updateDraft(next.id, {
-            status: "failed",
-            errorMessage: "请先生成或填写“文案内容”后再提交真人口播视频",
-          });
-          setAssetHint("请先生成或填写“文案内容”后再提交真人口播视频");
-          return;
-        }
-        if (!imageDataUrl) {
-          updateDraft(next.id, {
-            status: "failed",
-            errorMessage: "请先上传一张人物头像/肖像图片作为参考图",
-          });
-          setAssetHint("请先上传一张人物头像/肖像图片作为参考图");
-          return;
-        }
-
         const created = await createAvatarVideoTask({
           fullScript: avatarFullScript,
           referenceImageDataUrl: imageDataUrl,
@@ -1002,7 +1085,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
           accessToken,
         });
 
-        updateDraft(next.id, {
+        await persistDraftPatch(next.id, {
           taskId: created.taskId,
         });
         setAssetHint(
@@ -1040,34 +1123,43 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       });
 
       if (result.status === "success" && result.videoUrl) {
-        updateDraft(next.id, {
+        await persistDraftPatch(next.id, {
           status: "ready",
           videoUrl: result.videoUrl,
           provider: result.provider,
           model: result.model,
+          completedAt: new Date().toISOString(),
         });
         setAssetHint(isProductMode ? "视频已生成完成。" : "视频已生成完成，已同步到草稿箱。");
         return;
       }
 
       if (result.taskId) {
-        updateDraft(next.id, {
+        await persistDraftPatch(next.id, {
           taskId: result.taskId,
           provider: result.provider,
           model: result.model,
         });
       } else {
-        updateDraft(next.id, {
+        await persistDraftPatch(next.id, {
           status: "failed",
           errorMessage: "视频生成失败：未返回任务 ID",
+          completedAt: new Date().toISOString(),
         });
         setAssetHint("视频生成失败：未返回任务 ID");
       }
     } catch (error) {
-      updateDraft(next.id, {
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : "视频生成失败",
-      });
+      if (createdDraftId) {
+        try {
+          await persistDraftPatch(createdDraftId, {
+            status: "failed",
+            errorMessage: error instanceof Error ? error.message : "视频生成失败",
+            completedAt: new Date().toISOString(),
+          });
+        } catch {
+          // Ignore persistence errors and keep the optimistic local state.
+        }
+      }
       setAssetHint(error instanceof Error ? error.message : "视频生成失败");
     } finally {
       setIsGenerating(false);
@@ -1102,24 +1194,27 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         const result = await getVideoTaskStatus(accessToken, taskId);
         if (stopped) return;
         if (result.status === "success" && result.videoUrl) {
-          updateDraft(draftId, {
+          await persistDraftPatch(draftId, {
             status: "ready",
             videoUrl: result.videoUrl,
             errorMessage: undefined,
+            completedAt: new Date().toISOString(),
           });
           return;
         }
         if (result.status === "failed") {
-          updateDraft(draftId, {
+          await persistDraftPatch(draftId, {
             status: "failed",
             errorMessage: result.errorMessage || "视频生成失败",
+            completedAt: new Date().toISOString(),
           });
         }
       } catch (error) {
         if (stopped) return;
-        updateDraft(draftId, {
+        await persistDraftPatch(draftId, {
           status: "failed",
           errorMessage: error instanceof Error ? error.message : "视频任务查询失败",
+          completedAt: new Date().toISOString(),
         });
       }
     }
@@ -1195,7 +1290,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     const next = copyResultEditorValue.trim();
     setDraftField(props.draftSource, "productCopyText", next);
     if (currentProductTask?.id) {
-      updateDraft(currentProductTask.id, { generatedScript: next });
+      void persistDraftPatch(currentProductTask.id, { generatedScript: next });
     }
     setCopyResultEditorOpen(false);
     setPolishHint("已保存文案生成结果");
@@ -1246,7 +1341,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     const platformText = platformLabel(
       (currentMetaDraft.platformStyle as VideoWorkspaceDraft["platformStyle"]) ?? "douyin",
     );
-    updateDraft(currentMetaDraft.id, {
+    void persistDraftPatch(currentMetaDraft.id, {
       publishTitle: titleValue || undefined,
       publishTags: tagsValue.length ? tagsValue : undefined,
       title: titleValue ? `${props.cardTitle}｜${platformText}｜${titleValue}` : currentMetaDraft.title,
@@ -1283,15 +1378,17 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         if (stopped) return;
         setAvatarDetail(result);
         if (result.status === "completed" && result.finalVideoUrl) {
-          updateDraft(activeAvatarDraft.id, {
+          await persistDraftPatch(activeAvatarDraft.id, {
             status: "ready",
             videoUrl: result.finalVideoUrl,
             errorMessage: undefined,
+            completedAt: new Date().toISOString(),
           });
         } else if (result.status === "failed") {
-          updateDraft(activeAvatarDraft.id, {
+          await persistDraftPatch(activeAvatarDraft.id, {
             status: "failed",
             errorMessage: result.errorMessage || "视频生成失败",
+            completedAt: new Date().toISOString(),
           });
         }
       } catch {
