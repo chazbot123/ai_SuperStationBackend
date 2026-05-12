@@ -52,8 +52,11 @@ export class ProductsController {
   }
 
   @Post('infer-english-name')
-  inferEnglishName(@Body() dto: InferEnglishNameDto) {
-    return this.productsService.inferEnglishName(dto.name);
+  inferEnglishName(
+    @Req() req: { user: SessionUser },
+    @Body() dto: InferEnglishNameDto,
+  ) {
+    return this.productsService.inferEnglishName(req.user, dto.name);
   }
 
   @Get(':id')
@@ -78,6 +81,11 @@ export class ProductsController {
   @Post(':id/submit')
   submit(@Req() req: { user: SessionUser }, @Param('id') id: string) {
     return this.productsService.submit(req.user, id);
+  }
+
+  @Post(':id/withdraw')
+  withdrawSubmission(@Req() req: { user: SessionUser }, @Param('id') id: string) {
+    return this.productsService.withdrawSubmission(req.user, id);
   }
 
   @Post(':id/publish')

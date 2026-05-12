@@ -79,7 +79,9 @@ const defaultConfigs: ModelConfig[] = [
 ];
 
 type ModelConfigState = {
+  ownerUserId: string | null;
   configs: ModelConfig[];
+  bindOwner: (userId: string | null | undefined) => void;
   updateConfig: (type: ModelType, patch: Partial<ModelConfig>) => void;
   replaceConfig: (type: ModelType, next: Partial<ModelConfig>) => void;
   resetConfigs: () => void;
@@ -116,7 +118,19 @@ function mergeConfigs(saved?: ModelConfig[]) {
 export const useModelConfigStore = create<ModelConfigState>()(
   persist(
     (set) => ({
+      ownerUserId: null,
       configs: defaultConfigs,
+      bindOwner: (userId) =>
+        set((state) => {
+          const normalizedUserId = userId?.trim() || null;
+          if (state.ownerUserId === normalizedUserId) {
+            return state;
+          }
+          return {
+            ownerUserId: normalizedUserId,
+            configs: defaultConfigs,
+          };
+        }),
       updateConfig: (type, patch) =>
         set((state) => ({
           configs: state.configs.map((item) => (item.type === type ? { ...item, ...patch, type: item.type } : item)),
@@ -142,6 +156,7 @@ export const useModelConfigStore = create<ModelConfigState>()(
         return {
           ...currentState,
           ...persisted,
+          ownerUserId: persisted.ownerUserId ?? null,
           configs: mergeConfigs(persisted.configs),
         };
       },

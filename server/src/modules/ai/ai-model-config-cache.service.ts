@@ -29,9 +29,9 @@ export class AiModelConfigCacheService implements OnModuleDestroy {
 
   constructor(private readonly configService: ConfigService) {}
 
-  async get(type: ModelType): Promise<StoredModelConfig | null> {
+  async get(userId: string, type: ModelType): Promise<StoredModelConfig | null> {
     const client = await this.getClient();
-    const raw = await client.get(this.buildKey(type));
+    const raw = await client.get(this.buildKey(userId, type));
     if (!raw) {
       return null;
     }
@@ -43,20 +43,20 @@ export class AiModelConfigCacheService implements OnModuleDestroy {
     }
   }
 
-  async getAll(): Promise<StoredModelConfigItem[]> {
+  async getAll(userId: string): Promise<StoredModelConfigItem[]> {
     const types: ModelType[] = ['text', 'image', 'video'];
     const items = await Promise.all(
       types.map(async (type) => {
-        const config = await this.get(type);
+        const config = await this.get(userId, type);
         return config ? { type, ...config } : null;
       }),
     );
     return items.filter(Boolean) as StoredModelConfigItem[];
   }
 
-  async getSaved(type: ModelType, providerKey: ProviderKey): Promise<StoredModelConfig | null> {
+  async getSaved(userId: string, type: ModelType, providerKey: ProviderKey): Promise<StoredModelConfig | null> {
     const client = await this.getClient();
-    const raw = await client.get(this.buildSavedKey(type, providerKey));
+    const raw = await client.get(this.buildSavedKey(userId, type, providerKey));
     if (!raw) {
       return null;
     }
@@ -68,9 +68,9 @@ export class AiModelConfigCacheService implements OnModuleDestroy {
     }
   }
 
-  async getAllSaved(): Promise<StoredProviderModelConfigItem[]> {
+  async getAllSaved(userId: string): Promise<StoredProviderModelConfigItem[]> {
     const client = await this.getClient();
-    const keys = await client.keys('ai:model-config:saved:*');
+    const keys = await client.keys(`ai:model-config:saved:${userId}:*`);
     if (keys.length === 0) {
       return [];
     }
@@ -83,8 +83,8 @@ export class AiModelConfigCacheService implements OnModuleDestroy {
         }
 
         const parts = key.split(':');
-        const type = parts[4] as ModelType | undefined;
-        const providerKey = parts[5] as ProviderKey | undefined;
+        const type = parts[5] as ModelType | undefined;
+        const providerKey = parts[6] as ProviderKey | undefined;
         if (!type || !providerKey) {
           return null;
         }
@@ -105,15 +105,15 @@ export class AiModelConfigCacheService implements OnModuleDestroy {
     return entries.filter(Boolean) as StoredProviderModelConfigItem[];
   }
 
-  async set(type: ModelType, config: StoredModelConfig) {
+  async set(userId: string, type: ModelType, config: StoredModelConfig) {
     const client = await this.getClient();
-    await client.set(this.buildKey(type), JSON.stringify(config));
+    await client.set(this.buildKey(userId, type), JSON.stringify(config));
     return { type, ...config };
   }
 
-  async setSaved(type: ModelType, providerKey: ProviderKey, config: StoredModelConfig) {
+  async setSaved(userId: string, type: ModelType, providerKey: ProviderKey, config: StoredModelConfig) {
     const client = await this.getClient();
-    await client.set(this.buildSavedKey(type, providerKey), JSON.stringify(config));
+    await client.set(this.buildSavedKey(userId, type, providerKey), JSON.stringify(config));
     return { type, ...config, providerKey };
   }
 
@@ -123,12 +123,12 @@ export class AiModelConfigCacheService implements OnModuleDestroy {
     }
   }
 
-  private buildKey(type: ModelType) {
-    return `ai:model-config:active:${type}`;
+  private buildKey(userId: string, type: ModelType) {
+    return `ai:model-config:active:${userId}:${type}`;
   }
 
-  private buildSavedKey(type: ModelType, providerKey: ProviderKey) {
-    return `ai:model-config:saved:${type}:${providerKey}`;
+  private buildSavedKey(userId: string, type: ModelType, providerKey: ProviderKey) {
+    return `ai:model-config:saved:${userId}:${type}:${providerKey}`;
   }
 
   private async getClient(): Promise<ReturnType<typeof createClient>> {

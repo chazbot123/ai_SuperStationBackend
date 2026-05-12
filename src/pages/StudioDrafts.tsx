@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { FileImage, LayoutTemplate, Layers3 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Download, FileImage, LayoutTemplate, Layers3, Upload } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -7,17 +7,30 @@ import Input from "@/components/ui/Input";
 import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
 import {
+  createProductImageDraft,
   listSocialPosts,
+  listProductImageDrafts,
   markSocialPostSynced,
+  markProductImageDraftProductSynced,
+  markProductImageDraftSynced,
+  removeSocialPost,
+  removeProductImageDraft,
   submitSocialPost,
+  submitProductImageDraft,
+  withdrawSocialPostReview,
+  withdrawProductImageDraftReview,
   type SocialPostItem,
+  type ProductImageDraftItem,
+  updateSocialPost,
+  updateProductImageDraft,
+  uploadDraftImage,
 } from "@/lib/ai";
+import { syncPublishingContent, type LeadPlatformStyle } from "@/lib/publishing";
 import { usePageMeta } from "@/hooks/usePageMeta";
-import { useAppStore } from "@/store/appStore";
 import { useAuthStore } from "@/store/authStore";
+import { useProductsStore } from "@/store/productsStore";
 import { useStudioDraftInboxStore } from "@/store/studioDraftInboxStore";
 import { useStudioDraftTaskStore } from "@/store/studioDraftTaskStore";
-import { useStudioProductDraftStore } from "@/store/studioProductDraftStore";
 
 type DraftItem = {
   id: string;
@@ -25,8 +38,10 @@ type DraftItem = {
   source: "social" | "product";
   title: string;
   body: string;
+  tags: string[];
   createdAt: string;
   images: string[];
+  downloadableImages: boolean[];
   style?: "xiaohongshu" | "douyin" | "wechat";
   sizePreset: "1_1" | "3_4" | "4_5" | "9_16" | "16_9";
   reviewStage: "draft" | "submitted" | "approved";
@@ -36,6 +51,75 @@ type DraftItem = {
 };
 
 type SourceFilter = "all" | "social" | "product";
+
+function formatTagInput(tags?: string[]) {
+  return (tags ?? [])
+    .map((item) => item.trim().replace(/^#+/, ""))
+    .filter(Boolean)
+    .map((item) => `#${item}`)
+    .join(" ");
+}
+
+function normalizeDraftImageUrl(image: string) {
+  const next = image.trim();
+  if (!next || next.startsWith("blob:")) {
+    return "";
+  }
+  if (
+    next.startsWith("http://") ||
+    next.startsWith("https://") ||
+    next.startsWith("data:image/") ||
+    next.startsWith("/")
+  ) {
+    return next;
+  }
+  if (next.startsWith("//")) {
+    return window.location.protocol + next;
+  }
+  if (/^[a-z0-9.-]+(?::\d+)?\/.+/i.test(next)) {
+    return `${window.location.protocol}//${next}`;
+  }
+  return `/${next.replace(/^\.?\//, "")}`;
+}
+
+function getVisibleImages(images: string[]) {
+  return images.flatMap((image, index) => {
+    if (typeof image !== "string") return [];
+    const normalized = normalizeDraftImageUrl(image);
+    if (!normalized) return [];
+    return [{ index, image: normalized }];
+  });
+}
+
+function buildProductPayloadFromDraft(item: DraftItem) {
+  const title = item.title.trim();
+  const body = item.body.trim();
+  const summarySource = body || title;
+
+  return {
+    name: (title || "未命名商品").slice(0, 120),
+    englishName: "",
+    summary: summarySource.slice(0, 255) || "请补充商品卖点",
+    description: body.slice(0, 2000),
+    priceText: "0",
+    images: item.images,
+    specialOfferEnabled: false,
+    originalPriceText: "",
+    specialPriceText: "",
+    specialTag: "",
+  };
+}
+
+function downloadFile(url: string, filename: string) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
 
 function sourceMeta(source: DraftItem["source"]) {
   if (source === "social") {
@@ -58,31 +142,44 @@ export default function StudioDrafts() {
 
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
-  const addContent = useAppStore((s) => s.addContent);
-  const markContentSynced = useAppStore((s) => s.markContentSynced);
-  const productDrafts = useStudioProductDraftStore((s) => s.items);
-  const updateProductDraft = useStudioProductDraftStore((s) => s.updateItem);
+  const createProduct = useProductsStore((s) => s.createProduct);
   const markDraftViewed = useStudioDraftInboxStore((s) => s.markViewed);
   const runningTasks = useStudioDraftTaskStore((s) => s.tasks);
   const [socialDrafts, setSocialDrafts] = useState<SocialPostItem[]>([]);
+  const [productDrafts, setProductDrafts] = useState<ProductImageDraftItem[]>([]);
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [hint, setHint] = useState<string | null>(null);
-  const [previewItem, setPreviewItem] = useState<DraftItem | null>(null);
+  const [editingItem, setEditingItem] = useState<DraftItem | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [editImages, setEditImages] = useState<string[]>([]);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const isAgent = user?.roleKey === "level1_agent";
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!accessToken) {
       setSocialDrafts([]);
+      setProductDrafts([]);
       return;
     }
 
     let cancelled = false;
     void (async () => {
       try {
-        const items = await listSocialPosts(accessToken);
+        const [socialItems, productItems] = await Promise.all([
+          listSocialPosts(accessToken),
+          listProductImageDrafts(accessToken),
+        ]);
         if (!cancelled) {
-          setSocialDrafts(items);
+          setSocialDrafts(socialItems);
+          setProductDrafts(productItems);
         }
       } catch (error) {
         if (!cancelled) {
@@ -103,8 +200,10 @@ export default function StudioDrafts() {
       source: "social",
       title: item.title,
       body: item.body,
+      tags: item.tags,
       createdAt: item.createdAt,
       images: item.images,
+      downloadableImages: item.downloadableImages ?? item.images.map(() => false),
       style: item.style,
       sizePreset: item.sizePreset,
       reviewStage: item.reviewStage,
@@ -119,8 +218,10 @@ export default function StudioDrafts() {
       source: "product",
       title: item.title,
       body: item.body,
+      tags: [],
       createdAt: item.createdAt,
       images: item.images,
+      downloadableImages: item.downloadableImages ?? item.images.map(() => false),
       sizePreset: item.sizePreset,
       reviewStage: item.reviewStage,
       syncedToLeads: item.syncedToLeads,
@@ -147,30 +248,18 @@ export default function StudioDrafts() {
     });
   }, [draftItems, query, sourceFilter]);
 
-  const filteredRunningTasks = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return runningTasks.filter((task) => {
-      if (task.stage === "failed") {
-        return false;
-      }
-      const sourceMatched = sourceFilter === "all" || task.source === sourceFilter;
-      if (!sourceMatched) {
-        return false;
-      }
-      if (!normalized) {
-        return true;
-      }
-      return (
-        task.title.toLowerCase().includes(normalized) ||
-        task.label.toLowerCase().includes(normalized) ||
-        (task.errorMessage?.toLowerCase().includes(normalized) ?? false)
-      );
-    });
-  }, [query, runningTasks, sourceFilter]);
-
-  function openPreview(item: DraftItem) {
+  function openEditor(item: DraftItem) {
     markDraftViewed(item.source, item.rawId);
-    setPreviewItem(item);
+    setEditingItem(item);
+    setEditTitle(item.title);
+    setEditBody(item.body);
+    setEditTags(formatTagInput(item.tags));
+    setEditImages(item.images);
+    setPreviewImage(null);
+  }
+
+  function handleDownloadImage(item: DraftItem, image: string, index: number) {
+    downloadFile(image, `${item.source}-${item.rawId}-${index + 1}.jpg`);
   }
 
   async function handleSubmitReview(item: DraftItem) {
@@ -179,7 +268,7 @@ export default function StudioDrafts() {
       try {
         const next = await submitSocialPost(accessToken, item.rawId);
         setSocialDrafts((prev) => prev.map((entry) => (entry.id === item.rawId ? next : entry)));
-        setPreviewItem((prev) => (prev?.id === item.id ? { ...prev, reviewStage: next.reviewStage } : prev));
+        setEditingItem((prev) => (prev?.id === item.id ? { ...prev, reviewStage: next.reviewStage } : prev));
         setHint("已提交审核，等待主公司处理。");
       } catch (error) {
         setHint(error instanceof Error ? error.message : "提交审核失败");
@@ -187,9 +276,40 @@ export default function StudioDrafts() {
       return;
     }
 
-    updateProductDraft(item.rawId, { reviewStage: "submitted" });
-    setPreviewItem((prev) => (prev?.id === item.id ? { ...prev, reviewStage: "submitted" } : prev));
-    setHint("已提交审核，等待主公司处理。");
+    if (!accessToken) return;
+    try {
+      const next = await submitProductImageDraft(accessToken, item.rawId);
+      setProductDrafts((prev) => prev.map((entry) => (entry.id === item.rawId ? next : entry)));
+      setEditingItem((prev) => (prev?.id === item.id ? { ...prev, reviewStage: next.reviewStage } : prev));
+      setHint("已提交审核，等待主公司处理。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "提交审核失败");
+    }
+  }
+
+  async function handleWithdrawReview(item: DraftItem) {
+    if (!accessToken) return;
+
+    if (item.source === "social") {
+      try {
+        const next = await withdrawSocialPostReview(accessToken, item.rawId);
+        setSocialDrafts((prev) => prev.map((entry) => (entry.id === item.rawId ? next : entry)));
+        setEditingItem((prev) => (prev?.id === item.id ? { ...prev, reviewStage: next.reviewStage } : prev));
+        setHint("已撤销审核，草稿已退回。");
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : "撤销审核失败");
+      }
+      return;
+    }
+
+    try {
+      const next = await withdrawProductImageDraftReview(accessToken, item.rawId);
+      setProductDrafts((prev) => prev.map((entry) => (entry.id === item.rawId ? next : entry)));
+      setEditingItem((prev) => (prev?.id === item.id ? { ...prev, reviewStage: next.reviewStage } : prev));
+      setHint("已撤销审核，草稿已退回。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "撤销审核失败");
+    }
   }
 
   async function handleSyncToLeads(item: DraftItem) {
@@ -198,22 +318,30 @@ export default function StudioDrafts() {
       return;
     }
 
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
     if (item.source === "social") {
-      if (!accessToken) return;
       try {
-        const next = await markSocialPostSynced(accessToken, item.rawId);
-        const content = addContent({
-          type: "copy",
+        const platformStyle: LeadPlatformStyle =
+          item.style === "douyin" ? "douyin" : item.style === "wechat" ? "wechat_mp" : "xiaohongshu";
+        await syncPublishingContent({
+          accessToken,
+          sourceType: "social",
+          sourceId: item.rawId,
           title: item.title,
           body: item.body,
-          platformStyle: item.style === "douyin" ? "douyin" : item.style === "wechat" ? "wechat_mp" : "xiaohongshu",
+          tags: item.tags,
+          contentType: "image_text",
+          platformStyle,
+          coverImage: item.images[0],
           images: item.images,
-          syncedToLeads: true,
-          reviewStatus: "approved",
         });
-        markContentSynced(content.id);
+        const next = await markSocialPostSynced(accessToken, item.rawId);
         setSocialDrafts((prev) => prev.map((entry) => (entry.id === item.rawId ? next : entry)));
-        setPreviewItem((prev) => (prev?.id === item.id ? { ...prev, syncedToLeads: true } : prev));
+        setEditingItem((prev) => (prev?.id === item.id ? { ...prev, syncedToLeads: true } : prev));
         setHint("已同步到获客内容池。");
       } catch (error) {
         setHint(error instanceof Error ? error.message : "同步获客失败");
@@ -221,19 +349,31 @@ export default function StudioDrafts() {
       return;
     }
 
-    const content = addContent({
-      type: "copy",
-      title: item.title,
-      body: item.body,
-      platformStyle: "super_site",
-      images: item.images,
-      syncedToLeads: true,
-      reviewStatus: "approved",
-    });
-    markContentSynced(content.id);
-    updateProductDraft(item.rawId, { syncedToLeads: true });
-    setPreviewItem((prev) => (prev?.id === item.id ? { ...prev, syncedToLeads: true } : prev));
-    setHint("已同步到获客内容池。");
+    try {
+      const platformStyle: LeadPlatformStyle =
+        item.sizePreset === "9_16"
+          ? "douyin"
+          : item.sizePreset === "16_9"
+            ? "wechat_mp"
+            : "xiaohongshu";
+      await syncPublishingContent({
+        accessToken,
+        sourceType: "product",
+        sourceId: item.rawId,
+        title: item.title,
+        body: item.body,
+        contentType: "product_asset",
+        platformStyle,
+        coverImage: item.images[0],
+        images: item.images,
+      });
+      const next = await markProductImageDraftSynced(accessToken, item.rawId);
+      setProductDrafts((prev) => prev.map((entry) => (entry.id === item.rawId ? next : entry)));
+      setEditingItem((prev) => (prev?.id === item.id ? { ...prev, syncedToLeads: next.syncedToLeads } : prev));
+      setHint("已同步到获客内容池。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "同步获客失败");
+    }
   }
 
   function handleSyncToProducts(item: DraftItem) {
@@ -242,18 +382,177 @@ export default function StudioDrafts() {
       setHint("只有审核通过后才能同步到产品管理。");
       return;
     }
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
 
-    addContent({
-      type: "product",
-      title: item.title,
-      body: item.body,
-      platformStyle: "super_site",
-      images: item.images,
-      reviewStatus: "approved",
-    });
-    updateProductDraft(item.rawId, { syncedToProducts: true });
-    setPreviewItem((prev) => (prev?.id === item.id ? { ...prev, syncedToProducts: true } : prev));
-    setHint("已同步到产品管理。");
+    void (async () => {
+      try {
+        await createProduct(buildProductPayloadFromDraft(item));
+        const next = await markProductImageDraftProductSynced(accessToken, item.rawId);
+        setProductDrafts((prev) => prev.map((entry) => (entry.id === item.rawId ? next : entry)));
+        setEditingItem((prev) =>
+          prev?.id === item.id ? { ...prev, syncedToProducts: next.syncedToProducts } : prev
+        );
+        setHint("已同步到产品管理。");
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : "同步到产品管理失败");
+      }
+    })();
+  }
+
+  function handleRemoveImage(index: number) {
+    setEditImages((current) => current.filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  async function handleUploadImages(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (files.length === 0) {
+      return;
+    }
+
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    try {
+      setUploadingImages(true);
+      const uploadedUrls = await Promise.all(files.map((file) => uploadDraftImage(accessToken, file)));
+      setEditImages((current) => [...current, ...uploadedUrls].slice(0, 12));
+      setHint("图片已上传。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "上传图片失败");
+    } finally {
+      setUploadingImages(false);
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!editingItem) return;
+    const title = editTitle.trim();
+    const body = editBody.trim();
+    const tags = Array.from(
+      new Set(
+        editTags
+          .split(/\s+/)
+          .map((item) => item.trim().replace(/^#+/, ""))
+          .filter(Boolean)
+      )
+    ).slice(0, 20);
+
+    if (!title) {
+      setHint("标题不能为空。");
+      return;
+    }
+
+    if (!body) {
+      setHint("文案不能为空。");
+      return;
+    }
+
+    if (uploadingImages) {
+      setHint("图片还在上传中，请稍后再保存。");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const nextImages = editImages.filter((item) => item.trim());
+      if (editingItem.source === "social") {
+        if (!accessToken) {
+          setHint("登录已失效，请重新登录。");
+          return;
+        }
+        const next = await updateSocialPost({
+          accessToken,
+          id: editingItem.rawId,
+          title,
+          body,
+          tags,
+          images: nextImages,
+        });
+        setSocialDrafts((prev) => prev.map((entry) => (entry.id === editingItem.rawId ? next : entry)));
+        const nextItem: DraftItem = {
+          ...editingItem,
+          title: next.title,
+          body: next.body,
+          tags: next.tags,
+          images: next.images,
+          reviewStage: next.reviewStage,
+          syncedToLeads: next.synced,
+        };
+        setEditingItem(nextItem);
+        setEditTitle(next.title);
+        setEditBody(next.body);
+        setEditTags(formatTagInput(next.tags));
+        setEditImages(next.images);
+        setHint("草稿已保存。");
+        setDeleteConfirmOpen(false);
+        setEditingItem(null);
+        return;
+      }
+
+      if (!accessToken) {
+        setHint("登录已失效，请重新登录。");
+        return;
+      }
+      const next = await updateProductImageDraft({
+        accessToken,
+        id: editingItem.rawId,
+        title,
+        body,
+        images: nextImages,
+      });
+      setProductDrafts((prev) => prev.map((entry) => (entry.id === editingItem.rawId ? next : entry)));
+      setEditTitle(next.title);
+      setEditBody(next.body);
+      setEditImages(next.images);
+      setHint("草稿已保存。");
+      setDeleteConfirmOpen(false);
+      setEditingItem(null);
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "保存草稿失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function requestDeleteDraft() {
+    if (!editingItem) return;
+    setDeleteConfirmOpen(true);
+  }
+
+  async function handleDeleteDraft() {
+    if (!editingItem) return;
+
+    try {
+      setDeleting(true);
+      if (editingItem.source === "social") {
+        if (!accessToken) {
+          setHint("登录已失效，请重新登录。");
+          return;
+        }
+        await removeSocialPost(accessToken, editingItem.rawId);
+        setSocialDrafts((prev) => prev.filter((entry) => entry.id !== editingItem.rawId));
+      } else {
+        if (!accessToken) {
+          setHint("登录已失效，请重新登录。");
+          return;
+        }
+        await removeProductImageDraft(accessToken, editingItem.rawId);
+        setProductDrafts((prev) => prev.filter((entry) => entry.id !== editingItem.rawId));
+      }
+      setDeleteConfirmOpen(false);
+      setEditingItem(null);
+      setHint("草稿已删除。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "删除草稿失败");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -290,12 +589,12 @@ export default function StudioDrafts() {
 
           <div className="space-y-2">
             <div className="text-sm font-medium text-zinc-100">正在执行的任务</div>
-            {filteredRunningTasks.length === 0 ? (
+            {runningTasks.length === 0 ? (
               <div className="rounded-md border border-white/10 bg-white/5 px-3 py-6 text-center text-sm text-zinc-500">
                 当前没有执行中的任务
               </div>
             ) : (
-              filteredRunningTasks.map((task) => (
+              runningTasks.map((task) => (
                 <div
                   key={task.id}
                   className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-3"
@@ -335,6 +634,7 @@ export default function StudioDrafts() {
             ) : (
               filteredItems.map((item) => {
                 const meta = sourceMeta(item.source);
+                const visibleImages = getVisibleImages(item.images);
                 return (
                   <div key={item.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -346,17 +646,22 @@ export default function StudioDrafts() {
                         <div className="mt-1 truncate text-sm font-medium text-zinc-100">{item.title}</div>
                         <div className="mt-1 line-clamp-2 text-sm text-zinc-400">{item.body}</div>
                         <div className="mt-2 text-xs text-zinc-500">
-                          {new Date(item.createdAt).toLocaleString()} · 图片 {item.images.length} 张
+                          {new Date(item.createdAt).toLocaleString()} · 图片 {visibleImages.length} 张
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <Button type="button" variant="secondary" size="sm" onClick={() => openPreview(item)}>
-                          预览
+                        <Button type="button" variant="secondary" size="sm" onClick={() => openEditor(item)}>
+                          编辑
                         </Button>
                         {isAgent && item.reviewStage === "draft" ? (
                           <Button type="button" variant="secondary" size="sm" onClick={() => void handleSubmitReview(item)}>
                             提交审核
+                          </Button>
+                        ) : null}
+                        {isAgent && item.reviewStage === "submitted" ? (
+                          <Button type="button" variant="secondary" size="sm" onClick={() => void handleWithdrawReview(item)}>
+                            撤销审核
                           </Button>
                         ) : null}
                         {item.reviewStage === "approved" ? (
@@ -382,7 +687,6 @@ export default function StudioDrafts() {
                         ) : null}
                         {item.reviewStage === "submitted" ? <Badge variant="amber">待审核</Badge> : null}
                         {item.reviewStage === "approved" ? <Badge variant="green">审核通过</Badge> : null}
-                        {item.syncedToLeads ? <Badge variant="blue">已同步获客</Badge> : null}
                         {item.syncedToProducts ? <Badge variant="blue">已同步产品</Badge> : null}
                       </div>
                     </div>
@@ -394,22 +698,184 @@ export default function StudioDrafts() {
         </CardContent>
       </Card>
 
-      <Modal open={!!previewItem} title="草稿预览" onClose={() => setPreviewItem(null)}>
-        {previewItem ? (
-          <div className="space-y-4">
-            <div>
-              <div className="text-sm font-medium text-zinc-100">{previewItem.title}</div>
-              <div className="mt-1 text-xs text-zinc-500">
-                {new Date(previewItem.createdAt).toLocaleString()} · 图片 {previewItem.images.length} 张
+      <Modal
+        open={!!editingItem}
+        title="编辑草稿"
+        onClose={() => {
+          setPreviewImage(null);
+          setEditingItem(null);
+        }}
+        panelClassName="max-w-[96vw] sm:max-w-3xl xl:max-w-5xl"
+        bodyClassName="max-h-[calc(100vh-11rem)]"
+        footerClassName="shrink-0"
+        footer={
+          editingItem ? (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button type="button" variant="danger" onClick={requestDeleteDraft}>
+                删除记录
+              </Button>
+              <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setDeleteConfirmOpen(false);
+                    setEditingItem(null);
+                  }}
+                  disabled={saving || uploadingImages}
+                >
+                  取消
+                </Button>
+                <Button type="button" onClick={() => void handleSaveEdit()} disabled={saving || uploadingImages}>
+                  {saving ? "保存中..." : uploadingImages ? "等待上传..." : "保存"}
+                </Button>
               </div>
             </div>
-            <div className="whitespace-pre-line text-sm text-zinc-300">{previewItem.body}</div>
-            <div className="grid grid-cols-2 gap-3">
-              {previewItem.images.map((image, index) => (
-                <div key={`${previewItem.id}_${index}`} className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                  <img src={image} alt={`${previewItem.title}_${index + 1}`} className="aspect-[4/3] w-full object-cover" />
+          ) : null
+        }
+      >
+        {editingItem ? (
+          <div className="space-y-4">
+            <div>
+              <div className="text-xs text-zinc-500">
+                {new Date(editingItem.createdAt).toLocaleString()} · 来源 {sourceMeta(editingItem.source).label}
+              </div>
+            </div>
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="text-sm text-zinc-200">标题</div>
+                  <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} placeholder="请输入标题" />
                 </div>
-              ))}
+                <div className="space-y-2">
+                  <div className="text-sm text-zinc-200">文案</div>
+                  <textarea
+                    value={editBody}
+                    onChange={(event) => setEditBody(event.target.value)}
+                    rows={12}
+                    className="min-h-[220px] w-full rounded-md border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30 sm:min-h-[280px]"
+                    placeholder="请输入文案"
+                  />
+                </div>
+                {editingItem.source === "social" ? (
+                  <div className="space-y-2">
+                    <div className="text-sm text-zinc-200">标签</div>
+                    <textarea
+                      value={editTags}
+                      onChange={(event) => setEditTags(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30"
+                      placeholder="请输入标签，使用空格分隔，例如：#智能好物 #高效工具 #种草推荐"
+                    />
+                    <div className="text-xs text-zinc-500">支持直接输入 #标签，保存时会自动去重。</div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm text-zinc-200">图片</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={handleUploadImages}
+                    />
+                    <Button type="button" variant="secondary" size="sm" onClick={() => uploadInputRef.current?.click()}>
+                      <Upload className="h-4 w-4" />
+                      {uploadingImages ? "上传中..." : "上传图片"}
+                    </Button>
+                  </div>
+                </div>
+                {getVisibleImages(editImages).length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                    {getVisibleImages(editImages).map(({ index: originalIndex, image }, index) => (
+                      <div key={`${editingItem.id}_${originalIndex}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                        <button
+                          type="button"
+                          className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-red-500"
+                          onClick={() => handleRemoveImage(originalIndex)}
+                          aria-label="删除图片"
+                        >
+                          ×
+                        </button>
+                        <button
+                          type="button"
+                          className="absolute bottom-2 right-2 z-10 inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-black/70 px-2 text-white transition hover:bg-amber-500"
+                          onClick={() => handleDownloadImage(editingItem, image, originalIndex)}
+                          aria-label="下载图片到本地"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                        <button type="button" className="block w-full" onClick={() => setPreviewImage(image)} aria-label="放大预览图片">
+                          <img src={image} alt={`${editingItem.title}_${index + 1}`} className="aspect-[4/3] w-full object-cover transition hover:scale-[1.01]" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-zinc-500">
+                    当前草稿还没有图片，你可以自己上传
+                  </div>
+                )}
+              </div>
+            </div>
+            {editingItem.reviewStage === "submitted" ? <Badge variant="amber">当前状态：待审核</Badge> : null}
+            {editingItem.reviewStage === "approved" ? <Badge variant="green">当前状态：审核通过</Badge> : null}
+            {editingItem.reviewStage === "draft" ? <Badge variant="gray">当前状态：草稿</Badge> : null}
+            {isAgent && editingItem.reviewStage === "draft" ? (
+              <div className="flex justify-end">
+                <Button type="button" variant="secondary" size="sm" onClick={() => void handleSubmitReview(editingItem)}>
+                  提交审核
+                </Button>
+              </div>
+            ) : null}
+            {isAgent && editingItem.reviewStage === "submitted" ? (
+              <div className="flex justify-end">
+                <Button type="button" variant="secondary" size="sm" onClick={() => void handleWithdrawReview(editingItem)}>
+                  撤销审核
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal open={!!previewImage} title="图片预览" onClose={() => setPreviewImage(null)}>
+        {previewImage ? <img src={previewImage} alt="preview" className="max-h-[70vh] rounded-md object-contain" /> : null}
+      </Modal>
+
+      <Modal
+        open={deleteConfirmOpen}
+        title="确认删除"
+        onClose={() => {
+          if (!deleting) {
+            setDeleteConfirmOpen(false);
+          }
+        }}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={deleting}
+            >
+              取消
+            </Button>
+            <Button type="button" variant="danger" onClick={() => void handleDeleteDraft()} disabled={deleting}>
+              {deleting ? "删除中..." : "确认删除"}
+            </Button>
+          </div>
+        }
+      >
+        {editingItem ? (
+          <div className="space-y-2 text-sm text-zinc-300">
+            <div>删除后不可恢复，请确认是否删除这条草稿。</div>
+            <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-3 text-zinc-100">
+              {editingItem.title}
             </div>
           </div>
         ) : null}

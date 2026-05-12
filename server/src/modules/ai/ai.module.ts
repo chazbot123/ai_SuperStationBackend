@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ProductsModule } from '../products/products.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AiController } from './ai.controller';
 import { AiModelConfigCacheService } from './ai-model-config-cache.service';
@@ -9,7 +10,7 @@ import { AiVideoTtsCacheService } from './ai-video-tts-cache.service';
 import { AiService } from './ai.service';
 
 @Module({
-  imports: [ConfigModule, PrismaModule],
+  imports: [ConfigModule, PrismaModule, forwardRef(() => ProductsModule)],
   controllers: [AiController],
   providers: [
     AiService,
@@ -18,5 +19,6 @@ import { AiService } from './ai.service';
     AiVideoConcatService,
     AiVideoTtsCacheService,
   ],
+  exports: [AiService, AiModelConfigCacheService],
 })
 export class AiModule {}

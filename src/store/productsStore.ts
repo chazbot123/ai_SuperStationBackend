@@ -67,6 +67,7 @@ type ProductsState = {
   uploadProductImage: (file: File) => Promise<string>;
   removeProduct: (id: string) => Promise<void>;
   submitProduct: (id: string) => Promise<ProductItem>;
+  withdrawProductSubmission: (id: string) => Promise<ProductItem>;
   publishProduct: (id: string) => Promise<ProductItem>;
   unpublishProduct: (id: string) => Promise<ProductItem>;
   approveProduct: (id: string) => Promise<ProductItem>;
@@ -227,6 +228,19 @@ export const useProductsStore = create<ProductsState>((set) => ({
   },
   submitProduct: async (id) => {
     const item = await requestJson<ProductItem>(`/api/products/${id}/submit`, {
+      method: "POST",
+      headers: getAuthorizationHeaders(),
+    });
+
+    set((state) => ({
+      items: state.items.map((current) => (current.id === id ? item : current)),
+      error: null,
+    }));
+
+    return item;
+  },
+  withdrawProductSubmission: async (id) => {
+    const item = await requestJson<ProductItem>(`/api/products/${id}/withdraw`, {
       method: "POST",
       headers: getAuthorizationHeaders(),
     });

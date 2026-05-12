@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Naya Investment Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/studio-freight/lenis@1.0.27/bundled/lenis.min.js"></script>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+  <style>
+    :root{--bg:#f9f8f6;--bg-soft:#f0ebe1;--panel:rgba(255,255,255,.5);--ink:#1a1714;--muted:#8a8178;--line:rgba(26,23,20,.1);--accent:#a6533f;--accent-2:#d48b76;--deep:#241a14;--shadow:0 40px 100px rgba(0,0,0,.04);--shadow-soft:0 20px 50px rgba(0,0,0,.03);--radius:0px;--ease:cubic-bezier(0.2,0.8,0.2,1)}
+    
+    html, body { height: auto; width: 100vw; overflow-x: hidden; }
+    .lenis.lenis-smooth { scroll-behavior: auto !important; }
+    .lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
+    .lenis.lenis-stopped { overflow: hidden; }
+    .lenis.lenis-smooth iframe { pointer-events: none; }
+
+    .page-loader { position: fixed; inset: 0; background: var(--bg); z-index: 99999; display: flex; justify-content: center; align-items: center; transition: transform 1.2s var(--ease); transform-origin: top; }
+    .loader-text { font-family: "Cormorant Garamond", serif; font-size: 32px; letter-spacing: 0.1em; color: var(--ink); opacity: 1; transition: opacity 0.6s var(--ease); }
+    
+    #p5-canvas-container { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0.4; mix-blend-mode: multiply; }
+    
+    body { cursor: auto; }
+
+    a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid rgba(166,83,63,.55);outline-offset:4px}
+
+    .project-overlay{position:fixed;inset:0;z-index:99998;pointer-events:none;opacity:0;visibility:hidden;transition:opacity .4s var(--ease),visibility 0s linear .4s}
+    .project-overlay.is-open{opacity:1;pointer-events:auto;visibility:visible;transition:opacity .4s var(--ease)}
+    .project-overlay__backdrop{position:absolute;inset:0;background:rgba(20,15,11,.34);backdrop-filter:blur(18px) saturate(1.08)}
+    .project-overlay__panel{position:relative;width:min(1320px,calc(100vw - 56px));height:min(820px,calc(100vh - 56px));margin:28px auto;border-radius:28px;overflow:hidden;background:linear-gradient(180deg,rgba(249,248,246,.85),rgba(240,235,225,.95));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:1px solid rgba(255,255,255,.6);box-shadow:0 60px 160px rgba(53,34,18,.15),inset 0 1px 1px rgba(255,255,255,1);transform:translate3d(0,18px,0);opacity:0}
+    .project-overlay.is-open .project-overlay__panel{transform:none;opacity:1;transition:transform .7s var(--ease),opacity .7s var(--ease)}
+    .project-overlay__close{position:absolute;top:20px;right:20px;z-index:4;width:54px;height:54px;border-radius:50%;border:1px solid rgba(26,23,20,.12);background:rgba(255,255,255,.6);backdrop-filter:blur(10px);cursor:pointer;font-size:22px;line-height:1;color:var(--ink);transition:transform .3s var(--ease),background .3s var(--ease)}
+    .project-overlay__close:hover{transform:scale(1.05);background:rgba(255,255,255,.82)}
+    .project-overlay__grid{display:grid;grid-template-columns:1.24fr .76fr;height:100%}
+    .project-overlay__media{position:relative;overflow:hidden;background:#eae4dc;user-select:none}
+    .project-overlay__image{position:absolute;inset:0;background-size:cover;background-position:center;filter:sepia(0.1) saturate(0.92) contrast(0.98);transform:scale(1.02)}
+    .project-overlay__media-nav{position:absolute;left:24px;right:24px;bottom:22px;display:flex;align-items:center;justify-content:space-between;gap:12px;z-index:3}
+    .project-overlay__nav-btn{width:54px;height:54px;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(14,11,8,.44);color:#fff;cursor:pointer;transition:transform .3s var(--ease),background .3s var(--ease)}
+    .project-overlay__nav-btn:hover{transform:scale(1.06);background:rgba(14,11,8,.6)}
+    .project-overlay__count{padding:10px 16px;border-radius:999px;background:rgba(14,11,8,.44);color:rgba(255,255,255,.86);font-size:11px;letter-spacing:.22em;text-transform:uppercase;border:1px solid rgba(255,255,255,.14)}
+    .project-overlay__content{position:relative;padding:48px 40px 0;overflow:auto;display:flex;flex-direction:column;height:100%}
+    .project-overlay__meta{display:inline-flex;align-items:center;gap:10px;padding:8px 12px;border-radius:999px;border:1px solid rgba(166,83,63,.15);background:rgba(166,83,63,.05);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin-bottom:24px;align-self:flex-start}
+    .project-overlay__title{margin:0;font-size:48px;line-height:1.1;font-family:"Cormorant Garamond","Noto Serif SC","Songti SC",Georgia,serif;text-wrap:balance}
+    .project-overlay__desc{margin:24px 0 0;color:var(--muted);line-height:1.8;font-size:15px;max-width:90%}
+    .project-overlay__specs{margin-top:auto;padding-top:40px}
+    .project-overlay__price{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:24px 28px;border-radius:24px;border:1px solid rgba(166,83,63,.15);background:linear-gradient(180deg,rgba(255,255,255,.8),rgba(255,255,255,.4));backdrop-filter:blur(22px) saturate(1.15);-webkit-backdrop-filter:blur(22px) saturate(1.15);box-shadow:0 18px 50px rgba(166,83,63,.06)}
+    .project-overlay__price-label{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent)}
+    .project-overlay__price-value{font-variant-numeric:tabular-nums;font-size:34px;line-height:1;font-weight:800;letter-spacing:-0.02em;color:var(--ink);display:flex;align-items:baseline;gap:8px}
+    .project-overlay__price-value del{font-size:14px;color:var(--muted);text-decoration:line-through;font-weight:600;letter-spacing:normal}
+    .project-overlay__cta{position:sticky;bottom:0;margin:32px -40px 0;padding:32px 40px 40px;background:linear-gradient(180deg,rgba(245,241,234,0) 0%,rgba(245,241,234,0.85) 30%,rgba(245,241,234,1) 100%);z-index:2;pointer-events:none}
+    .project-overlay__cta-btn{width:100%;padding:18px 20px;border-radius:20px;border:1px solid rgba(166,83,63,.2);background:linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);color:#fff;font-size:15px;font-weight:700;letter-spacing:.08em;cursor:pointer;transition:transform .4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow .4s ease;box-shadow:0 8px 24px rgba(166,83,63,.25), inset 0 1px 1px rgba(255,255,255,0.2);pointer-events:auto}
+    .project-overlay__cta-btn:hover{transform:translateY(-3px) scale(1.02);box-shadow:0 12px 32px rgba(166,83,63,.35), inset 0 1px 1px rgba(255,255,255,0.3)}
+    .project-overlay__cta-btn:active{transform:translateY(0) scale(0.98);box-shadow:0 4px 12px rgba(166,83,63,.2)}
+    .project-overlay__cta-btn:focus-visible,.project-overlay__nav-btn:focus-visible,.project-overlay__close:focus-visible{outline:2px solid rgba(140,101,74,.55);outline-offset:3px}
+    body.overlay-open{overflow:hidden !important}
+
+    .action-btn{transition:background .3s ease,color .3s ease,border-color .3s ease,transform .3s ease}
+    .hover-hint{transition:opacity .3s ease,transform .3s ease}
+
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);font-family:"Manrope",sans-serif;background:var(--bg);position:relative;width:100%;overflow-x:hidden;}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;background:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");opacity:0.06;mix-blend-mode:multiply;z-index:999}
+    @keyframes pageIn{from{opacity:0;filter:blur(8px)}to{opacity:1;filter:blur(0)}}
+    a{color:inherit;text-decoration:none}img,video{display:block;max-width:100%}.page{position:relative;z-index:1;width:min(1560px,calc(100vw - 64px));margin:0 auto;padding-bottom:120px}.topbar{position:sticky;top:0;z-index:50;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:32px 0;font-size:11px;letter-spacing:.2em;text-transform:uppercase;background:transparent;border-bottom:1px solid transparent;transition:padding .6s var(--ease),background .6s var(--ease),border-color .6s var(--ease)}.topbar.compact{padding:16px 0;background:rgba(249,248,246,.85);backdrop-filter:blur(24px) saturate(1.2);border-bottom-color:var(--line)}.brand{display:flex;align-items:center;gap:12px;justify-self:start}.brand-logo{height:32px;width:auto;object-fit:contain;display:block;mix-blend-mode:multiply}.nav{display:flex;gap:36px;color:var(--ink);justify-self:center}.nav a{position:relative;padding-bottom:6px}.nav a::after{content:"";position:absolute;left:0;bottom:0;width:100%;height:1px;background:var(--ink);transform:scaleX(0);transform-origin:left;transition:transform .4s var(--ease)}.nav a:hover::after,.nav a.active::after{transform:scaleX(1)}.eyebrow{margin:0 0 12px;font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--muted)}.serif,h1,h2,h3,.big-number,.kpi strong,.manifesto,.hero-card strong{font-family:"Manrope",sans-serif;font-weight:800;letter-spacing:-0.03em;text-transform:uppercase}.hero-copy h1 span{display:block;overflow:hidden}.hero-copy h1 i{display:block;font-style:normal;transform:translateY(115%);opacity:0;animation:titleRise 1.4s var(--ease) forwards}.hero-copy h1 span:nth-child(2) i{animation-delay:.15s}.reveal{opacity:0;transform:translateY(40px);transition:opacity 1.2s var(--ease),transform 1.2s var(--ease)}.reveal.in-view{opacity:1;transform:translateY(0)}@keyframes titleRise{to{transform:translateY(0);opacity:1}}
+    .hero{padding:40px 0 34px;display:grid;grid-template-columns:1.04fr .96fr;gap:28px;align-items:center}.intro-meta{display:flex;gap:32px;font-size:13px;color:var(--muted);margin-bottom:16px;text-transform:uppercase;letter-spacing:.12em}h1{margin:32px 0;font-size:clamp(68px,10vw,138px);line-height:0.96;text-shadow:0 12px 38px rgba(255,255,255,.28);font-family:"Cormorant Garamond", "Noto Serif SC", "Songti SC", Georgia, serif}h1 .en{display:block;margin-bottom:6px;letter-spacing:0.02em}h1 .zh{display:block;font-size:0.8em;font-weight:700}.hero-copy .subhead{max-width:590px;margin:32px 0 46px;color:var(--muted);line-height:1.95;font-size:15px}.specs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-top:36px}.spec{position:relative;padding:18px 0 0;border-top:1px solid var(--line);min-height:120px;transition:transform .35s ease,border-color .35s ease}.spec::before{content:"";position:absolute;top:-1px;left:0;width:0;height:1px;background:rgba(146,105,78,.92);transition:width .45s ease}.spec:hover{transform:translateY(-6px);border-color:rgba(146,105,78,.2)}.spec:hover::before{width:100%}.spec .label{font-size:11px;color:var(--muted);letter-spacing:.18em;text-transform:uppercase}.spec strong{display:block;margin-top:10px;font-size:44px;line-height:.95}.spec p{margin:10px 0 0;font-size:13px;color:var(--muted);line-height:1.6}
+    .hero-image,.photo-tall,.photo-wide,.visual,.video-box{transform:translate3d(0,0,0);will-change:transform}.hero-image,.photo-tall,.photo-wide,.visual,.offer-image{filter:sepia(0.15) saturate(0.85) contrast(0.95);transition:transform 1.2s var(--ease),filter 1.2s var(--ease),box-shadow 1.2s var(--ease)}.hero-image:hover,.photo-tall:hover,.photo-wide:hover,.visual:hover,.offer-image:hover{transform:scale(1.025);filter:sepia(0) saturate(1) contrast(1.05)}.hero-image{min-height:840px;border-radius:var(--radius);overflow:hidden;position:relative;box-shadow:var(--shadow);background:linear-gradient(180deg,rgba(21,16,12,.08),rgba(21,16,12,.34)),url("assets/images/landing/hero.jpeg") center/cover}.hero-image::before{content:"";position:absolute;inset:0;background:linear-gradient(130deg,rgba(255,255,255,.18),transparent 38%),radial-gradient(circle at 70% 20%,rgba(255,255,255,.15),transparent 26%);mix-blend-mode:screen;pointer-events:none}.hero-card{position:absolute;right:24px;bottom:24px;width:min(320px,calc(100% - 48px));padding:24px;border-radius:0px;color:#fff;background:rgba(16,12,9,.4);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(8px);box-shadow:0 24px 50px rgba(0,0,0,.18);transition:transform .4s var(--ease)}.hero-image:hover .hero-card{transform:translateY(-6px)}.hero-card .mini{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:rgba(255,255,255,.78)}.hero-card strong{display:block;margin:10px 0 4px;font-size:36px}.hero-card p{margin:0;line-height:1.7;color:rgba(255,255,255,.8);font-size:14px}
+    .section{padding:62px 0}.divider{border-top:1px solid var(--line);margin:8px 0 0}.kpi-band{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;margin-top:26px}.kpi{position:relative;padding:22px;min-height:168px;border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,.42),rgba(255,255,255,.14));box-shadow:var(--shadow-soft);border:1px solid rgba(255,255,255,.46); saturate(1.1);overflow:hidden;transition:transform .35s ease,box-shadow .35s ease,border-color .35s ease}.kpi::before{content:"";position:absolute;inset:auto -10% 0 -10%;height:58%;background:radial-gradient(circle at top,rgba(255,255,255,.55),transparent 60%);opacity:.7;pointer-events:none}.kpi:hover{transform:translateY(-8px);box-shadow:0 28px 68px rgba(53,34,18,.14);border-color:rgba(201,179,157,.72)}.kpi span{font-size:12px;color:var(--muted);letter-spacing:.16em;text-transform:uppercase;position:relative;z-index:1}.kpi strong{display:block;font-size:50px;margin:16px 0 8px;line-height:.92;position:relative;z-index:1}.kpi p{margin:0;color:var(--muted);line-height:1.7;font-size:13px;position:relative;z-index:1}
+    .section-head{display:flex;justify-content:space-between;gap:24px;align-items:end;margin-bottom:30px}.section-head h2{margin:0;font-size:clamp(40px,6vw,74px);line-height:.92}.section-head p{margin:0;max-width:440px;color:var(--muted);line-height:1.9;font-size:15px}.lead-grid{display:grid;grid-template-columns:.92fr 1.08fr;gap:26px;align-items:stretch}.panel{border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);background:var(--panel);border:1px solid rgba(255,255,255,.36);}.photo-tall{min-height:940px;background:linear-gradient(180deg,rgba(28,21,15,.06),rgba(28,21,15,.2)),url("assets/images/landing/img_1.png") center/cover}.stack{display:grid;grid-template-rows:.72fr 1.28fr;gap:26px}.copy-card{padding:42px;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(135deg,rgba(255,255,255,.52),rgba(201,179,157,.44)),radial-gradient(circle at top right,rgba(255,255,255,.38),transparent 28%)}.copy-card h2{margin:0;font-size:clamp(42px,5vw,68px);line-height:.92}.copy-card p{margin:22px 0 0;max-width:540px;color:var(--muted);line-height:1.95;font-size:15px}.photo-wide{min-height:560px;position:relative;background:linear-gradient(180deg,rgba(24,19,15,.08),rgba(24,19,15,.38)),url("assets/images/landing/img_2.jpeg") center/cover}.floating-metrics{position:absolute;left:22px;right:22px;bottom:22px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.metric{padding:18px;border-radius:22px;background:rgba(18,14,10,.5);color:#fff;;border:1px solid rgba(255,255,255,.1);transition:transform .35s ease,background .35s ease}.metric:hover{transform:translateY(-6px);background:rgba(18,14,10,.6)}.metric .mini{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.72)}.metric .big-number{display:block;margin:10px 0 4px;font-size:42px;line-height:.92}.metric em{font-style:normal;color:rgba(255,255,255,.78);font-size:13px}
+    .gallery{display:grid;grid-template-columns:1.18fr .82fr;gap:26px}.gallery-left,.gallery-right{display:grid;gap:26px}.visual{position:relative;border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);min-height:360px;background-size:cover;background-position:center;isolation:isolate;transition:transform .5s ease,box-shadow .5s ease,filter .5s ease}.visual::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,15,11,.03),rgba(20,15,11,.22)),radial-gradient(circle at 30% 20%,rgba(255,255,255,.2),transparent 30%);z-index:0;transition:opacity .5s ease}.visual::after{content:attr(data-caption);position:absolute;left:24px;bottom:22px;font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:rgba(255,255,255,.88);opacity:0;transform:translateY(14px);transition:opacity .45s ease,transform .45s ease;z-index:1}.visual:hover{transform:translateY(-10px) scale(1.01);box-shadow:0 36px 92px rgba(53,34,18,.18);filter:saturate(1.04) contrast(1.02)}.visual:hover::after{opacity:1;transform:translateY(0)}.v1{min-height:820px;background-image:url("assets/images/landing/img_3.jpeg")}.v2{min-height:400px;background-image:url("assets/images/landing/img_4.jpeg")}.v3{min-height:540px;background-image:url("assets/images/landing/img_5.jpeg")}.v4{min-height:380px;background-image:url("assets/images/landing/img_6.jpeg")}.v5{min-height:620px;background-image:url("assets/images/landing/img_7.jpeg")}
+    .video-layout{display:grid;grid-template-columns:1.08fr .92fr;gap:26px}.video-box{min-height:760px;position:relative;border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);background:#baa48c;isolation:isolate}.video-box::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,15,11,.08),rgba(20,15,11,.42));z-index:1;pointer-events:none}.video-box video{width:100%;height:100%;object-fit:cover;transition:transform 1.2s ease,filter .8s ease}.video-box:hover video{transform:scale(1.04);filter:saturate(1.05)}.video-toggle{position:absolute;top:24px;right:24px;z-index:3;width:64px;height:64px;border:1px solid rgba(255,255,255,.18);border-radius:50%;background:rgba(14,11,8,.42);color:#fff;;cursor:pointer;transition:transform .3s ease,background .3s ease}.video-toggle:hover{transform:scale(1.06);background:rgba(14,11,8,.56)}.video-toggle::before{content:"";display:inline-block;width:0;height:0;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:16px solid #fff;margin-left:4px}.video-toggle.is-playing::before{width:14px;height:18px;border:0;margin-left:0;background:linear-gradient(90deg,#fff 0 38%,transparent 38% 62%,#fff 62% 100%)}.video-copy{position:absolute;left:28px;right:28px;bottom:28px;z-index:2;padding:24px;border-radius:22px;color:#fff;background:rgba(17,12,9,.42); saturate(1.08);border:1px solid rgba(255,255,255,.12)}.video-copy h3,.benefit h3,.market h3{margin:10px 0 10px;font-size:48px;line-height:.95}.video-copy p{margin:0;color:rgba(255,255,255,.82);line-height:1.8;max-width:500px}.pulse-dot{display:inline-flex;width:10px;height:10px;margin-right:8px;border-radius:50%;background:#f4dbc0;box-shadow:0 0 0 0 rgba(244,219,192,.75);animation:pulse 2s infinite;vertical-align:middle}@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(244,219,192,.75)}70%{box-shadow:0 0 0 14px rgba(244,219,192,0)}100%{box-shadow:0 0 0 0 rgba(244,219,192,0)}}
+    .aside-stack{display:grid;gap:26px}.benefit,.market{position:relative;padding:30px;border-radius:var(--radius);background:linear-gradient(135deg,rgba(255,255,255,.74),rgba(233,221,205,.88)),radial-gradient(circle at top right,rgba(255,255,255,.42),transparent 28%);box-shadow:var(--shadow-soft);border:1px solid rgba(255,255,255,.5);overflow:hidden}.benefit::after,.market::after{content:"";position:absolute;inset:auto -18% -22% auto;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.34),transparent 68%);pointer-events:none}.benefit p,.market p{margin:0 0 20px;color:var(--muted);line-height:1.85}.chips{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px}.chip{padding:10px 14px;border-radius:999px;background:rgba(24,19,15,.9);color:#fff;font-size:12px;letter-spacing:.14em;text-transform:uppercase;transition:transform .3s ease,background .3s ease}.chip:hover{transform:translateY(-4px);background:rgba(36,26,20,.98)}.list{display:grid;gap:14px}.row{display:flex;justify-content:space-between;gap:18px;padding:0 0 14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:14px;transition:transform .3s ease,color .3s ease}.row:hover{transform:translateX(6px);color:var(--ink)}.row strong{color:var(--ink);font-weight:600}.activity-meter{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:20px}.activity-box{padding:16px 14px;border-radius:18px;background:rgba(255,255,255,.36);border:1px solid rgba(255,255,255,.34)}.activity-box span{display:block;font-size:11px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase}.activity-box strong{display:block;margin-top:8px;font-size:30px;line-height:1}
+    .market-wrap{display:grid;grid-template-columns:.74fr 1.26fr;gap:26px;align-items:stretch}.market.dark{color:#f6f0e8;background:radial-gradient(circle at top,rgba(255,255,255,.06),transparent 36%),linear-gradient(135deg,#34261c 0%,#1b1511 100%);border:none;box-shadow:0 36px 90px rgba(22,14,10,.24)}.market.dark p,.market.dark .caption,.market.dark .small,.market.dark .eyebrow{color:rgba(246,240,232,.74)}.ring-area{min-height:320px;display:grid;place-items:center;margin-top:10px}.ring{width:224px;height:224px;border-radius:50%;background:conic-gradient(#d8c1a9 0 68%,rgba(255,255,255,.12) 68% 100%);display:grid;place-items:center;position:relative;transition:transform .45s ease}.market.dark:hover .ring{transform:rotate(10deg) scale(1.03)}.ring::before{content:"";width:138px;height:138px;border-radius:50%;background:#231a14;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}.ring .center{position:absolute;text-align:center}.ring .center strong{display:block;font-size:52px}.ring .center span{font-size:12px;letter-spacing:.2em;text-transform:uppercase}.market-tabs{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px}.market-tab{border:1px solid rgba(23,18,15,.09);background:rgba(255,255,255,.5);color:var(--muted);border-radius:999px;padding:10px 14px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;transition:transform .3s ease,background .3s ease,color .3s ease}.market-tab:hover,.market-tab.is-active{transform:translateY(-3px);background:rgba(24,19,15,.88);color:#fff;border-color:rgba(24,19,15,.88)}.bars{display:grid;gap:18px;margin:22px 0 26px}.bar-row{display:grid;grid-template-columns:120px 1fr 56px;gap:14px;align-items:center;font-size:13px}.track{height:10px;border-radius:999px;background:rgba(24,19,15,.08);overflow:hidden}.fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent-2),var(--accent));width:0;transition:width .9s cubic-bezier(.2,.8,.2,1)}.trend{padding:18px 20px 12px;border-radius:22px;background:rgba(24,19,15,.03);transition:background .4s ease}svg{width:100%;height:220px;display:block}.trend path[data-line]{stroke-dasharray:900;stroke-dashoffset:900;transition:stroke-dashoffset 1.6s cubic-bezier(.2,.8,.2,1)}.trend.in-view path[data-line]{stroke-dashoffset:0}.legend{display:flex;gap:18px;margin-top:10px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.12em}.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:middle}.legend span:nth-child(1)::before{background:#8c654a}.legend span:nth-child(2)::before{background:#c9b39d}.legend span:nth-child(3)::before{background:#2b211a}
+    .manifest{position:relative;padding:90px 0 94px;text-align:center;border-top:1px solid var(--line);margin-top:12px;overflow:hidden}.manifest::before{content:"";position:absolute;inset:20% 0 auto 0;margin:0 auto;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.38),transparent 68%);filter:blur(18px);pointer-events:none}.manifesto{position:relative;z-index:1;margin:0 auto;max-width:980px;font-size:clamp(36px,4vw,60px);line-height:1.08}.footer{padding:0 0 46px;display:flex;justify-content:space-between;gap:18px;color:var(--muted);font-size:12px;letter-spacing:.14em;text-transform:uppercase}.cursor-orb{display:none}@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.reveal{opacity:1;transform:none}.cursor-orb{display:none}}@media (max-width:1180px){.hero,.lead-grid,.gallery,.video-layout,.market-wrap{grid-template-columns:1fr}.hero-image,.photo-tall,.video-box{min-height:640px}.specs,.kpi-band{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:760px){.page{width:min(100vw - 20px,1480px)}.nav{display:none}.specs,.kpi-band,.floating-metrics,.activity-meter{grid-template-columns:1fr}.copy-card,.benefit,.market,.video-copy{padding:24px}.topbar{padding:16px 0 12px}.footer{flex-direction:column}.video-toggle{width:54px;height:54px;top:18px;right:18px}.cursor-orb{display:none}.bar-row{grid-template-columns:86px 1fr 48px}.video-copy h3,.benefit h3,.market h3{font-size:38px}
+    /* 手机端案例/特价抽屉优化 */
+    .project-overlay__panel{width:100vw;height:100vh;margin:0;border-radius:0;border:none}
+    .project-overlay__grid{grid-template-columns:1fr;height:100vh;overflow-y:auto;overflow-x:hidden}
+    .project-overlay__media{height:40vh;min-height:300px;position:relative}
+    .project-overlay__content{height:auto;min-height:60vh;padding:32px 24px 0}
+    .project-overlay__title{font-size:36px}
+    .project-overlay__desc{font-size:14px;max-width:100%}
+    .project-overlay__price{padding:20px;border-radius:20px;gap:12px;flex-direction:column;align-items:flex-start}
+    .project-overlay__price-value{font-size:28px}
+    .project-overlay__cta{position:sticky;bottom:0;margin:24px -24px 0;padding:24px 24px 32px}
+    .project-overlay__cta-btn{padding:16px}
+    .project-overlay__close{top:16px;right:16px;width:44px;height:44px;font-size:20px}
+    .offer-grid{grid-template-columns:1fr}}
+    .virtual-ip-wrapper{position:fixed;right:24px;bottom:24px;z-index:999;display:flex;flex-direction:column;align-items:flex-end;gap:16px;pointer-events:none}.chat-bubble{width:300px;background:rgba(255,255,255,.95);backdrop-filter:blur(12px) saturate(1.15);border:1px solid rgba(146,105,78,.18);border-radius:24px 24px 4px 24px;box-shadow:0 24px 48px rgba(53,34,18,.12);padding:20px;pointer-events:auto;opacity:0;transform:translateY(12px) scale(0.95);transform-origin:bottom right;transition:opacity .4s cubic-bezier(.2,.8,.2,1),transform .4s cubic-bezier(.2,.8,.2,1);visibility:hidden}.chat-bubble.is-open{opacity:1;transform:translateY(0) scale(1);visibility:visible}.bubble-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:13px;font-weight:700;color:var(--ink);padding-bottom:10px;border-bottom:1px solid rgba(146,105,78,.1)}.close-btn{background:none;border:none;font-size:20px;color:var(--muted);cursor:pointer;padding:0;line-height:1;transition:color .3s}.close-btn:hover{color:var(--ink)}.chat-history{max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;margin-bottom:16px;padding-right:4px;scroll-behavior:smooth}.chat-history::-webkit-scrollbar{width:4px}.chat-history::-webkit-scrollbar-thumb{background:rgba(146,105,78,.2);border-radius:4px}.msg{max-width:85%;font-size:13px;line-height:1.5;padding:10px 14px;border-radius:12px;animation:msgIn 0.3s ease forwards;word-break:break-all}.msg p{margin:0}.msg-ai{background:rgba(231,223,210,.4);color:var(--ink);align-self:flex-start;border-bottom-left-radius:2px}.msg-user{background:var(--accent);color:#fff;align-self:flex-end;border-bottom-right-radius:2px}.bubble-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid rgba(146,105,78,.1)}.action-btn{padding:8px 12px;border:1px solid rgba(146,105,78,.24);border-radius:20px;background:#fff;color:var(--ink);font-size:12px;cursor:pointer;transition:all .3s ease}.action-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent);transform:translateY(-2px)}.chat-input-area{display:flex;align-items:center;gap:8px;background:rgba(23,18,15,.04);border-radius:20px;padding:4px 4px 4px 14px}.chat-input-area input{flex:1;border:none;background:transparent;outline:none;font-size:13px;color:var(--ink);width:100%}.chat-input-area input::placeholder{color:rgba(23,18,15,.38)}.chat-input-area button{background:var(--accent);border:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:#fff;cursor:pointer;transition:background .3s ease}.chat-input-area button:hover{background:#7a543b}.chat-input-area button svg{width:14px;height:14px}@keyframes msgIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}.ip-avatar-container{position:relative;pointer-events:auto;cursor:pointer}.ip-avatar{width:96px;height:120px;display:flex;align-items:flex-end;justify-content:center;transition:transform .4s cubic-bezier(.34,1.56,.64,1);animation:float 4s ease-in-out infinite;perspective:400px}.ip-avatar:hover{transform:scale(1.08) translateY(-4px)}.ip-avatar:hover .bear-eye{animation:blink 2.4s infinite}.status-dot{position:absolute;top:16px;right:4px;width:12px;height:12px;background:#4caf50;border:2px solid #fff;border-radius:50%;z-index:2}.hover-hint{position:absolute;right:100px;top:50%;transform:translateY(-50%) translateX(10px);background:rgba(23,18,15,.85);color:#fff;padding:6px 12px;border-radius:12px 12px 0 12px;font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:all .3s ease}.ip-avatar-container:hover .hover-hint{opacity:1;transform:translateY(-50%) translateX(0)}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}@keyframes blink{0%,8%,100%{transform:scaleY(1)}4%{transform:scaleY(0.1)}}
+    .bear-body{position:relative;width:60px;height:70px;background:linear-gradient(180deg,#d8edff 0%,#b5dbff 100%);border-radius:30px 30px 20px 20px;box-shadow:inset -6px -6px 12px rgba(135,188,245,.6),inset 6px 6px 12px rgba(255,255,255,.9);transform-style:preserve-3d;transform:translateY(10px) rotateY(0deg);transition:transform .4s ease;z-index:2}.ip-avatar-container:hover .bear-body{transform:translateY(10px) rotateY(-15deg)}.bear-arm{position:absolute;top:10px;width:20px;height:45px;background:linear-gradient(180deg,#eaf4ff 0%,#a8d2ff 100%);border-radius:10px;box-shadow:inset -3px -3px 6px rgba(135,188,245,.5),inset 3px 3px 6px rgba(255,255,255,.9),0 4px 6px rgba(135,188,245,.3);transform-origin:top center;z-index:-1;transition:transform .4s cubic-bezier(.34,1.56,.64,1)}.bear-arm::after{content:"";position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:14px;height:6px;background:linear-gradient(180deg,#3282ff 0%,#115cd9 100%);border-radius:4px;box-shadow:inset -1px -1px 2px rgba(0,0,0,.2)}.bear-arm.left{left:-12px;transform:rotate(20deg)}.bear-arm.right{right:-12px;transform:rotate(-20deg)}.ip-avatar-container:hover .bear-arm.left{transform:rotate(45deg) rotateX(20deg) translateY(-4px); animation: wave 1s ease-in-out infinite alternate}
+    .ip-avatar-container:hover .animated-head{transform:rotate(-5deg) translate(-2px,2px)}.ip-avatar-container:hover .animated-arm{animation:wave 1s ease-in-out infinite alternate}.animated-head{transform-origin:100px 120px;transition:transform .4s cubic-bezier(.34,1.56,.64,1)}.animated-arm{transform-origin:65px 100px;transition:transform .4s cubic-bezier(.34,1.56,.64,1)}@keyframes wave{0%{transform:rotate(20deg) translate(0px, -5px)}100%{transform:rotate(90deg) translate(5px, -10px)}}.bear-leg{position:absolute;bottom:-12px;width:24px;height:24px;background:linear-gradient(180deg,#b5dbff 0%,#d8edff 100%);border-radius:12px;box-shadow:inset -2px -4px 6px rgba(135,188,245,.6),inset 2px 4px 6px rgba(255,255,255,.9),0 4px 6px rgba(135,188,245,.4);z-index:-1;display:flex;justify-content:center;align-items:flex-end;padding-bottom:2px;gap:2px}.bear-leg.left{left:2px}.bear-leg.right{right:2px}.bear-paw-pad{width:4px;height:6px;background:#2a3642;border-radius:2px}.bear-head{position:absolute;top:-30px;left:-5px;width:70px;height:65px;background:linear-gradient(135deg,#eaf4ff 0%,#c2e0ff 100%);border-radius:35px 35px 30px 30px;box-shadow:inset -4px -8px 10px rgba(135,188,245,.5),inset 4px 6px 10px rgba(255,255,255,.9),0 8px 12px rgba(135,188,245,.3);transform-style:preserve-3d;transition:transform .5s cubic-bezier(.34,1.56,.64,1);z-index:2}.ip-avatar-container:hover .bear-head{transform:rotateY(-20deg) rotateX(-5deg)}.bear-ear{position:absolute;top:2px;width:18px;height:18px;background:linear-gradient(135deg,#fff 0%,#c2e0ff 100%);border-radius:50%;box-shadow:inset -2px -2px 4px rgba(135,188,245,.4),0 2px 4px rgba(135,188,245,.2)}.bear-ear.left{left:-2px}.bear-ear.right{right:-2px}.bear-hat{position:absolute;top:-8px;left:8px;width:54px;height:24px;z-index:3;transform:rotate(-5deg)}.hat-crown{position:absolute;top:0;left:6px;width:42px;height:20px;background:linear-gradient(135deg,#3282ff 0%,#115cd9 100%);border-radius:21px 21px 4px 4px;box-shadow:inset -3px -3px 6px rgba(0,0,0,.2),inset 3px 3px 6px rgba(255,255,255,.4)}.hat-brim{position:absolute;bottom:0;left:0;width:54px;height:10px;background:linear-gradient(180deg,#2474f2 0%,#0f51c2 100%);border-radius:50%;box-shadow:0 4px 4px rgba(0,0,0,.15)}.hat-button{position:absolute;top:-3px;left:24px;width:6px;height:6px;background:#115cd9;border-radius:50%;box-shadow:inset 1px 1px 2px rgba(255,255,255,.4)}.bear-face{position:absolute;inset:0;transform:translateZ(15px);transform-style:preserve-3d}.bear-eyebrow{position:absolute;top:20px;width:8px;height:3px;background:#2a3642;border-radius:2px;transform:rotate(-10deg)}.bear-eyebrow.left{left:18px;transform:rotate(10deg)}.bear-eyebrow.right{right:18px}.bear-eye{position:absolute;top:28px;width:8px;height:12px;background:#1a2229;border-radius:50%;transform-origin:center}.bear-eye.left{left:18px}.bear-eye.right{right:18px}.eye-shine{position:absolute;top:2px;right:2px;width:3px;height:4px;background:#fff;border-radius:50%}.bear-blush{position:absolute;top:38px;width:14px;height:6px;background:#ff9eb0;border-radius:50%;filter:blur(2px);opacity:0.6}.bear-blush.left{left:10px}.bear-blush.right{right:10px}.bear-snout{position:absolute;bottom:8px;left:18px;width:34px;height:24px;background:linear-gradient(180deg,#fff 0%,#ffe8d6 100%);border-radius:17px 17px 14px 14px;box-shadow:inset -2px -4px 6px rgba(214,196,180,.4),0 4px 6px rgba(135,188,245,.2);display:flex;flex-direction:column;align-items:center}.bear-nose{margin-top:4px;width:10px;height:7px;background:#1a2229;border-radius:5px 5px 3px 3px;box-shadow:inset 1px 1px 2px rgba(255,255,255,.4)}.bear-mouth{margin-top:2px;width:12px;height:6px;border-bottom:2px solid #1a2229;border-left:2px solid transparent;border-right:2px solid transparent;border-radius:50%}
+    .portfolio-filters{display:flex;gap:36px;margin-bottom:64px;border-bottom:1px solid var(--line);padding-bottom:20px;justify-content:center}.pf-btn{background:none;border:none;padding:0 0 10px;font-size:12px;letter-spacing:0.2em;text-transform:uppercase;color:var(--muted);cursor:pointer;position:relative;transition:color 0.6s var(--ease)}.pf-btn::after{content:"";position:absolute;left:0;bottom:-21px;width:100%;height:1px;background:var(--ink);transform:scaleX(0);transform-origin:left;transition:transform 0.6s var(--ease)}.pf-btn:hover{color:var(--ink)}.pf-btn.active{color:var(--ink)}.pf-btn.active::after{transform:scaleX(1)}
+    .portfolio-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:80px 40px;transition:opacity 0.6s var(--ease)}.p-item{opacity:1;transform:translateY(0);transition:opacity 0.8s var(--ease),transform 0.8s var(--ease)}.p-item.hidden{opacity:0;transform:translateY(20px);pointer-events:none;position:absolute;visibility:hidden}.p-image-wrap{overflow:hidden;background:#ebe6de}.p-image{height:680px;background-size:cover;background-position:center;filter:sepia(0.15) saturate(0.85) contrast(0.95);transition:transform 1.4s var(--ease),filter 1.4s var(--ease)}.p-item:hover .p-image{transform:scale(1.03);filter:sepia(0) saturate(1) contrast(1.05)}.p-info{margin-top:24px;display:flex;flex-direction:column;gap:8px;text-align:center}.p-cat{font-size:10px;letter-spacing:0.25em;text-transform:uppercase;color:var(--muted)}.p-info h3{margin:0;font-size:28px;font-weight:800;letter-spacing:-0.02em}
+    .offers-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:40px}.offer-card{background:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.6);border-radius:24px;overflow:hidden;box-shadow:var(--shadow-soft);transition:transform .4s var(--ease),box-shadow .4s var(--ease)}.offer-card:hover{transform:translateY(-8px);box-shadow:0 32px 72px rgba(53,34,18,.14)}.offer-image{height:240px;background-size:cover;background-position:center;position:relative}.badge{position:absolute;top:20px;right:20px;background:rgba(146,105,78,.9);color:#fff;padding:6px 14px;border-radius:99px;font-size:12px;font-weight:700;letter-spacing:.05em;backdrop-filter:blur(4px)}.badge.hot{background:#d35400}.offer-content{padding:28px}.offer-content h3{margin:8px 0 16px;font-size:26px;font-family:"Manrope",sans-serif;font-weight:800;letter-spacing:-0.02em}.offer-content .desc{font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:24px;min-height:44px}.price-row{display:flex;justify-content:space-between;align-items:flex-end;padding-top:20px;border-top:1px solid var(--line)}.price{display:flex;align-items:baseline;gap:6px}.price .currency{font-size:16px;font-weight:700;color:#d35400}.price strong{font-size:32px;font-weight:800;color:#d35400;line-height:1}.price del{font-size:13px;color:var(--muted);text-decoration:line-through}.buy-btn{background:#1a1714;color:#fff;border:none;padding:12px 24px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;transition:background .3s var(--ease)}.buy-btn:hover{background:var(--accent)}
+  </style>
+</head>
+<body>
+  <div class="page-loader">
+    <div class="loader-text">CHILINTECH</div>
+  </div>
+  
+  <div id="p5-canvas-container"></div>
+  
+  <div class="virtual-ip-wrapper" id="virtualIp">
+    <div class="chat-bubble" id="chatBubble">
+      <div class="bubble-header">
+        <span>小林助手</span>
+        <button class="close-btn" aria-label="关闭对话">&times;</button>
+      </div>
+      <div class="chat-history" id="chatHistory">
+        <div class="msg msg-ai">
+          <p>您好！我是志林科技的招商顾问小林。有什么我可以帮您的吗？</p>
+        </div>
+      </div>
+      <div class="bubble-actions">
+        <button class="action-btn" data-target="#video">带我看视频</button>
+        <button class="action-btn" data-target="#special-offers">看特价爆款</button>
+        <button class="action-btn" data-target="#industry">了解应用领域</button>
+      </div>
+      <div class="chat-input-area">
+        <input type="text" id="chatInput" placeholder="输入您想咨询的内容…" autocomplete="off">
+        <button id="chatSendBtn" aria-label="发送消息">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </div>
+    </div>
+    
+    <div class="ip-avatar-container" id="ipAvatarContainer">
+      <div class="status-dot"></div>
+      <div class="ip-avatar" id="ipAvatar">
+        <!-- 3D 小熊 SVG 结构 -->
+        <svg viewBox="0 0 200 200" width="100%" height="100%" style="overflow:visible;" class="bear-svg">
+          <defs>
+            <radialGradient id="headGrad" cx="40%" cy="30%" r="70%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="40%" stop-color="#d6c3b0"/>
+              <stop offset="100%" stop-color="#a68e7c"/>
+            </radialGradient>
+            <radialGradient id="bodyGrad" cx="50%" cy="30%" r="70%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="40%" stop-color="#d6c3b0"/>
+              <stop offset="100%" stop-color="#a68e7c"/>
+            </radialGradient>
+            <linearGradient id="hatGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#5a4536"/>
+              <stop offset="100%" stop-color="#241a14"/>
+            </linearGradient>
+            <radialGradient id="snoutGrad" cx="50%" cy="30%" r="50%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="#fdfbf9"/>
+            </radialGradient>
+            <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#a6533f" flood-opacity="0.25"/>
+            </filter>
+            <filter id="softShadow">
+              <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#a6533f" flood-opacity="0.15"/>
+            </filter>
+          </defs>
+
+          <!-- Body Group -->
+          <g id="bear-body">
+            <!-- Legs -->
+            <path d="M 70 140 L 70 170 A 12 12 0 0 0 94 170 L 94 140 Z" fill="url(#bodyGrad)"/>
+            <path d="M 106 140 L 106 170 A 12 12 0 0 0 130 170 L 130 140 Z" fill="url(#bodyGrad)"/>
+            
+            <!-- Claws/Paws -->
+            <ellipse cx="76" cy="175" rx="2" ry="3" fill="#2a3642"/>
+            <ellipse cx="82" cy="176" rx="2" ry="3" fill="#2a3642"/>
+            <ellipse cx="88" cy="175" rx="2" ry="3" fill="#2a3642"/>
+            <ellipse cx="112" cy="175" rx="2" ry="3" fill="#2a3642"/>
+            <ellipse cx="118" cy="176" rx="2" ry="3" fill="#2a3642"/>
+            <ellipse cx="124" cy="175" rx="2" ry="3" fill="#2a3642"/>
+
+            <!-- Torso -->
+            <path d="M 75 80 C 50 120, 55 160, 100 160 C 145 160, 150 120, 125 80 Z" fill="url(#bodyGrad)" filter="url(#softShadow)"/>
+            
+            <!-- Belly -->
+            <path d="M 85 95 C 70 120, 75 145, 100 145 C 125 145, 130 120, 115 95 Z" fill="#ffffff" opacity="0.7" filter="blur(2px)"/>
+
+            <!-- Arms -->
+            <path id="left-arm" class="animated-arm" d="M 68 95 C 45 100, 35 135, 45 145 C 55 155, 60 120, 65 110 Z" fill="url(#bodyGrad)" filter="url(#softShadow)" transform-origin="65 100"/>
+            <path id="right-arm" d="M 132 95 C 155 100, 165 135, 155 145 C 145 155, 140 120, 135 110 Z" fill="url(#bodyGrad)" filter="url(#softShadow)" transform-origin="135 100"/>
+          </g>
+
+          <!-- Head Group (Animated) -->
+          <g id="bear-head-group" filter="url(#dropShadow)" class="animated-head">
+            <!-- Ears -->
+            <circle cx="50" cy="50" r="16" fill="url(#bodyGrad)"/>
+            <circle cx="50" cy="50" r="8" fill="#ffffff" opacity="0.8"/>
+            <circle cx="150" cy="50" r="16" fill="url(#bodyGrad)"/>
+            <circle cx="150" cy="50" r="8" fill="#ffffff" opacity="0.8"/>
+
+            <!-- Head Base -->
+            <path d="M 100 35 C 160 35, 165 85, 155 100 C 145 120, 120 125, 100 125 C 80 125, 55 120, 45 100 C 35 85, 40 35, 100 35 Z" fill="url(#headGrad)"/>
+
+            <!-- Blush -->
+            <ellipse cx="55" cy="95" rx="14" ry="7" fill="#ff9eb0" opacity="0.5" filter="blur(3px)"/>
+            <ellipse cx="145" cy="95" rx="14" ry="7" fill="#ff9eb0" opacity="0.5" filter="blur(3px)"/>
+
+            <!-- Snout -->
+            <ellipse cx="100" cy="102" rx="24" ry="18" fill="url(#snoutGrad)" filter="url(#softShadow)"/>
+            
+            <!-- Nose & Mouth -->
+            <path d="M 90 94 C 90 90, 110 90, 110 94 C 110 100, 100 102, 100 102 C 100 102, 90 100, 90 94 Z" fill="#1a2229"/>
+            <ellipse cx="96" cy="93" rx="3" ry="1.5" fill="#ffffff" opacity="0.8" transform="rotate(-15 96 93)"/>
+            <path d="M 90 106 C 95 112, 100 112, 100 104 M 110 106 C 105 112, 100 112, 100 104" stroke="#1a2229" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+            <!-- Eyes (Blinking) -->
+            <g class="bear-eyes">
+              <ellipse cx="70" cy="78" rx="7" ry="11" fill="#1a2229"/>
+              <circle cx="68" cy="73" r="3" fill="#ffffff"/>
+              <circle cx="72" cy="82" r="1.5" fill="#ffffff"/>
+              
+              <ellipse cx="130" cy="78" rx="7" ry="11" fill="#1a2229"/>
+              <circle cx="128" cy="73" r="3" fill="#ffffff"/>
+              <circle cx="132" cy="82" r="1.5" fill="#ffffff"/>
+            </g>
+
+            <!-- Eyebrows -->
+            <path d="M 62 58 Q 70 54, 78 58" stroke="#2a3642" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <path d="M 138 58 Q 130 54, 122 58" stroke="#2a3642" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+            <!-- Hat -->
+            <g id="bear-hat">
+              <path d="M 65 35 C 70 5, 130 5, 135 35 Z" fill="url(#hatGrad)"/>
+              <path d="M 50 35 C 80 25, 120 25, 150 35 C 140 42, 60 42, 50 35 Z" fill="#241a14" filter="url(#softShadow)"/>
+              <circle cx="100" cy="12" r="4" fill="#1a1714"/>
+              <path d="M 100 12 L 85 35 M 100 12 L 115 35" stroke="#1a1714" stroke-width="1.5" fill="none" opacity="0.5"/>
+            </g>
+          </g>
+        </svg>
+      </div>
+      <div class="hover-hint">需要帮助吗？</div>
+    </div>
+  </div>
+
+  <div class="page">
+    <header class="topbar" id="topbar">
+      <div class="brand">
+        <svg class="brand-logo" viewBox="0 0 280 64" xmlns="http://www.w3.org/2000/svg">
+          <g transform="translate(0, 2) scale(0.6)">
+            <path d="M 50,0 C 20,0 0,20 0,50 C 0,80 20,100 50,100 C 70,100 90,85 100,70 C 80,90 60,95 40,85 C 15,75 10,40 20,20 C 30,5 50,0 70,5 C 85,10 95,20 100,30 C 85,10 70,0 50,0 Z" fill="#0072bc"/>
+            <path d="M 25,35 C 15,50 20,70 35,85 C 50,95 70,90 85,75 C 65,90 45,85 30,70 C 15,55 20,35 35,25 C 50,15 70,20 85,30 C 70,15 45,15 25,35 Z" fill="#f29100"/>
+            <path d="M 35,85 C 50,100 75,95 95,75 C 90,85 75,100 50,100 C 30,100 10,85 0,65 C 5,80 20,95 35,85 Z" fill="#004a8c"/>
+          </g>
+          <text x="75" y="32" font-family="sans-serif" font-size="34" font-weight="900" font-style="italic" fill="#241a14">志林科技</text>
+          <text x="77" y="56" font-family="sans-serif" font-size="20" font-weight="900" font-style="italic" fill="#241a14" letter-spacing="1">CHILINTECH</text>
+        </svg>
+      </div>
+      <nav class="nav"><a href="#portfolio">项目</a><a href="#metrics">优势</a><a href="#story">理念</a><a href="#special-offers">特价</a><a href="#industry">领域</a></nav>
+      <div style="justify-self:end;font-weight:600;letter-spacing:0.05em">400-882-CHILIN</div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-copy reveal">
+        <div class="intro-meta"><span>中国</span><span>佛山</span></div>
+        <p class="eyebrow">Graphene heating art & Premium decorative heating brand</p>
+        <h1>
+          <span class="en">CHILIN</span>
+          <span class="zh">志林科技</span>
+        </h1>
+        <p class="subhead">石墨烯远红外供暖 · 高端装饰材料革新者<br>一站式石墨烯发热装饰解决方案，装饰·供暖·保健三效融合，定义未来人居体验。</p>
+        <div class="specs">
+          <div class="spec reveal"><span class="label">加盟商入住率</span><strong data-count="86" data-suffix="%">86%</strong><p>样板城市加盟落位效率持续高位。</p></div>
+          <div class="spec reveal"><span class="label">现在的登录量</span><strong data-count="12684">12,684</strong><p>来自后台、活动页与咨询入口。</p></div>
+          <div class="spec reveal"><span class="label">购买量</span><strong data-count="5291">5,291</strong><p>联营包、活动包、本月总成交。</p></div>
+          <div class="spec reveal"><span class="label">入住量</span><strong data-count="1478">1,478</strong><p>近 30 日新签约与待开业门店。</p></div>
+          <div class="spec reveal"><span class="label">库存剩余量</span><strong data-count="23" data-suffix="%">23%</strong><p>主推资源位与物料包剩余比例。</p></div>
+        </div>
+      </div>
+      <div class="hero-image reveal" data-parallax="0.08"><div class="hero-card reveal"><span class="mini">核心优势</span><strong class="serif" data-count="8" data-suffix=" 年">8 年</strong><p>深耕石墨烯电热层与高端装饰材料深度融合，参与国家“煤改电”供暖行业标准制定。</p></div></div>
+    </section>
+
+    <section class="section" id="story"><div class="section-head reveal"><h2>一站式开店赋能<br>高净值样板店</h2><p>佛山市志林科技有限公司，集研发、制造、销售于一体的国家高新技术企业，将石墨烯电热层与高端装饰材料深度融合，实现建筑装饰与智能供暖一体化。</p></div><div class="lead-grid"><article class="panel photo-tall reveal" data-parallax="0.04"></article><div class="stack"><article class="panel copy-card reveal"><div><p class="eyebrow">01 / Brand positioning</p><h2>招商叙事<br>高端品牌现场</h2></div><p>“用偏室内摄影集的视觉语言，包装加盟项目的门店模型、流量能力与运营成熟度。用户看到的不是冷冰冰的报表，而是一个已经成型、值得加入的品牌现场。”<br><br>—— 志林科技·石墨烯发热体验馆，从场景到情绪，从产品到盈利闭环。</p></article><article class="panel photo-wide reveal"><div class="floating-metrics"><div class="metric reveal"><span class="mini">国家专利</span><strong class="big-number" data-count="15">15</strong><em>多项科技进步奖</em></div><div class="metric reveal"><span class="mini">研发沉淀</span><strong class="big-number" data-count="8" data-suffix="年">8年</strong><em>独立研发团队</em></div><div class="metric reveal"><span class="mini">节能对比</span><strong class="big-number" data-count="50" data-suffix="%">50%</strong><em>比传统取暖降低50%</em></div></div></article></div></div></section>
+
+    <section class="section"><div class="gallery"><div class="gallery-left"><div class="visual v1 reveal" data-caption="Flagship retail mood"></div><div class="visual v2 reveal" data-caption="Warm premium material"></div></div><div class="gallery-right"><div class="visual v3 reveal" data-caption="Spatial brand confidence"></div><div class="visual v4 reveal" data-caption="Refined opening standard"></div><div class="visual v5 reveal" data-caption="Immersive recruitment mood"></div></div></div></section>
+
+    <section class="section" id="portfolio">
+      <div class="section-head reveal">
+        <h2>精选案例<br>场景应用</h2>
+        <p>志林科技石墨烯发热系统在各大高端空间的应用实践。通过不同类目的探索，感受温暖与设计的无缝融合。</p>
+      </div>
+      <div class="portfolio-filters reveal">
+        <button class="pf-btn active" data-filter="all">全部空间</button>
+        <button class="pf-btn" data-filter="residential">高端住宅</button>
+        <button class="pf-btn" data-filter="retail">零售/商业</button>
+        <button class="pf-btn" data-filter="hospitality">星级酒店/餐饮</button>
+      </div>
+      <div class="portfolio-grid reveal" id="portfolioGrid">
+        <article class="p-item" data-category="residential">
+          <div class="p-image-wrap"><div class="p-image" style="background-image:url('assets/images/landing/img_8.jpeg')"></div></div>
+          <div class="p-info">
+            <span class="p-cat">高端住宅</span>
+            <h3>苏州·隐逸大平层</h3>
+          </div>
+        </article>
+        <article class="p-item" data-category="hospitality">
+          <div class="p-image-wrap"><div class="p-image" style="background-image:url('assets/images/landing/img_9.jpeg')"></div></div>
+          <div class="p-info">
+            <span class="p-cat">星级酒店</span>
+            <h3>上海·安缦套房供暖</h3>
+          </div>
+        </article>
+        <article class="p-item" data-category="retail">
+          <div class="p-image-wrap"><div class="p-image" style="background-image:url('assets/images/landing/img_10.jpeg')"></div></div>
+          <div class="p-info">
+            <span class="p-cat">零售/商业</span>
+            <h3>成都·高定买手店</h3>
+          </div>
+        </article>
+        <article class="p-item" data-category="residential">
+          <div class="p-image-wrap"><div class="p-image" style="background-image:url('assets/images/landing/img_11.jpeg')"></div></div>
+          <div class="p-info">
+            <span class="p-cat">高端住宅</span>
+            <h3>北京·西山别墅区</h3>
+          </div>
+        </article>
+        <article class="p-item" data-category="hospitality">
+          <div class="p-image-wrap"><div class="p-image" style="background-image:url('assets/images/landing/img_12.jpeg')"></div></div>
+          <div class="p-info">
+            <span class="p-cat">星级餐饮</span>
+            <h3>杭州·米其林景观餐厅</h3>
+          </div>
+        </article>
+        <article class="p-item" data-category="retail">
+          <div class="p-image-wrap"><div class="p-image" style="background-image:url('assets/images/landing/img_13.jpeg')"></div></div>
+          <div class="p-info">
+            <span class="p-cat">零售/商业</span>
+            <h3>深圳·独立艺术画廊</h3>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="metrics"><div class="divider reveal"></div><div class="kpi-band">
+      <article class="kpi reveal"><span>环保标准</span><strong data-count="0.05" data-suffix="mg/m³" data-decimals="2">0.05</strong><p>无甲醛胶水专利，达欧盟E1级，绿色卫士</p></article>
+      <article class="kpi reveal"><span>电热转化率</span><strong data-count="99" data-suffix="%">99%</strong><p>比传统供暖方式节能50%以上</p></article>
+      <article class="kpi reveal"><span>远红外光波</span><strong data-count="8" data-suffix="~15μm">8~15</strong><p>释放“生命光波”，促进血液循环活化细胞</p></article>
+      <article class="kpi reveal"><span>稳定运行</span><strong data-count="20" data-suffix=" 年+">20 年+</strong><p>21万小时无衰减认证，国家质检中心背书</p></article>
+      <article class="kpi reveal"><span>安全防护</span><strong data-count="100" data-suffix="%">100%</strong><p>自限温+精密印刷绝缘，0漏电0火灾隐患</p></article>
+    </div></section>
+    <section class="section" id="special-offers">
+      <div class="section-head reveal">
+        <h2>欢迎选购</h2>
+        <p>石墨烯核心科技体验单品，现以特价限量开放，提前感受装饰、供暖与健康理疗的三效融合体验。</p>
+      </div>
+      <div class="offers-grid">
+        <article class="offer-card reveal">
+          <div class="offer-image" id="offer-img-1" style="background-image: url('assets/images/landing/img_14.jpeg')">
+            <span class="badge">直降 ¥2000</span>
+          </div>
+          <div class="offer-content">
+            <p class="eyebrow">Graphene Heating Mattress</p>
+            <h3>石墨烯远红外发热床垫</h3>
+            <p class="desc">远红外深睡系统，悬浮黑科技，恒温助眠促进血液循环，打造私人理疗空间。</p>
+            <div class="price-row">
+              <div class="price">
+                <span class="currency">¥</span><strong>5,999</strong><del>¥7,999</del>
+              </div>
+              <button class="buy-btn">立即抢购</button>
+            </div>
+          </div>
+        </article>
+        
+        <article class="offer-card reveal">
+          <div class="offer-image" id="offer-img-2" style="background-image: url('assets/images/landing/img_15.png')">
+            <span class="badge hot">工程特惠</span>
+          </div>
+          <div class="offer-content">
+            <p class="eyebrow">Twin Bed Heating System</p>
+            <h3>星级酒店双床温控系统</h3>
+            <p class="desc">酒店/康养专属双床独立控温，精密印刷绝缘，0漏电火灾隐患，极致安全体验。</p>
+            <div class="price-row">
+              <div class="price">
+                <span class="currency">¥</span><strong>9,800</strong><del>¥12,800</del>
+              </div>
+              <button class="buy-btn">立即抢购</button>
+            </div>
+          </div>
+        </article>
+        
+        <article class="offer-card reveal">
+          <div class="offer-image" id="offer-img-3" style="background-image: url('assets/images/products/prod2.png')">
+            <span class="badge">买一赠一</span>
+          </div>
+          <div class="offer-content">
+            <p class="eyebrow">Shujianbao Therapy</p>
+            <h3>舒健保·石墨烯理疗双床</h3>
+            <p class="desc">多功能理疗康养双床，释放生命光波，温润助眠，康养中心与高端医护优选。</p>
+            <div class="price-row">
+              <div class="price">
+                <span class="currency">¥</span><strong>8,999</strong><del>¥12,999</del>
+              </div>
+              <button class="buy-btn">立即抢购</button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="video"><div class="section-head reveal"><h2>石墨烯技术<br>发热作品集</h2><p>装饰·供暖·保健三效融合。包含发热床、发热桌、发热挂画、美容面罩、汗蒸房、石墨烯护具等，隐形供暖，艺术与科技共生。</p></div><div class="video-layout"><article class="video-box reveal"><button class="video-toggle" type="button" aria-label="播放或暂停招商视频"></button><video id="brandVideo" preload="metadata" poster="assets/images/landing/img_17.png" playsinline muted></video><div class="video-copy reveal"><p class="eyebrow" style="color:rgba(255,255,255,.72);margin-bottom:8px;"><span class="pulse-dot"></span>品牌主视频</p><h3>石墨烯远红外供暖<br>高端装饰材料革新者</h3><p>点击播放品牌宣传片。八年深耕，独立研发团队，参与国家“煤改电”供暖行业标准制定。</p></div></article><div class="aside-stack"><article class="benefit reveal" id="benefits"><p class="eyebrow">Core Advantages</p><h3>四大核心优势<br>加盟赋能</h3><p>石墨烯供暖刚需市场，成熟流量模型，一站式开店赋能，高端门店SI体系。</p><div class="chips"><span class="chip">节能高效</span><span class="chip">健康理疗</span><span class="chip">安全可靠</span></div><div class="list"><div class="row"><strong>节能高效</strong><span>PTC变频自限温，双向发热</span></div><div class="row"><strong>健康理疗</strong><span>释放 8-15微米 远红外光波</span></div><div class="row"><strong>安全可靠</strong><span>精密印刷绝缘，0漏电火灾隐患</span></div></div><div class="activity-meter"><div class="activity-box"><span>电热转化率</span><strong data-count="99" data-suffix="%">99%</strong></div><div class="activity-box"><span>无衰减运行</span><strong data-count="21" data-suffix="万">21万</strong></div><div class="activity-box"><span>节能对比</span><strong data-count="50" data-suffix="%">50%</strong></div></div></article><article class="benefit reveal"><p class="eyebrow">ZUBEN Board</p><h3>足本高性能<br>复合板材</h3><div class="list"><div class="row"><strong>至臻板材</strong><span>无惧时间考验</span></div><div class="row"><strong>防潮阻燃</strong><span>浸泡5年不起泡，A2级防火</span></div><div class="row"><strong>物理性能</strong><span>抗冻耐高温，耐磨等级卓越</span></div><div class="row"><strong>饰面选择</strong><span>木纹、石纹、布纹、金属、岩板等</span></div></div></article></div></div></section>
+
+    <section class="section" id="industry"><div class="section-head reveal"><h2>六大核心<br>应用领域</h2><p>点击不同区域标签，了解志林科技石墨烯供暖系统在各大商业及民用空间的解决方案与渗透情况。</p></div><div class="market-wrap"><article class="market dark reveal"><p class="eyebrow">Market penetration</p><h3>本年度工程覆盖渗透率</h3><p>高端住宅与星级酒店仍是最强增长区间，康养中心在供暖和保健需求升级后，逐渐成为第二增长曲线。</p><div class="ring-area"><div class="ring"><div class="center"><strong class="serif" data-count="68" data-suffix="%">68%</strong><span class="small">年度达成</span></div></div></div><div class="caption">行业平均采购信心指数较去年同期提升 14.2%</div></article><article class="market reveal"><p class="eyebrow">Application board</p><h3>场景机会与应用趋势</h3><p id="marketSummary">当前视图聚焦全领域应用。点击下面的场景标签，可以切换不同空间的数据重心和机会说明。</p><div class="market-tabs" role="tablist" aria-label="应用场景切换"><button class="market-tab is-active" type="button" data-market="national">全领域</button><button class="market-tab" type="button" data-market="east">星级酒店</button><button class="market-tab" type="button" data-market="south">医院康养</button><button class="market-tab" type="button" data-market="north">高端住宅</button></div><div class="bars"><div class="bar-row"><span id="labelA">星级酒店</span><div class="track"><div class="fill" data-fill="a"></div></div><span id="valueA">91%</span></div><div class="bar-row"><span id="labelB">医院康养</span><div class="track"><div class="fill" data-fill="b"></div></div><span id="valueB">84%</span></div><div class="bar-row"><span id="labelC">高端住宅</span><div class="track"><div class="fill" data-fill="c"></div></div><span id="valueC">76%</span></div><div class="bar-row"><span id="labelD">机场/地铁</span><div class="track"><div class="fill" data-fill="d"></div></div><span id="valueD">69%</span></div><div class="bar-row"><span id="labelE">影院/教育</span><div class="track"><div class="fill" data-fill="e"></div></div><span id="valueE">52%</span></div></div><div class="trend reveal" id="trendBox"><svg viewBox="0 0 800 220" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="行业趋势图"><path d="M0 190H800" stroke="rgba(24,19,15,.08)" stroke-width="2"/><path data-line d="M0 140C60 122 110 130 160 112C220 90 248 72 320 76C390 80 430 138 498 122C558 108 626 56 688 46C734 38 771 45 800 30" stroke="#8C654A" stroke-width="4" stroke-linecap="round"/><path data-line d="M0 176C60 160 112 164 160 146C216 126 252 118 320 126C388 134 441 166 500 152C566 136 626 118 690 110C738 104 772 98 800 92" stroke="#C9B39D" stroke-width="4" stroke-linecap="round"/><path data-line d="M0 198C64 194 110 182 160 178C224 172 258 154 320 160C392 166 448 186 508 174C564 162 626 148 692 144C738 142 772 136 800 132" stroke="#2B211A" stroke-width="4" stroke-linecap="round"/><circle cx="688" cy="46" r="6" fill="#8C654A"/><circle cx="690" cy="110" r="6" fill="#C9B39D"/><circle cx="692" cy="144" r="6" fill="#2B211A"/></svg><div class="legend"><span>意向咨询</span><span>方案输出</span><span>最终合作</span></div></div></article></div></section>
+
+    <section class="manifest reveal"><p class="manifesto">佛山市志林科技有限公司<br>石墨烯发热科技&高端装饰板材引领者</p></section>
+    <footer class="footer reveal"><span>温暖守护每一寸生活空间</span><span>加盟热线 400-882-志林</span></footer>
+  </div>
+  
+  <div class="project-overlay" id="projectOverlay" aria-hidden="true" data-lenis-prevent>
+    <div class="project-overlay__backdrop" data-close="true"></div>
+    <div class="project-overlay__panel" role="dialog" aria-modal="true" aria-label="案例详情">
+      <button class="project-overlay__close" id="projectOverlayClose" type="button" aria-label="关闭案例详情">×</button>
+      <div class="project-overlay__grid">
+        <div class="project-overlay__media">
+          <div class="project-overlay__image" id="projectOverlayImage"></div>
+          <div class="project-overlay__media-nav">
+            <button class="project-overlay__nav-btn" id="projectOverlayPrev" type="button" aria-label="上一张">←</button>
+            <div class="project-overlay__count" id="projectOverlayCount">1 / 1</div>
+            <button class="project-overlay__nav-btn" id="projectOverlayNext" type="button" aria-label="下一张">→</button>
+          </div>
+        </div>
+        <div class="project-overlay__content" data-lenis-prevent>
+          <div class="project-overlay__meta" id="projectOverlayMeta"></div>
+          <h2 class="project-overlay__title" id="projectOverlayTitle"></h2>
+          <p class="project-overlay__desc" id="projectOverlayDesc"></p>
+          <div class="project-overlay__specs" id="projectOverlaySpecs"></div>
+          <div class="project-overlay__cta">
+            <button class="project-overlay__cta-btn" id="projectOverlayConsultBtn" type="button">立即咨询</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let particles = [];
+    const numParticles = 800;
+    const noiseScale = 0.01;
+    let customSeed;
+    let interactionX = -1000;
+    let interactionY = -1000;
+
+    function setup() {
+      let canvas = createCanvas(windowWidth, windowHeight);
+      canvas.parent('p5-canvas-container');
+      customSeed = random(10000);
+      noiseSeed(customSeed);
+      for(let i = 0; i < numParticles; i++) {
+        particles.push(new Particle());
+      }
+      background(249, 248, 246);
+    }
+
+    function draw() {
+      noStroke();
+      fill(249, 248, 246, 20);
+      rect(0, 0, width, height);
+
+      interactionX = lerp(interactionX, mouseX, 0.1);
+      interactionY = lerp(interactionY, mouseY + window.scrollY, 0.1);
+
+      for(let p of particles) {
+        p.update();
+        p.display();
+      }
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+
+    class Particle {
+      constructor() {
+        this.pos = createVector(random(width), random(height));
+        this.vel = createVector(0, 0);
+        this.acc = createVector(0, 0);
+        this.maxSpeed = random(0.5, 1.5);
+        this.color = random() > 0.5 ? color(166, 83, 63, 40) : color(212, 139, 118, 40);
+        this.size = random(1, 3);
+      }
+      update() {
+        let angle = noise(this.pos.x * noiseScale, this.pos.y * noiseScale, frameCount * 0.002) * TWO_PI * 2;
+        let flowForce = p5.Vector.fromAngle(angle);
+        flowForce.mult(0.1);
+        
+        let d = dist(this.pos.x, this.pos.y, interactionX, interactionY - window.scrollY);
+        if (d < 200) {
+          let repulse = p5.Vector.sub(this.pos, createVector(interactionX, interactionY - window.scrollY));
+          repulse.normalize();
+          repulse.mult(map(d, 0, 200, 0.5, 0));
+          this.acc.add(repulse);
+        }
+
+        this.acc.add(flowForce);
+        this.vel.add(this.acc);
+        this.vel.limit(this.maxSpeed);
+        this.pos.add(this.vel);
+        this.acc.mult(0);
+
+        if(this.pos.x > width) this.pos.x = 0;
+        if(this.pos.x < 0) this.pos.x = width;
+        if(this.pos.y > height) this.pos.y = 0;
+        if(this.pos.y < 0) this.pos.y = height;
+      }
+      display() {
+        noStroke();
+        fill(this.color);
+        circle(this.pos.x, this.pos.y, this.size);
+      }
+    }
+
+    const lenis = new Lenis({
+      duration: 2.2,
+      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      direction: 'vertical',
+      gestureDirection: 'vertical',
+      smooth: true,
+      mouseMultiplier: 0.8,
+      smoothTouch: false,
+      touchMultiplier: 2,
+      infinite: false,
+    });
+    
+    lenis.on('scroll', ScrollTrigger.update);
+    gsap.ticker.add((time)=>{
+      lenis.raf(time * 1000);
+    });
+    gsap.ticker.lagSmoothing(0);
+
+    window.addEventListener("load", () => {
+      const loader = document.querySelector(".page-loader");
+      const loaderText = document.querySelector(".loader-text");
+      
+      gsap.to(loaderText, {
+        opacity: 0,
+        duration: 0.6,
+        delay: 0.5,
+        ease: "power2.inOut"
+      });
+      
+      gsap.to(loader, {
+        yPercent: -100,
+        duration: 1.2,
+        delay: 0.8,
+        ease: "power4.inOut",
+        onComplete: () => {
+          loader.style.display = "none";
+          ScrollTrigger.refresh();
+        }
+      });
+    });
+
+    gsap.registerPlugin(ScrollTrigger);
+    
+    // Instead of simple CSS reveals, let's use GSAP for all .reveal elements
+    const reveals = document.querySelectorAll('.reveal');
+    const countEls=document.querySelectorAll('[data-count]');
+    const topbar=document.getElementById('topbar');
+    const navLinks=document.querySelectorAll('.nav a');
+    const sections=document.querySelectorAll('section[id]');
+    const parallaxEls=document.querySelectorAll('[data-parallax]');
+    const video=document.getElementById('brandVideo');
+    const videoToggle=document.querySelector('.video-toggle');
+    const trendBox=document.getElementById('trendBox');
+
+    reveals.forEach((el) => {
+      // Mersi-style curtain reveal for images/visuals
+      if(el.classList.contains('photo-tall') || el.classList.contains('photo-wide') || el.classList.contains('visual') || el.classList.contains('hero-image') || el.classList.contains('video-box') || el.classList.contains('p-image-wrap')) {
+        // Reset CSS transform/transition conflict for these
+        el.style.transition = 'none';
+        gsap.fromTo(el,
+          { clipPath: "inset(100% 0% 0% 0%)", scale: 1.05 },
+          {
+            clipPath: "inset(0% 0% 0% 0%)",
+            scale: 1,
+            duration: 1.8,
+            ease: "power4.inOut",
+            scrollTrigger: {
+              trigger: el,
+              start: "top 85%",
+              onEnter: () => {
+                el.classList.add('in-view');
+              }
+            },
+            onComplete: () => {
+              el.style.transition = ''; // Restore hover transitions
+            }
+          }
+        );
+      } else {
+        // Soft fade up for text and other elements
+        gsap.fromTo(el, 
+          { y: 60, opacity: 0 },
+          {
+            y: 0, 
+            opacity: 1,
+            duration: 1.4,
+            ease: "power3.out",
+            scrollTrigger: {
+              trigger: el,
+              start: "top 85%",
+              onEnter: () => {
+                el.classList.add('in-view');
+                if(el.hasAttribute('data-count')) animateCount(el);
+                el.querySelectorAll?.('[data-count]').forEach((node)=>animateCount(node));
+              }
+            }
+          }
+        );
+      }
+    });
+
+    if(trendBox) {
+      ScrollTrigger.create({
+        trigger: trendBox,
+        start: "top 85%",
+        onEnter: () => trendBox.classList.add('in-view')
+      });
+    }
+
+    countEls.forEach((el) => {
+      if(!el.closest('.reveal')) {
+        ScrollTrigger.create({
+          trigger: el,
+          start: "top 85%",
+          onEnter: () => animateCount(el)
+        });
+      }
+    });
+
+    function formatValue(value,decimals,suffix){
+      const num=decimals>0?value.toFixed(decimals):Math.round(value).toString();
+      const withComma=num.replace(/\B(?=(\d{3})+(?!\d))/g,',');
+      const suffixHtml = suffix ? `<span class="unit-suffix">${suffix}</span>` : '';
+      return withComma+suffixHtml;
+    }
+    function animateCount(el){
+      if(el.dataset.animated==='true') return;
+      el.dataset.animated='true';
+      const target=Number(el.dataset.count||0);
+      const decimals=Number(el.dataset.decimals||(String(target).includes('.')?1:0));
+      const suffix=el.dataset.suffix||'';
+      const duration=1400;
+      const start=performance.now();
+      function tick(now){
+        const progress=Math.min((now-start)/duration,1);
+        const eased=1-Math.pow(1-progress,3);
+        el.innerHTML=formatValue(target*eased,decimals,suffix);
+        if(progress<1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+    function updateScrollState(){
+      const y=window.scrollY;
+      topbar.classList.toggle('compact',y>28);
+      let current='';
+      sections.forEach((section)=>{ if(y>=section.offsetTop-120) current=section.id; });
+      navLinks.forEach((link)=>link.classList.toggle('active',link.getAttribute('href')==='#'+current));
+    }
+    updateScrollState();
+    window.addEventListener('scroll',updateScrollState,{passive:true});
+    window.addEventListener('resize',updateScrollState);
+
+    // GSAP Parallax for data-parallax elements
+    parallaxEls.forEach((el) => {
+      const speed = Number(el.dataset.parallax || 0.06);
+      gsap.to(el, {
+        y: () => (window.innerHeight * speed),
+        ease: "none",
+        scrollTrigger: {
+          trigger: el.parentElement,
+          start: "top bottom",
+          end: "bottom top",
+          scrub: true
+        }
+      });
+    });
+
+    // ==========================================
+    // 核心区块重度滚动交互 (Heavy Scroll Scrub)
+    // ==========================================
+
+    // 5. Special Offers (特价爆款) - 3D 浮现与视差
+    const gsOfferCards = gsap.utils.toArray(".offers-grid .offer-card");
+    gsOfferCards.forEach((card, index) => {
+      card.style.transition = 'none';
+      gsap.fromTo(card,
+        { y: 200, rotationZ: index % 2 === 0 ? -3 : 3, scale: 0.9 },
+        {
+          y: 0,
+          rotationZ: 0,
+          scale: 1,
+          ease: "none",
+          scrollTrigger: {
+            trigger: card,
+            start: "top 100%",
+            end: "top 40%",
+            scrub: 2.5 
+          }
+        }
+      );
+    });
+
+    // 作品集分类过滤逻辑
+    const filterBtns = document.querySelectorAll('.pf-btn');
+    const portfolioGrid = document.getElementById('portfolioGrid');
+    const portfolioItems = document.querySelectorAll('.p-item');
+
+    filterBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        const filterValue = btn.getAttribute('data-filter');
+        
+        portfolioGrid.style.opacity = '0';
+        
+        setTimeout(() => {
+          portfolioItems.forEach(item => {
+            if (filterValue === 'all' || item.getAttribute('data-category') === filterValue) {
+              item.classList.remove('hidden');
+            } else {
+              item.classList.add('hidden');
+            }
+          });
+          portfolioGrid.style.opacity = '1';
+        }, 600);
+      });
+    });
+
+    const projectOverlay = document.getElementById('projectOverlay');
+    const projectOverlayPanel = projectOverlay?.querySelector('.project-overlay__panel');
+    const projectOverlayMedia = projectOverlay?.querySelector('.project-overlay__media');
+    const projectOverlayClose = document.getElementById('projectOverlayClose');
+    const projectOverlayImage = document.getElementById('projectOverlayImage');
+    const projectOverlayPrev = document.getElementById('projectOverlayPrev');
+    const projectOverlayNext = document.getElementById('projectOverlayNext');
+    const projectOverlayCount = document.getElementById('projectOverlayCount');
+    const projectOverlayMeta = document.getElementById('projectOverlayMeta');
+    const projectOverlayTitle = document.getElementById('projectOverlayTitle');
+    const projectOverlayDesc = document.getElementById('projectOverlayDesc');
+    const projectOverlaySpecs = document.getElementById('projectOverlaySpecs');
+    const projectOverlayConsultBtn = document.getElementById('projectOverlayConsultBtn');
+    let activeProjectIndex = -1;
+    let activeProjectImageIndex = 0;
+    let lastFocusEl = null;
+    let dragActive = false;
+    let dragStartX = 0;
+    let dragDeltaX = 0;
+
+    const extraGalleryPool = [
+      "assets/images/landing/img_18.png",
+      "assets/images/landing/img_19.jpeg",
+      "assets/images/landing/img_0.jpeg",
+      "assets/images/landing/img_1.png",
+      "assets/images/landing/img_2.jpeg",
+      "assets/images/landing/img_3.jpeg",
+      "assets/images/landing/img_4.jpeg",
+      "assets/images/landing/img_5.jpeg",
+      "assets/images/landing/img_6.jpeg",
+    ];
+
+    function getBgUrl(styleValue){
+      const m = String(styleValue || '').match(/url\((['"]?)(.*?)\1\)/);
+      return m?.[2] || '';
+    }
+
+    function uniqueSample(list, count, exclude){
+      const pool = list.filter((u)=>u && u!==exclude);
+      for(let i = pool.length - 1; i > 0; i--){
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      return pool.slice(0, count);
+    }
+
+    const projects = Array.from(portfolioItems).map((item, index) => {
+      const title = item.querySelector('h3')?.textContent?.trim() || `案例 ${index + 1}`;
+      const cat = item.querySelector('.p-cat')?.textContent?.trim() || '项目';
+      const primary = getBgUrl(item.querySelector('.p-image')?.style?.backgroundImage);
+      const images = [primary, ...uniqueSample(extraGalleryPool, 2, primary)].filter(Boolean);
+      const desc = `以“装饰 + 供暖 + 健康”一体化为导向，将石墨烯远红外发热层融入空间肌理。我们以隐形供暖、静音舒适与可定制饰面，完成从功能到情绪的整体交付。`;
+      const specs = [
+        { k: '价格', v: '¥ 100' }
+      ];
+
+      item.setAttribute('tabindex', '0');
+      item.setAttribute('role', 'button');
+      item.setAttribute('aria-label', `打开案例：${title}`);
+      item.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openProject(index);
+        }
+      });
+
+      return { title, cat, images, desc, specs };
+    });
+
+    const offerCards = document.querySelectorAll('.offer-card');
+    
+    const offerProjects = Array.from(offerCards).map((item, index) => {
+      const title = item.querySelector('h3')?.textContent?.trim() || `产品 ${index + 1}`;
+      const cat = item.querySelector('.eyebrow')?.textContent?.trim() || '特价单品';
+      const primary = getBgUrl(item.querySelector('.offer-image')?.style?.backgroundImage);
+      const images = [primary, ...uniqueSample(extraGalleryPool, 2, primary)].filter(Boolean);
+      const desc = item.querySelector('.desc')?.textContent?.trim() || '';
+      
+      const priceValue = item.querySelector('.price strong')?.textContent?.trim() || '100';
+      const priceCurrency = item.querySelector('.price .currency')?.textContent?.trim() || '¥';
+      const originalPrice = item.querySelector('.price del')?.textContent?.trim();
+      const specs = [
+        { 
+          k: '活动价', 
+          v: `${priceCurrency} ${priceValue}${originalPrice ? ` <del>${originalPrice}</del>` : ''}` 
+        }
+      ];
+
+      // Make offer cards clickable to open the overlay
+      item.style.cursor = 'pointer';
+      item.setAttribute('tabindex', '0');
+      item.setAttribute('role', 'button');
+      item.setAttribute('aria-label', `产品详情：${title}`);
+      
+      const clickHandler = (e) => {
+        // Prevent opening if they clicked the 'buy-btn' specifically
+        if(e.target.closest('.buy-btn')) return;
+        e.preventDefault();
+        openProject(index, true); // true indicates it's an offer, not a portfolio item
+      };
+      
+      item.addEventListener('click', clickHandler);
+      item.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          clickHandler(e);
+        }
+      });
+
+      return { title, cat, images, desc, specs };
+    });
+
+    let isViewingOffer = false;
+
+    function renderProject(){
+      const data = isViewingOffer ? offerProjects[activeProjectIndex] : projects[activeProjectIndex];
+      if(!data) return;
+      activeProjectImageIndex = Math.max(0, Math.min(activeProjectImageIndex, data.images.length - 1));
+      const img = data.images[activeProjectImageIndex];
+      projectOverlayImage.style.backgroundImage = `url("${img}")`;
+      projectOverlayCount.textContent = `${activeProjectImageIndex + 1} / ${data.images.length}`;
+      projectOverlayMeta.textContent = data.cat;
+      projectOverlayTitle.textContent = data.title;
+      projectOverlayDesc.textContent = data.desc;
+      const price = data.specs?.[0];
+      projectOverlaySpecs.innerHTML = price ? `<div class="project-overlay__price"><div class="project-overlay__price-label">${price.k}</div><div class="project-overlay__price-value">${price.v}</div></div>` : '';
+    }
+
+    function openProject(index, isOffer = false){
+      if(!projectOverlay) return;
+      isViewingOffer = isOffer;
+      activeProjectIndex = index;
+      activeProjectImageIndex = 0;
+      renderProject();
+      lastFocusEl = document.activeElement;
+      projectOverlay.classList.add('is-open');
+      projectOverlay.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('overlay-open');
+      setTimeout(()=>projectOverlayClose?.focus?.(), 0);
+    }
+
+    function closeProject(){
+      if(!projectOverlay) return;
+      projectOverlay.classList.remove('is-open');
+      projectOverlay.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('overlay-open');
+      activeProjectIndex = -1;
+      activeProjectImageIndex = 0;
+      lastFocusEl?.focus?.();
+    }
+
+    function nextProjectImage(dir){
+      const data = isViewingOffer ? offerProjects[activeProjectIndex] : projects[activeProjectIndex];
+      if(!data) return;
+      activeProjectImageIndex = (activeProjectImageIndex + dir + data.images.length) % data.images.length;
+      renderProject();
+      gsap.fromTo(projectOverlayImage, { opacity: 0.2, scale: 1.06 }, { opacity: 1, scale: 1.02, duration: 0.7, ease: "power3.out" });
+    }
+
+    portfolioGrid?.addEventListener('click', (e) => {
+      const item = e.target.closest('.p-item');
+      if(!item) return;
+      const index = Array.from(portfolioItems).indexOf(item);
+      if(index >= 0) openProject(index);
+    });
+
+    projectOverlay?.addEventListener('click', (e) => {
+      const closeHit = e.target.closest('[data-close="true"]');
+      if(closeHit) closeProject();
+    });
+    projectOverlayClose?.addEventListener('click', closeProject);
+    projectOverlayPrev?.addEventListener('click', () => nextProjectImage(-1));
+    projectOverlayNext?.addEventListener('click', () => nextProjectImage(1));
+    projectOverlayPanel?.addEventListener('click', (e) => e.stopPropagation());
+    projectOverlayMedia?.addEventListener('pointerdown', (e) => {
+      if(!projectOverlay?.classList.contains('is-open')) return;
+      dragActive = true;
+      dragStartX = e.clientX;
+      dragDeltaX = 0;
+      projectOverlayMedia.setPointerCapture?.(e.pointerId);
+    });
+    projectOverlayMedia?.addEventListener('pointermove', (e) => {
+      if(!dragActive) return;
+      dragDeltaX = e.clientX - dragStartX;
+      const damp = Math.max(-140, Math.min(140, dragDeltaX));
+      gsap.set(projectOverlayImage, { x: damp, rotate: damp * -0.02, scale: 1.03 });
+    });
+    projectOverlayMedia?.addEventListener('pointerup', () => {
+      if(!dragActive) return;
+      dragActive = false;
+      const threshold = 60;
+      const dir = dragDeltaX < -threshold ? 1 : dragDeltaX > threshold ? -1 : 0;
+      gsap.to(projectOverlayImage, { x: 0, rotate: 0, scale: 1.02, duration: 0.35, ease: "power3.out" });
+      if(dir) nextProjectImage(dir);
+    });
+    projectOverlayMedia?.addEventListener('pointercancel', () => {
+      dragActive = false;
+      gsap.to(projectOverlayImage, { x: 0, rotate: 0, scale: 1.02, duration: 0.35, ease: "power3.out" });
+    });
+    projectOverlayMedia?.addEventListener('wheel', (e) => {
+      if(!projectOverlay?.classList.contains('is-open')) return;
+      e.preventDefault();
+      if(Math.abs(e.deltaY) < 6) return;
+      nextProjectImage(e.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
+
+    window.addEventListener('keydown', (e) => {
+      if(!projectOverlay?.classList.contains('is-open')) return;
+      if(e.key === 'Escape') closeProject();
+      if(e.key === 'ArrowLeft') nextProjectImage(-1);
+      if(e.key === 'ArrowRight') nextProjectImage(1);
+      if(e.key === 'Tab') {
+        const focusables = Array.from(projectOverlay.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')).filter((el)=>!el.hasAttribute('disabled'));
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if(!first || !last) return;
+        if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+        else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+      }
+    });
+
+
+
+    if(video && videoToggle){
+      const syncVideoButton=()=>videoToggle.classList.toggle('is-playing',!video.paused);
+      video.addEventListener('pause',syncVideoButton);
+      video.addEventListener('ended',syncVideoButton);
+      syncVideoButton();
+    }
+
+    const marketData={
+      national:{summary:'当前视图聚焦全领域应用。点击下面的场景标签，可以切换不同空间的数据重心和机会说明。',labels:['星级酒店','医院康养','高端住宅','机场/地铁','影院/教育'],values:[91,84,76,69,52]},
+      east:{summary:'星级酒店对供暖的隐形美观度和舒适度要求极高，石墨烯发热板无风无音的特性完美契合。',labels:['大堂/接待','客房/套房','洗浴中心','行政酒廊','会议中心'],values:[96,89,83,79,72]},
+      south:{summary:'医院与康养中心关注安全与健康，生命光波理疗与零甲醛、A2级防火成为核心竞争力。',labels:['康复病房','理疗中心','养老公寓','休闲区','医护值班室'],values:[94,88,81,77,70]},
+      north:{summary:'高端住宅业主更注重个性化定制与智能控制，志林科技提供丰富的饰面选择与变频技术。',labels:['客厅/大平层','卧室/书房','全屋地暖','浴室/桑拿','地下影音室'],values:[90,82,78,73,61]}
+    };
+    const marketSummary=document.getElementById('marketSummary');
+    const labels=['A','B','C','D','E'].map((k)=>document.getElementById('label'+k));
+    const values=['A','B','C','D','E'].map((k)=>document.getElementById('value'+k));
+    const fills=['a','b','c','d','e'].map((k)=>document.querySelector('[data-fill="'+k+'"]'));
+    const tabs=document.querySelectorAll('.market-tab');
+    function updateMarket(key){
+      const data=marketData[key];
+      if(!data) return;
+      marketSummary.textContent=data.summary;
+      data.labels.forEach((label,index)=>labels[index].textContent=label);
+      data.values.forEach((value,index)=>{ values[index].textContent=value+'%'; fills[index].style.width=value+'%'; });
+      tabs.forEach((tab)=>tab.classList.toggle('is-active',tab.dataset.market===key));
+    }
+    tabs.forEach((tab)=>tab.addEventListener('click',()=>updateMarket(tab.dataset.market)));
+    setTimeout(()=>{ updateMarket('national'); },120);
+
+    // 虚拟IP交互逻辑
+    const ipContainer = document.querySelector('.ip-avatar-container');
+    const chatBubble = document.getElementById('chatBubble');
+    const closeBtn = document.querySelector('.close-btn');
+    const actionBtns = document.querySelectorAll('.action-btn');
+
+    // 切换对话框
+    ipContainer.addEventListener('click', () => {
+      chatBubble.classList.toggle('is-open');
+    });
+
+    // 关闭按钮
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // 阻止事件冒泡到外层
+      chatBubble.classList.remove('is-open');
+    });
+
+    // 动作按钮点击反馈
+    const chatHistory = document.getElementById('chatHistory');
+    
+    actionBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const text = e.target.textContent;
+        const targetSelector = e.target.getAttribute('data-target');
+        
+        // 1. 增加用户消息气泡
+        const userMsg = document.createElement('div');
+        userMsg.className = 'msg msg-user';
+        userMsg.innerHTML = `<p>${text}</p>`;
+        chatHistory.appendChild(userMsg);
+        
+        // 滚动到底部
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+
+        // 隐藏当前点击的按钮（可选体验优化）
+        e.target.style.display = 'none';
+
+        // 2. 模拟客服正在输入和回复
+        setTimeout(() => {
+          const aiMsg = document.createElement('div');
+          aiMsg.className = 'msg msg-ai';
+          aiMsg.innerHTML = `<p>好的，马上为您跳转到相关区域，请稍等...</p>`;
+          chatHistory.appendChild(aiMsg);
+          chatHistory.scrollTop = chatHistory.scrollHeight;
+          
+          // 3. 触发平滑滚动跳转
+          setTimeout(() => {
+            const targetEl = document.querySelector(targetSelector);
+            if(targetEl) {
+              const offsetTop = targetEl.getBoundingClientRect().top + window.scrollY - 80; // 减去顶栏高度
+              window.scrollTo({ top: offsetTop, behavior: 'smooth' });
+              
+              // 跳转完成后更新回复，并恢复按钮
+              setTimeout(() => {
+                aiMsg.innerHTML = `<p>已经为您跳转！您可以浏览相关内容，还有其他需要了解的吗？</p>`;
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+                e.target.style.display = 'block'; // 恢复按钮
+              }, 800);
+            }
+          }, 600);
+        }, 500);
+      });
+    });
+
+    // 自主输入对话逻辑
+    const chatInput = document.getElementById('chatInput');
+    const chatSendBtn = document.getElementById('chatSendBtn');
+
+    function handleSendMsg() {
+      const text = chatInput.value.trim();
+      if (!text) return;
+      
+      // 1. 用户消息
+      const userMsg = document.createElement('div');
+      userMsg.className = 'msg msg-user';
+      userMsg.innerHTML = `<p>${text}</p>`;
+      chatHistory.appendChild(userMsg);
+      chatInput.value = '';
+      chatHistory.scrollTop = chatHistory.scrollHeight;
+
+      // 2. AI 模拟回复
+      setTimeout(() => {
+        const aiMsg = document.createElement('div');
+        aiMsg.className = 'msg msg-ai';
+        aiMsg.innerHTML = `<p>好的，我已收到您的咨询：<b>“${text}”</b>。<br>我们的招商经理会在稍后通过微信与您详细沟通，请您留意！</p>`;
+        chatHistory.appendChild(aiMsg);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+      }, 600);
+    }
+
+    chatSendBtn.addEventListener('click', handleSendMsg);
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        handleSendMsg();
+      }
+    });
+
+    function openChatWithMessage(message){
+      chatBubble.classList.add('is-open');
+      const userMsg = document.createElement('div');
+      userMsg.className = 'msg msg-user';
+      userMsg.innerHTML = `<p>${message}</p>`;
+      chatHistory.appendChild(userMsg);
+      chatHistory.scrollTop = chatHistory.scrollHeight;
+      setTimeout(() => {
+        const aiMsg = document.createElement('div');
+        aiMsg.className = 'msg msg-ai';
+        aiMsg.innerHTML = `<p>收到！我马上为您安排招商经理对接。方便留一下您的联系方式吗？</p>`;
+        chatHistory.appendChild(aiMsg);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+      }, 500);
+      setTimeout(()=>chatInput?.focus?.(), 0);
+    }
+
+    projectOverlayConsultBtn?.addEventListener('click', () => {
+      const data = projects[activeProjectIndex];
+      if(!data) return;
+      closeProject();
+      openChatWithMessage(`我想了解案例：${data.title}（${data.cat}）`);
+    });
+
+    document.querySelectorAll('.buy-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const product = btn.closest('.offer-card')?.querySelector('h3')?.textContent?.trim() || '特价产品';
+        openChatWithMessage(`我想了解特价：${product}`);
+      });
+    });
+
+    // 页面加载后自动弹出提示
+    setTimeout(() => {
+      if (!chatBubble.classList.contains('is-open')) {
+        chatBubble.classList.add('is-open');
+        // 5秒后自动关闭（如果用户没有交互的话）
+        setTimeout(() => {
+          chatBubble.classList.remove('is-open');
+        }, 5000);
+      }
+    }, 3000);
+
+  </script>
+      </body>
+</html>
+

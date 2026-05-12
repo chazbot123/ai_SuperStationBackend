@@ -6,6 +6,7 @@ export type PageKey =
   | "publishing"
   | "products"
   | "assets"
+  | "customerManagement"
   | "videos"
   | "support"
   | "personalization"

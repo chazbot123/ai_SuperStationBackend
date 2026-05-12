@@ -111,7 +111,7 @@ export function createDemoSeed() {
       assets: false,
       videos: true,
       support: false,
-      personalization: false,
+      personalization: true,
       agents: false,
       rules: false,
       reviews: false,

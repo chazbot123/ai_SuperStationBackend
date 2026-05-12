@@ -1,9 +1,12 @@
 import {
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { Prisma, ProductStatus } from '@prisma/client';
+import { AiService } from '../ai/ai.service';
 import { SessionUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAIN_COMPANY_ROLE_KEY } from '../rbac/rbac.constants';
@@ -32,6 +35,8 @@ export class ProductsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly productImageStorageService: ProductImageStorageService,
+    @Inject(forwardRef(() => AiService))
+    private readonly aiService: AiService,
   ) {}
 
   uploadImage(user: SessionUser, file?: ProductUploadFile) {
@@ -71,7 +76,23 @@ export class ProductsService {
     };
   }
 
+  async listPublicByUser(userId: string) {
+    const items = await this.prisma.product.findMany({
+      where: {
+        creatorId: userId,
+        status: ProductStatus.live,
+      },
+      orderBy: [{ sortOrder: 'asc' }, { updatedAt: 'desc' }],
+      include: productInclude,
+    });
+
+    return {
+      items: items.map((item) => this.serializePublicProduct(item)),
+    };
+  }
+
   async create(user: SessionUser, dto: CreateProductDto) {
+    const nextEnglishName = dto.englishName?.trim() || (await this.buildEnglishName(dto.name, user.userId));
     this.validatePriceFields({
       specialOfferEnabled: dto.specialOfferEnabled ?? false,
       priceText: dto.priceText?.trim() || '',
@@ -83,7 +104,7 @@ export class ProductsService {
       data: {
         creatorId: user.userId,
         name: dto.name.trim(),
-        englishName: dto.englishName?.trim() || this.buildEnglishName(dto.name),
+        englishName: nextEnglishName,
         summary: dto.summary?.trim() || '请补充商品卖点',
         priceText: dto.specialOfferEnabled ? '' : dto.priceText?.trim() || '0',
         specialOfferEnabled: dto.specialOfferEnabled ?? false,
@@ -117,6 +138,12 @@ export class ProductsService {
     this.ensureEditable(user, existing.status);
 
     const nextName = dto.name?.trim() || existing.name;
+    const nextEnglishName =
+      dto.englishName !== undefined
+        ? dto.englishName.trim() || (await this.buildEnglishName(nextName, user.userId))
+        : dto.name !== undefined
+          ? await this.buildEnglishName(nextName, user.userId)
+          : existing.englishName;
     const nextSpecialOfferEnabled =
       dto.specialOfferEnabled ?? existing.specialOfferEnabled;
     this.validatePriceFields({
@@ -138,9 +165,7 @@ export class ProductsService {
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: nextName } : {}),
-        ...(dto.englishName !== undefined
-          ? { englishName: dto.englishName.trim() || this.buildEnglishName(nextName) }
-          : { englishName: this.buildEnglishName(nextName) }),
+        englishName: nextEnglishName,
         ...(dto.summary !== undefined
           ? { summary: dto.summary.trim() || '请补充商品卖点' }
           : {}),
@@ -223,6 +248,29 @@ export class ProductsService {
         status: ProductStatus.submitted,
         submittedAt: new Date(),
         rejectReason: null,
+      },
+      include: productInclude,
+    });
+
+    return this.serializeProduct(product);
+  }
+
+  async withdrawSubmission(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleProduct(user, id);
+
+    if (this.isMainCompany(user)) {
+      throw new ForbiddenException('主公司商品无需撤销审核');
+    }
+
+    if (existing.status !== ProductStatus.submitted) {
+      throw new ForbiddenException('仅待审核商品可撤销审核');
+    }
+
+    const product = await this.prisma.product.update({
+      where: { id },
+      data: {
+        status: ProductStatus.draft,
+        submittedAt: null,
       },
       include: productInclude,
     });
@@ -315,8 +363,8 @@ export class ProductsService {
     return this.serializeProduct(product);
   }
 
-  inferEnglishName(name: string) {
-    return { englishName: this.buildEnglishName(name) };
+  async inferEnglishName(user: SessionUser, name: string) {
+    return { englishName: await this.buildEnglishName(name, user.userId) };
   }
 
   private async findAccessibleProduct(user: SessionUser, id: string) {
@@ -409,6 +457,25 @@ export class ProductsService {
     };
   }
 
+  private serializePublicProduct(product: ProductWithRelations) {
+    return {
+      id: product.id,
+      ownerUserId: product.creatorId,
+      name: product.name,
+      englishName: product.englishName,
+      summary: product.summary,
+      priceText: product.priceText,
+      specialOfferEnabled: product.specialOfferEnabled,
+      originalPriceText: product.originalPriceText,
+      specialPriceText: product.specialPriceText,
+      specialTag: product.specialTag,
+      description: product.description,
+      images: product.images.map((image) => image.imageUrl),
+      sortOrder: product.sortOrder,
+      updatedAt: product.updatedAt,
+    };
+  }
+
   private validatePriceFields(
     input: {
       specialOfferEnabled: boolean;
@@ -432,7 +499,62 @@ export class ProductsService {
     }
   }
 
-  private buildEnglishName(name: string) {
+  private async buildEnglishName(name: string, userId?: string) {
+    const aiEnglishName = await this.buildEnglishNameWithAi(name, userId);
+    if (aiEnglishName) {
+      return aiEnglishName;
+    }
+
+    return this.buildEnglishNameFallback(name);
+  }
+
+  private async buildEnglishNameWithAi(name: string, userId?: string) {
+    const raw = name.trim();
+    if (!raw) {
+      return '';
+    }
+
+    try {
+      const response = await this.aiService.generateTextReply({
+        system: [
+          '你是产品英文命名助手。',
+          '请把给定的中文产品名翻译成自然、简洁、适合商品展示的英文产品名。',
+          '输出必须是英文，不要拼音，不要解释，不要引号，不要序号，不要多行。',
+          '只保留 2 到 6 个英文单词。',
+          '结果统一使用小写英文单词并用短横线连接，例如 graphene-heating-bed。',
+        ].join(''),
+        user: `产品名：${raw}`,
+        errorLabel: '产品英文名生成失败',
+        userId,
+      });
+
+      return this.normalizeEnglishName(response.text);
+    } catch {
+      return '';
+    }
+  }
+
+  private normalizeEnglishName(value: string) {
+    const normalized = value
+      .trim()
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)[0]
+      ?.replace(/^english-name\s*[:：-]\s*/i, '')
+      ?.replace(/^product-name\s*[:：-]\s*/i, '')
+      ?.replace(/^name\s*[:：-]\s*/i, '')
+      ?.replace(/["'`]/g, '')
+      ?.toLowerCase()
+      ?.replace(/&/g, ' and ')
+      ?.replace(/[^a-z0-9\s-]/g, ' ')
+      ?.replace(/[\s_-]+/g, '-')
+      ?.replace(/-+/g, '-')
+      ?.replace(/^-+|-+$/g, '');
+
+    return normalized || '';
+  }
+
+  private buildEnglishNameFallback(name: string) {
     const normalized = name
       .trim()
       .toLowerCase()
@@ -440,6 +562,10 @@ export class ProductsService {
       .replace(/\s+/g, ' ')
       .trim();
 
-    return normalized ? normalized.replace(/\s+/g, '-') : `product-${Date.now()}`;
+    if (normalized) {
+      return normalized.replace(/\s+/g, '-');
+    }
+
+    return `product-${Date.now()}`;
   }
 }

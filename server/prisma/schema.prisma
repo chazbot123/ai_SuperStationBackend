@@ -80,11 +80,110 @@ enum KnowledgeDocumentJobStatus {
   failed
 }
 
-/// 名片模板标识
-enum BusinessCardTemplateKey {
-  classic_blue
-  dark_grid
-  light_modern
+enum LeadContentSourceType {
+  social
+  product
+  video
+  manual
+}
+
+enum LeadContentType {
+  copy
+  image_text
+  video
+  product_asset
+}
+
+enum LeadContentStatus {
+  active
+  archived
+  deleted
+}
+
+enum LeadPublishPlatform {
+  xiaohongshu
+  douyin
+  wechat_mp
+  kuaishou
+}
+
+enum LeadPublishStatus {
+  queued
+  running
+  success
+  failed
+}
+
+enum LeadPublishMode {
+  draft_box
+}
+
+enum PlatformAccountAuthType {
+  cookie
+  token
+}
+
+enum PlatformAccountStatus {
+  saved
+  valid
+  invalid
+  disabled
+}
+
+enum PlatformAccountLoginStatus {
+  idle
+  pending
+  authenticated
+  failed
+  cancelled
+}
+
+enum SupportConversationStatus {
+  ai_chat
+  handoff_requested
+  queueing
+  human_chat
+  ended
+}
+
+enum SupportMessageRole {
+  visitor
+  ai
+  agent
+  system
+}
+
+enum SupportHandoffStatus {
+  pending
+  accepted
+  closed
+  cancelled
+}
+
+enum CustomerSourcePlatform {
+  super_site
+  douyin
+  xiaohongshu
+  video_channel
+  kuaishou
+  gaode_map
+}
+
+enum VideoDraftSource {
+  product_video
+  avatar_video
+}
+
+enum VideoDraftStatus {
+  ready
+  processing
+  failed
+}
+
+enum SuperSiteIndustrySourceType {
+  manual
+  rss
+  html
 }
 
 model User {
@@ -106,8 +205,10 @@ model User {
   updatedAt    DateTime      @updatedAt
   /// 用户名下的设备会话
   sessions     UserSession[]
-  /// 用户唯一企业名片
-  businessCard BusinessCard?
+  /// 用户唯一超级站配置
+  superSiteSetting SuperSiteSetting?
+  /// 用户维护的超级站行业信息
+  superSiteIndustryItems SuperSiteIndustryItem[]
   /// 代理绑定关系
   agentBinding Agent?
   /// 用户创建的商品列表
@@ -116,7 +217,56 @@ model User {
   socialGeneratedPosts SocialGeneratedPost[]
   /// 用户上传的知识库文档
   knowledgeDocuments   KnowledgeDocument[]
+  /// 用户创建的获客内容池内容
+  leadContents         LeadContent[]
+  /// 用户发起的发布任务
+  leadPublishJobs      LeadPublishJob[]
+  /// 用户维护的门店搜索关键词配置
+  leadStoreSearchConfig LeadStoreSearchConfig?
+  /// 用户维护的平台登录账号
+  platformAccounts     LeadPlatformAccount[]
+  /// 用户生成的商品图草稿
+  productImageDrafts   ProductImageDraft[]
+  /// 用户生成的视频草稿
+  videoDrafts         VideoDraft[]
+  /// 被分配的客服会话
+  assignedSupportConversations SupportConversation[] @relation("SupportConversationAssignee")
+  /// 人工客服发送的消息
+  supportMessages           SupportMessage[]         @relation("SupportMessageAgent")
+  /// 已接线的转人工记录
+  acceptedSupportHandoffs   SupportHandoff[]         @relation("SupportHandoffAcceptor")
   videoMainTasks       VideoMainTask[]
+}
+
+model LeadStoreSearchConfig {
+  /// 门店搜索配置主键
+  id        String   @id @default(cuid())
+  /// 关联用户 ID
+  userId    String   @unique
+  /// 关键词配置
+  keywords  Json
+  /// 已保存的省份 adcode
+  provinceAdcode String?
+  /// 已保存的省份名称
+  provinceName   String?
+  /// 已保存的城市 adcode
+  cityAdcode     String?
+  /// 已保存的城市名称
+  cityName       String?
+  /// 已保存的区县 adcode
+  districtAdcode String?
+  /// 已保存的区县名称
+  districtName   String?
+  /// 已保存的街道 adcode
+  streetAdcode   String?
+  /// 已保存的街道名称
+  streetName     String?
+  /// 创建时间
+  createdAt DateTime @default(now())
+  /// 更新时间
+  updatedAt DateTime @updatedAt
+  /// 关联用户
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UserSession {
@@ -146,31 +296,92 @@ model UserSession {
   @@index([userId, status, loggedInAt])
 }
 
-model BusinessCard {
-  /// 名片主键
-  id            String                  @id @default(cuid())
-  /// 每个用户只有一张名片
-  userId        String                  @unique
-  /// 公司名称
-  companyName   String
-  /// 职位头衔
-  jobTitle      String
-  /// 联系电话
-  phone         String
-  /// 联系邮箱
-  email         String
-  /// 经营范围描述
-  businessScope String
-  /// 封面图 URL（存 MinIO）
-  coverImageUrl String?
-  /// 名片模板标识
-  templateKey   BusinessCardTemplateKey @default(classic_blue)
+model SuperSiteSetting {
+  /// 配置主键
+  id                    String   @id @default(cuid())
+  /// 每个用户只有一份超级站配置
+  userId                String   @unique
+  /// 企业名称
+  enterpriseName        String   @default("示例科技")
+  /// 超级站模板标识
+  siteTemplate          String   @default("standard")
+  /// 超级站模块配置
+  siteModules           Json
+  /// 运营指标配置
+  siteMetrics           Json
+  /// 特价区标题
+  specialOfferTitle     String   @default("特价商品专区")
+  /// 特价区副标题
+  specialOfferSubtitle  String   @default("支持首页插入限时优惠、秒杀引导与爆款推荐")
+  /// 特价商品配置
+  specialOffers         Json
+  /// 超级站前台地址
+  superSiteBaseUrl      String   @default("")
+  /// 首页与样板店图片槽位配置
+  siteImageSlots        Json?
+  /// 行业抓取来源配置
+  industrySourceConfigs Json?
+  /// 行业关键词配置
+  industryKeywords      Json?
+  /// 行业刷新配置
+  industryRefreshConfig Json?
+  /// 最近同步时间
+  industryLastSyncAt    DateTime?
+  /// 最近同步状态
+  industryLastSyncStatus String?
+  /// 最近同步错误
+  industryLastSyncError String?
   /// 创建时间
-  createdAt     DateTime                @default(now())
+  createdAt             DateTime @default(now())
   /// 更新时间
-  updatedAt     DateTime                @updatedAt
-  /// 关联的用户
-  user          User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt             DateTime @updatedAt
+  /// 关联用户
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SuperSiteIndustryItem {
+  /// 行业信息主键
+  id           String                    @id @default(cuid())
+  /// 所属用户 ID
+  userId       String
+  /// 来源类型
+  sourceType   SuperSiteIndustrySourceType
+  /// 来源标识
+  sourceKey    String
+  /// 标题
+  title        String
+  /// 摘要
+  summary      String
+  /// 封面图
+  coverImage   String?
+  /// 原始来源链接
+  sourceUrl    String?
+  /// 原始发布时间
+  publishedAt  DateTime?
+  /// 排序值
+  sortOrder    Int                       @default(0)
+  /// 是否置顶
+  isPinned     Boolean                   @default(false)
+  /// 是否启用
+  enabled      Boolean                   @default(true)
+  /// 是否为手工创建
+  manualCreated Boolean                  @default(false)
+  /// 抓取原始载荷
+  rawPayload   Json?
+  /// 去重哈希
+  crawlHash    String?
+  /// 创建时间
+  createdAt    DateTime                  @default(now())
+  /// 更新时间
+  updatedAt    DateTime                  @updatedAt
+  /// 所属用户
+  user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sourceKey, sourceUrl], map: "super_site_industry_item_user_source_url_unique")
+  @@unique([crawlHash])
+  @@index([userId, enabled, isPinned, sortOrder])
+  @@index([userId, sourceType, publishedAt])
+  @@index([userId, createdAt])
 }
 
 model Product {
@@ -250,6 +461,8 @@ model SocialGeneratedPost {
   prompt          String                @default("")
   /// 生成正文
   body            String
+  /// 平台标签列表
+  tags            String[]              @default([])
   /// 平台风格
   style           String
   /// 尺寸预设
@@ -271,6 +484,225 @@ model SocialGeneratedPost {
 
   @@index([creatorId, createdAt])
   @@index([createdAt])
+}
+
+model ProductImageDraft {
+  /// 商品图草稿主键
+  id               String   @id @default(cuid())
+  /// 创建者用户 ID
+  creatorId        String
+  /// 草稿标题
+  title            String
+  /// 草稿正文
+  body             String
+  /// 图片地址列表
+  images           String[]
+  /// 尺寸预设
+  sizePreset       String
+  /// 分辨率预设
+  resolution       String
+  /// 审核阶段
+  reviewStage      SocialPostReviewStage @default(draft)
+  /// 是否已同步获客
+  syncedToLeads    Boolean @default(false)
+  /// 是否已同步产品管理
+  syncedToProducts Boolean @default(false)
+  /// 创建时间
+  createdAt        DateTime @default(now())
+  /// 更新时间
+  updatedAt        DateTime @updatedAt
+  /// 关联创建者
+  creator          User     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId, createdAt])
+  @@index([createdAt])
+}
+
+model VideoDraft {
+  /// 视频草稿主键
+  id            String                @id @default(cuid())
+  /// 创建者用户 ID
+  creatorId     String
+  /// 草稿来源
+  source        VideoDraftSource
+  /// 草稿标题
+  title         String
+  /// 平台风格
+  platformStyle String?
+  /// 发布标题
+  publishTitle  String?
+  /// 发布标签
+  publishTags   String[]              @default([])
+  /// 完成时间
+  completedAt   DateTime?
+  /// 时长文本
+  durationText  String
+  /// 生成脚本
+  generatedScript String
+  /// 最终视频地址
+  videoUrl      String                @default("")
+  /// 外部任务 ID
+  taskId        String?
+  /// 服务商
+  provider      String?
+  /// 模型名
+  model         String?
+  /// 错误信息
+  errorMessage  String?
+  /// 审核阶段
+  reviewStage   SocialPostReviewStage @default(draft)
+  /// 草稿状态
+  status        VideoDraftStatus      @default(processing)
+  /// 是否已同步获客
+  syncedToLeads Boolean               @default(false)
+  /// 创建时间
+  createdAt     DateTime              @default(now())
+  /// 更新时间
+  updatedAt     DateTime              @updatedAt
+  /// 关联创建者
+  creator       User                  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId, createdAt])
+  @@index([creatorId, source, createdAt])
+  @@index([createdAt])
+}
+
+model LeadContent {
+  /// 获客内容主键
+  id           String                @id @default(cuid())
+  /// 创建者用户 ID
+  creatorId    String
+  /// 来源类型
+  sourceType   LeadContentSourceType
+  /// 来源记录 ID
+  sourceId     String?
+  /// 内容标题
+  title        String
+  /// 内容正文
+  body         String
+  /// 平台标签列表
+  tags         String[]           @default([])
+  /// 内容类型
+  contentType  LeadContentType
+  /// 平台风格
+  platformStyle LeadPublishPlatform
+  /// 封面图
+  coverImage   String?
+  /// 图片列表
+  images       String[]
+  /// 视频地址
+  videoUrl     String?
+  /// 内容状态
+  status       LeadContentStatus     @default(active)
+  /// 创建时间
+  createdAt    DateTime              @default(now())
+  /// 更新时间
+  updatedAt    DateTime              @updatedAt
+  /// 关联创建者
+  creator      User                  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  /// 发布任务列表
+  publishJobs  LeadPublishJob[]
+
+  @@index([creatorId, createdAt])
+  @@index([sourceType, sourceId])
+  @@index([status, createdAt])
+}
+
+model LeadPublishJob {
+  /// 发布任务主键
+  id           String             @id @default(cuid())
+  /// 内容池内容 ID
+  leadContentId String
+  /// 发起人用户 ID
+  createdById  String
+  /// 目标平台
+  platform     LeadPublishPlatform
+  /// 目标平台账号 ID
+  platformAccountId String?
+  /// 发布模式
+  publishMode  LeadPublishMode    @default(draft_box)
+  /// 任务状态
+  status       LeadPublishStatus  @default(queued)
+  /// 草稿标题快照
+  draftTitle   String             @default("")
+  /// 草稿正文快照
+  draftBody    String             @default("")
+  /// 草稿标签快照
+  draftTags    String[]           @default([])
+  /// 草稿图片列表快照
+  draftImages  String[]           @default([])
+  /// 草稿视频地址快照
+  draftVideoUrl String?
+  /// 草稿箱保存页地址
+  draftUrl     String?
+  /// 草稿保存时间
+  draftedAt    DateTime?
+  /// 错误信息
+  lastError    String?
+  /// 创建时间
+  createdAt    DateTime           @default(now())
+  /// 更新时间
+  updatedAt    DateTime           @updatedAt
+  /// 关联内容
+  leadContent  LeadContent        @relation(fields: [leadContentId], references: [id], onDelete: Cascade)
+  /// 关联发起人
+  createdBy    User               @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  /// 关联平台账号
+  platformAccount LeadPlatformAccount? @relation(fields: [platformAccountId], references: [id], onDelete: SetNull)
+
+  @@index([leadContentId, createdAt])
+  @@index([createdById, createdAt])
+  @@index([platform, status, createdAt])
+  @@index([platformAccountId, createdAt])
+}
+
+model LeadPlatformAccount {
+  /// 平台账号主键
+  id                 String                  @id @default(cuid())
+  /// 创建人用户 ID
+  creatorId          String
+  /// 平台
+  platform           LeadPublishPlatform
+  /// 登录信息类型
+  authType           PlatformAccountAuthType @default(cookie)
+  /// 账号名称
+  accountName        String
+  /// 展示昵称
+  displayName        String?
+  /// 加密后的 Cookie / Token
+  authPayloadEncrypted String
+  /// 脱敏后的预览值
+  authPayloadPreview String
+  /// 托管浏览器会话目录
+  browserSessionPath  String?
+  /// 浏览器登录流状态
+  loginStatus         PlatformAccountLoginStatus @default(idle)
+  /// 最近登录发起时间
+  lastLoginStartedAt  DateTime?
+  /// 最近登录完成时间
+  lastLoginCompletedAt DateTime?
+  /// 最近登录页地址
+  loginUrl            String?
+  /// 当前状态
+  status             PlatformAccountStatus   @default(saved)
+  /// 备注
+  remark             String?
+  /// 最近校验时间
+  lastValidatedAt    DateTime?
+  /// 最近错误信息
+  lastError          String?
+  /// 创建时间
+  createdAt          DateTime                @default(now())
+  /// 更新时间
+  updatedAt          DateTime                @updatedAt
+  /// 关联创建人
+  creator            User                    @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  /// 关联发布任务
+  publishJobs        LeadPublishJob[]
+
+  @@unique([creatorId, platform, accountName])
+  @@index([platform, status, updatedAt])
+  @@index([creatorId, createdAt])
 }
 
 model VideoMainTask {
@@ -444,6 +876,129 @@ model KnowledgeDocumentJob {
   @@index([status, createdAt])
 }
 
+model SupportConversation {
+  /// 客服会话主键
+  id                String                    @id @default(cuid())
+  /// 渠道类型，第一版固定为 web
+  channel           String                    @default("web")
+  /// 匿名访客会话标识
+  visitorSessionId  String
+  /// 访客昵称
+  visitorName       String?
+  /// 访客联系方式
+  visitorContact    String?
+  /// 来源页面
+  sourcePage        String?
+  /// 会话状态
+  status            SupportConversationStatus @default(ai_chat)
+  /// 请求转人工时间
+  handoffRequestedAt DateTime?
+  /// 人工接线时间
+  humanTakenAt      DateTime?
+  /// 结束时间
+  endedAt           DateTime?
+  /// 最后消息时间
+  lastMessageAt     DateTime                  @default(now())
+  /// 当前接线客服 ID
+  assignedAgentId   String?
+  /// 创建时间
+  createdAt         DateTime                  @default(now())
+  /// 更新时间
+  updatedAt         DateTime                  @updatedAt
+  /// 当前接线客服
+  assignedAgent     User?                     @relation("SupportConversationAssignee", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  /// 会话消息
+  messages          SupportMessage[]
+  /// 转人工记录
+  handoffs          SupportHandoff[]
+
+  @@index([status, lastMessageAt])
+  @@index([visitorSessionId, createdAt])
+  @@index([assignedAgentId, status, updatedAt])
+}
+
+model SupportMessage {
+  /// 客服消息主键
+  id             String             @id @default(cuid())
+  /// 所属会话 ID
+  conversationId String
+  /// 消息角色
+  role           SupportMessageRole
+  /// 消息内容
+  content        String
+  /// AI 回复置信度
+  confidence     Float?
+  /// AI 来源片段摘要
+  sourcesJson    Json?
+  /// 人工客服用户 ID
+  agentUserId    String?
+  /// 创建时间
+  createdAt      DateTime           @default(now())
+  /// 所属会话
+  conversation   SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// 发送消息的人工客服
+  agentUser      User?              @relation("SupportMessageAgent", fields: [agentUserId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([role, createdAt])
+  @@index([agentUserId, createdAt])
+}
+
+model SupportHandoff {
+  /// 转人工记录主键
+  id               String               @id @default(cuid())
+  /// 所属会话 ID
+  conversationId   String
+  /// 转人工状态
+  status           SupportHandoffStatus @default(pending)
+  /// 排队序号
+  queueSerial      Int?
+  /// 发起时间
+  requestedAt      DateTime             @default(now())
+  /// 接线时间
+  acceptedAt       DateTime?
+  /// 关闭时间
+  closedAt         DateTime?
+  /// 接线客服用户 ID
+  acceptedByUserId String?
+  /// 所属会话
+  conversation     SupportConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// 接线客服
+  acceptedByUser   User?                @relation("SupportHandoffAcceptor", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, status, requestedAt])
+  @@index([status, requestedAt])
+  @@index([acceptedByUserId, status, requestedAt])
+}
+
+model CustomerLead {
+  /// 客户线索主键
+  id             String                 @id @default(cuid())
+  /// 客户姓名
+  name           String?
+  /// 手机号
+  phoneNumber    String?
+  /// 地址
+  address        String?
+  /// 备注
+  remark         String?
+  /// 微信号
+  wechatId       String?
+  /// 平台上的名字
+  platformName   String?
+  /// 平台来源
+  sourcePlatform CustomerSourcePlatform
+  /// 创建时间
+  createdAt      DateTime               @default(now())
+  /// 更新时间
+  updatedAt      DateTime               @updatedAt
+
+  @@index([sourcePlatform, createdAt])
+  @@index([phoneNumber])
+  @@index([wechatId])
+  @@index([name, createdAt])
+}
+
 model Agent {
   /// 一级代理主键
   id        String      @id @default(cuid())
@@ -503,6 +1058,7 @@ enum RbacPageKey {
   publishing
   products
   assets
+  customerManagement
   videos
   support
   personalization

@@ -1,0 +1,14 @@
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+
+const PUBLISH_PLATFORMS = ['xiaohongshu', 'douyin', 'wechat_mp', 'kuaishou'] as const;
+
+export class StartPlatformLoginDto {
+  @IsString()
+  @IsIn(PUBLISH_PLATFORMS)
+  platform!: (typeof PUBLISH_PLATFORMS)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  remark?: string;
+}

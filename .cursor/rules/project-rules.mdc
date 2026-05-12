@@ -1,0 +1,90 @@
+---
+description: 
+alwaysApply: true
+---
+
+# AI-SuperWeb 项目规则
+
+## 技术栈约束
+
+### Prisma 7（强制）
+- **不可用** `new PrismaClient()` 直连，必须使用 driver adapter：
+  ```ts
+  import { PrismaClient } from '@prisma/client'
+  import { PrismaPg } from '@prisma/adapter-pg'
+  import { Pool } from 'pg'
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+  const adapter = new PrismaPg(pool)
+  const prisma = new PrismaClient({ adapter })
+  ```
+- 连接串通过 `server/prisma.config.ts` + 环境变量注入，**不在 `schema.prisma` 里写 `datasource.url`**。
+- Schema 管理：目前用 `prisma db push`（原因：`migrate dev` 有 `pg_advisory_lock` 并发卡死问题）。Schema 稳定后切 `prisma migrate dev` → `prisma migrate deploy`。
+
+### 认证（强制）
+- 登录字段：`username`（非 `email`）+ `password` + `deviceId`（必填）+ `deviceName`（必填）。
+- 密码：**待接入 bcrypt**，当前为明文临时方案，禁止在此基础上继续扩展其他认证逻辑而不先修掉明文比对。
+- Session 枚举值（小写）：`active` / `revoked` / `squeezed`，对应代码中 `SessionStatus`。
+
+---
+
+## 文档规则
+
+### 核心原则：文档必须与运行时一致
+- **新增或修改接口 / Schema 后，必须同步更新 `docs/` 对应文档**，不允许文档落后代码。
+- 文档里的请求体示例、字段名、枚举值，必须与实际 DTO / Prisma schema 一致，不允许凭设计稿写示例。
+- **已实现 vs 规划中**必须区分：已落库的表和接口标注 ✅，规划中的不标注或注明「规划中，未落库」。
+
+### 禁止行为
+- 禁止在文档里写与实际代码不符的字段名（如写 `email` 但代码用 `username`）。
+- 禁止在文档里写不存在的接口请求体字段，或遗漏必填字段（如 `deviceId`）。
+- 禁止把规划表当作已实现表描述，不加任何区分。
+- 禁止 GPT/AI 生成的文档不经核对直接合入，必须对照实际 schema 和 service 层代码逐项校验。
+
+---
+
+## Schema 修改规则
+
+- 修改 `server/prisma/schema.prisma` 后，必须执行 `prisma db push`（或 migrate），确保数据库实际落库。
+- 修改枚举值或字段名后，必须同步修改：
+  1. `schema.prisma`
+  2. 相关 DTO（`*.dto.ts`）
+  3. Service 层引用
+  4. `docs/database-and-api.md` 对应表设计
+- 禁止在 schema 里保留与业务无关的字段（如 `tokenId` 如果实际不用，不要写在文档里）。
+
+---
+
+## 接口开发规则
+
+- 新增接口必须同时完成：Controller → Service → DTO → 文档更新。
+- DTO 字段与文档示例必须一致，一旦改 DTO 必须改文档。
+- 枚举值命名风格统一：Prisma enum 使用小写下划线（`active`、`squeezed`），TypeScript 类型层根据需要映射，文档跟 Prisma 保持一致。
+
+---
+
+## 当前已实现模块（基准线）
+
+数据库已落库的表（`prisma db push` 已执行）：
+- `User`（`username` 登录，`role` 枚举）
+- `UserSession`（设备会话，`active / revoked / squeezed`）
+- `BusinessCard`（字段：`companyName / jobTitle / phone / email / businessScope / coverImageUrl / templateKey`）
+- `Product`（`name / englishName / description / creatorId`）
+
+后端已实现模块：
+- `auth`：登录（`username + password + deviceId + deviceName`）、JWT、设备挤占（最多 2 台）
+- `business-cards`：每用户唯一 upsert（GET / PUT `/api/business-cards/me`）
+- `products`：CRUD 骨架（`/api/products`）
+
+基础设施：PostgreSQL / Redis / MinIO 均 healthy（Docker Compose）。
+
+**以上之外的模块（rbac / org / agent / content / review / rule / publish / asset / audit / settings）均为规划中，尚未实现。**
+
+---
+
+## 待办（禁止忽视）
+
+- [ ] 密码 bcrypt hash（`server/src/modules/auth/auth.service.ts`）
+- [ ] `BusinessCard` 字段 `jobTitle / businessScope` 在文档目标设计里要对齐（目标设计用 `position / business`，待统一命名）
+- [ ] `e2e` 测试修复：`beforeAll` 自建用户，`afterAll` 空指针兜底
+- [ ] Prisma migration 正式化（schema 稳定后从 `db push` 切 `migrate`）
+- [ ] 生产 Dockerfile（`server/Dockerfile`、前端 Dockerfile）和 `deploy/docker-compose.prod.yml`

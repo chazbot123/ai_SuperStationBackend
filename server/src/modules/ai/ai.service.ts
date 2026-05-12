@@ -15,18 +15,25 @@ import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ProductImageDraft,
   SocialGeneratedPost,
   SocialPostReviewStage,
+  VideoDraft,
+  VideoDraftStatus,
+  VideoDraftSource,
   VideoMainTaskStatus,
   VideoSubTaskStatus,
 } from '@prisma/client';
 import { SessionUser } from '../auth/auth.types';
+import { ProductImageStorageService } from '../products/product-image-storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAIN_COMPANY_ROLE_KEY } from '../rbac/rbac.constants';
 import {
   AiModelConfigCacheService,
   type StoredModelConfig,
 } from './ai-model-config-cache.service';
+import { CreateProductImageDraftDto } from './dto/create-product-image-draft.dto';
+import { CreateVideoDraftDto } from './dto/create-video-draft.dto';
 import { AiVideoConcatService } from './ai-video-concat.service';
 import { AiVideoStorageService } from './ai-video-storage.service';
 import { AiVideoTtsCacheService } from './ai-video-tts-cache.service';
@@ -37,8 +44,10 @@ import { GenerateImagesDto, ImageModelConfigInput } from './dto/generate-images.
 import { GeneratePlatformMetaDto } from './dto/generate-platform-meta.dto';
 import { GenerateVideoDto, VideoModelConfigInput } from './dto/generate-video.dto';
 import { GenerateSocialPostDto } from './dto/generate-social-post.dto';
+import { PromptPolishDto } from './dto/prompt-polish.dto';
 import { PolishPromptDto } from './dto/polish-prompt.dto';
 import { RecommendBgmDto } from './dto/recommend-bgm.dto';
+import { ReviewMaterialDecisionDto } from './dto/review-material-decision.dto';
 import { SaveModelConfigDto } from './dto/save-model-config.dto';
 import {
   getProviderPreset,
@@ -49,6 +58,9 @@ import {
   type ProviderProtocol,
 } from './model-provider-presets';
 import { TestModelConfigDto } from './dto/test-model-config.dto';
+import { UpdateProductImageDraftDto } from './dto/update-product-image-draft.dto';
+import { UpdateSocialPostDto } from './dto/update-social-post.dto';
+import { UpdateVideoDraftDto } from './dto/update-video-draft.dto';
 import { Queue, Worker, type Job, type JobsOptions } from 'bullmq';
 import IORedis from 'ioredis';
 
@@ -63,6 +75,13 @@ type ResolvedModelConfig = {
   modelName: string;
 };
 
+type GeneratedCopyPayload = {
+  title: string;
+  body: string;
+  tags: string[];
+};
+
+type ReviewMaterialSource = 'social' | 'product' | 'video';
 class UpstreamHttpError extends Error {
   constructor(
     public readonly statusCode: number,
@@ -98,6 +117,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly modelConfigCache: AiModelConfigCacheService,
+    private readonly productImageStorage: ProductImageStorageService,
     private readonly videoStorage: AiVideoStorageService,
     private readonly videoConcat: AiVideoConcatService,
     private readonly videoTtsCache: AiVideoTtsCacheService,
@@ -327,7 +347,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       if (!task) return;
       if (task.status !== VideoMainTaskStatus.processing) return;
 
-      const baseVideoConfig = await this.getEffectiveModelConfig('video');
+      const baseVideoConfig = await this.getEffectiveModelConfig('video', undefined, task.userId);
       const resolvedConfig = this.resolveAvatarVideoConfig(baseVideoConfig, {
         scriptChars: this.estimateAvatarScriptChars(task.fullScript),
       });
@@ -344,6 +364,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
       const { backgroundPlan, backgroundSeed } = await this.ensureAvatarBackgroundPlan({
         id: task.id,
+        userId: task.userId,
         backgroundLock: task.backgroundLock,
         backgroundSeed: task.backgroundSeed,
         backgroundPlan: task.backgroundPlan,
@@ -503,7 +524,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       if (!task) return;
       if (task.status !== VideoMainTaskStatus.processing) return;
 
-      const baseVideoConfig = await this.getEffectiveModelConfig('video');
+      const baseVideoConfig = await this.getEffectiveModelConfig('video', undefined, task.userId);
       const resolvedConfig = this.resolveAvatarVideoConfig(baseVideoConfig, {
         scriptChars: this.estimateAvatarScriptChars(task.fullScript),
       });
@@ -849,35 +870,28 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async generateCopy(dto: GenerateCopyDto) {
+  async generateCopy(user: SessionUser, dto: GenerateCopyDto) {
     const style = dto.style ?? 'xhs';
-    const format = dto.format ?? 'text';
     const productName = dto.productName?.trim() || '产品';
     const sellingPoints = dto.sellingPoints?.trim() || '更智能/更高效';
     const audience = dto.audience?.trim() || '泛用户';
     const prompt = dto.prompt?.trim() || '';
     const styleLabel = this.pickStyleLabel(style);
-    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig);
+    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig, user.userId);
 
     this.ensureModelEnabled('文字模型', resolvedConfig.enabled);
     this.ensureApiKey('文字模型', resolvedConfig.apiKey);
     this.ensureBaseUrl(resolvedConfig.baseUrl);
 
     try {
-      const system =
-        '你是一个擅长营销转化的中文内容创作助手。输出必须贴合用户输入，不要编造不存在的功能。';
-      const user = [
-        `请按${styleLabel}生成一条产品营销内容。`,
-        prompt ? `补充提示词：${prompt}` : '',
-        `产品名称：${productName}`,
-        `目标人群：${audience}`,
-        `核心卖点：${sellingPoints}`,
-        format === 'html'
-          ? '输出为简洁的HTML（仅使用h3/p/ul/li/br等基础标签）。'
-          : '输出为纯文本，段落清晰。',
-      ]
-        .filter(Boolean)
-        .join('\n');
+      const system = this.buildGenerateCopySystemPrompt();
+      const user = this.buildGenerateCopyUserPrompt({
+        styleLabel,
+        prompt,
+        productName,
+        audience,
+        sellingPoints,
+      });
       const content = await this.generateTextContent(resolvedConfig, {
         system,
         user,
@@ -886,21 +900,19 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       if (!content) {
         throw new BadGatewayException('文字模型未返回有效内容');
       }
-
-      if (format === 'html') {
-        return {
-          text: content,
-          html: content,
-          used: format,
-          provider: resolvedConfig.providerName,
-          model: resolvedConfig.modelName,
-        };
-      }
+      const generated = this.parseGeneratedCopyPayload(content, {
+        style,
+        productName,
+        prompt,
+      });
 
       return {
-        text: content,
-        html: `<h3>${productName}推荐</h3><p>${content.split('\n').join('<br/>')}</p>`,
-        used: format,
+        title: generated.title,
+        body: generated.body,
+        tags: generated.tags,
+        text: generated.body,
+        html: `<h3>${generated.title}</h3><p>${generated.body.split('\n').join('<br/>')}</p>`,
+        used: 'text',
         provider: resolvedConfig.providerName,
         model: resolvedConfig.modelName,
       };
@@ -909,7 +921,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async polishPrompt(dto: PolishPromptDto) {
+  async polishPrompt(user: SessionUser, dto: PolishPromptDto) {
     const text = dto.text?.trim() || '';
     if (!text) {
       throw new BadRequestException('请输入需要润色的内容');
@@ -917,7 +929,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     const mode = dto.mode ?? 'product_video';
     const platformStyle = dto.platformStyle ?? 'douyin';
-    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig);
+    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig, user.userId);
 
     this.ensureModelEnabled('文字模型', resolvedConfig.enabled);
     this.ensureApiKey('文字模型', resolvedConfig.apiKey);
@@ -1014,14 +1026,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('请输入提示词');
     }
 
-    const targetSeconds = Math.max(10, Math.min(300, Math.round(dto.targetSeconds)));
-    const targetMinutes = targetSeconds >= 60 ? Math.max(1, Math.round(targetSeconds / 60)) : 0;
+    const targetSeconds = Math.max(30, Math.min(300, Math.round(dto.targetSeconds)));
+    const targetMinutes = Math.max(1, Math.round(targetSeconds / 60));
     const platformStyle = dto.platformStyle ?? 'douyin';
     const platformLabel =
       platformStyle === 'xiaohongshu' ? '小红书' : platformStyle === 'wechat_mp' ? '视频号' : '抖音';
     const scene = dto.scene?.trim() || '';
     const style = dto.style?.trim() || '';
-    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig as TextModelConfigInput);
+    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig as TextModelConfigInput, user.userId);
 
     this.ensureModelEnabled('文字模型', resolvedConfig.enabled);
     this.ensureApiKey('文字模型', resolvedConfig.apiKey);
@@ -1029,10 +1041,6 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     const charsPerSecond = 4;
     const estimatedSeconds = targetSeconds;
-    const durationLine =
-      targetSeconds >= 60
-        ? `请为${platformLabel}平台生成一段“真人口播讲解”脚本，目标时长约 ${estimatedSeconds} 秒（约 ${targetMinutes} 分钟）。`
-        : `请为${platformLabel}平台生成一段“真人口播讲解”脚本，目标时长约 ${estimatedSeconds} 秒。`;
     const targetChars = targetSeconds * charsPerSecond;
     const minChars = Math.floor(targetChars * 0.85);
     const maxChars = Math.floor(targetChars * 1.15);
@@ -1041,7 +1049,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       const system =
         '你是一个中文真人口播脚本编写助手。只输出脚本文本，不要解释，不要使用Markdown，不要输出标题编号或列表符号。不得编造不存在的信息与承诺。必须保留用户给出的品牌名、产品名、数字、链接、占位符（例如 {xx}、{{xx}}、[xx]）含义不变。';
       const userPrompt = [
-        durationLine,
+        `请为${platformLabel}平台生成一段“真人口播讲解”脚本，目标时长约 ${estimatedSeconds} 秒（约 ${targetMinutes} 分钟）。`,
         `脚本应口语化、节奏清晰、停顿自然，适合一位主播正对镜头连续讲解；不要出现“镜头一/二/三”或分镜描述；不要出现括号舞台提示。`,
         `字数控制在 ${minChars}-${maxChars} 个中文字符左右（不含空格与标点不强制），尽量接近目标时长。`,
         scene ? `内容场景：${scene}` : '',
@@ -1078,7 +1086,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async generatePlatformMeta(dto: GeneratePlatformMetaDto) {
+  async generatePlatformMeta(user: SessionUser, dto: GeneratePlatformMetaDto) {
     const text = dto.text?.trim() || '';
     if (!text) {
       throw new BadRequestException('请输入内容');
@@ -1086,7 +1094,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     const mode = dto.mode ?? 'product_video';
     const platformStyle = dto.platformStyle ?? 'douyin';
-    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig);
+    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig, user.userId);
 
     this.ensureModelEnabled('文字模型', resolvedConfig.enabled);
     this.ensureApiKey('文字模型', resolvedConfig.apiKey);
@@ -1148,12 +1156,12 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async generateImages(dto: GenerateImagesDto) {
+  async generateImages(user: SessionUser, dto: GenerateImagesDto) {
     const prompt = dto.prompt?.trim() || '请生成一组商品营销图片';
     const sizePreset = dto.sizePreset ?? '3_4';
     const resolution = dto.resolution ?? '1k';
     const referenceImages = (dto.referenceImages ?? []).filter(Boolean).slice(0, 3);
-    const resolvedConfig = await this.getEffectiveModelConfig('image', dto.modelConfig);
+    const resolvedConfig = await this.getEffectiveModelConfig('image', dto.modelConfig, user.userId);
 
     this.ensureModelEnabled('图片模型', resolvedConfig.enabled);
     this.ensureApiKey('图片模型', resolvedConfig.apiKey);
@@ -1166,19 +1174,88 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       referenceImages,
       count: 3,
     });
+    const persistedUrls = await this.persistDraftImages(user.userId, urls, 'ai-generated-images');
 
     return {
-      urls,
+      urls: persistedUrls,
       provider: resolvedConfig.providerName,
       model: resolvedConfig.modelName,
     };
   }
 
-  async generateVideo(dto: GenerateVideoDto) {
+  async promptPolish(user: SessionUser, dto: PromptPolishDto) {
+    const prompt = dto.prompt.trim();
+    if (!prompt) {
+      throw new BadRequestException('提示词不能为空');
+    }
+
+    const resolvedConfig = await this.getEffectiveModelConfig('text', dto.modelConfig, user.userId);
+
+    this.ensureModelEnabled('文字模型', resolvedConfig.enabled);
+    this.ensureApiKey('文字模型', resolvedConfig.apiKey);
+    this.ensureBaseUrl(resolvedConfig.baseUrl);
+
+    try {
+      const content = await this.generateTextContent(resolvedConfig, {
+        system: this.buildPromptPolishSystemPrompt(dto.scene),
+        user: this.buildPromptPolishUserPrompt(dto.scene, prompt),
+        errorLabel: '提示词润色失败',
+      });
+
+      const polishedPrompt = content.trim();
+      if (!polishedPrompt) {
+        throw new BadGatewayException('提示词润色未返回有效内容');
+      }
+
+      return {
+        prompt: polishedPrompt,
+        provider: resolvedConfig.providerName,
+        model: resolvedConfig.modelName,
+      };
+    } catch (error) {
+      this.rethrowModelError(error, '提示词润色失败');
+    }
+  }
+
+  async generateTextReply(input: {
+    system?: string;
+    user: string;
+    errorLabel?: string;
+    userId?: string;
+  }) {
+    const resolvedConfig = await this.getEffectiveModelConfig('text', undefined, input.userId);
+
+    this.ensureModelEnabled('文字模型', resolvedConfig.enabled);
+    this.ensureApiKey('文字模型', resolvedConfig.apiKey);
+    this.ensureBaseUrl(resolvedConfig.baseUrl);
+
+    try {
+      const content = await this.generateTextContent(resolvedConfig, {
+        system: input.system,
+        user: input.user,
+        errorLabel: input.errorLabel ?? '文字模型调用失败',
+      });
+
+      const text = content.trim();
+      if (!text) {
+        throw new BadGatewayException('文字模型未返回有效内容');
+      }
+
+      return {
+        text,
+        provider: resolvedConfig.providerName,
+        model: resolvedConfig.modelName,
+      };
+    } catch (error) {
+      this.rethrowModelError(error, input.errorLabel ?? '文字模型调用失败');
+    }
+  }
+
+  async generateVideo(user: SessionUser, dto: GenerateVideoDto) {
     try {
       const prompt = dto.prompt?.trim() || '请生成一个简短的产品视频。';
       const ttsText = dto.ttsText?.trim() || '';
-      const resolvedConfig = await this.getEffectiveModelConfig('video', dto.modelConfig);
+      const resolvedConfig = await this.getEffectiveModelConfig('video', dto.modelConfig, user.userId);
 
     this.ensureModelEnabled('视频模型', resolvedConfig.enabled);
     this.ensureApiKey('视频模型', resolvedConfig.apiKey);
@@ -1361,6 +1438,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
           finalVideoUrl: null,
           status: 'processing',
           createdAt: new Date().toISOString(),
+          userId: user.userId,
         },
         24 * 60 * 60,
       );
@@ -1377,14 +1455,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async getVideoTask(taskId: string) {
+  async getVideoTask(user: SessionUser, taskId: string) {
     try {
       const normalizedTaskId = taskId.trim();
       if (!normalizedTaskId) {
         throw new BadRequestException('任务 ID 不能为空');
       }
 
-    const resolvedConfig = await this.getEffectiveModelConfig('video');
+    const resolvedConfig = await this.getEffectiveModelConfig('video', undefined, user.userId);
     this.ensureModelEnabled('视频模型', resolvedConfig.enabled);
     this.ensureApiKey('视频模型', resolvedConfig.apiKey);
     this.ensureBaseUrl(resolvedConfig.baseUrl);
@@ -1482,7 +1560,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     if (!entry.sourceVideoUrl) return;
 
     try {
-      const resolvedConfig = await this.getEffectiveModelConfig('video');
+      const resolvedConfig = await this.getEffectiveModelConfig('video', undefined, entry.userId);
       this.ensureModelEnabled('视频模型', resolvedConfig.enabled);
       this.ensureApiKey('视频模型', resolvedConfig.apiKey);
       this.ensureBaseUrl(resolvedConfig.baseUrl);
@@ -1783,7 +1861,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return url.toString();
   }
 
-  async recommendBgm(dto: RecommendBgmDto) {
+  async recommendBgm(user: SessionUser, dto: RecommendBgmDto) {
     const text = dto.text?.trim() || '';
     if (!text) {
       throw new BadRequestException('请输入文案内容');
@@ -1801,7 +1879,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     const resolvedConfig = await (async () => {
       try {
-        return await this.getEffectiveModelConfig('text', dto.modelConfig);
+        return await this.getEffectiveModelConfig('text', dto.modelConfig, user.userId);
       } catch {
         return null;
       }
@@ -1813,7 +1891,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     const system =
       '你是一个中文短视频背景音乐匹配助手。只输出JSON，不要解释，不要使用Markdown，不要输出代码块。不得编造不存在的曲目。';
-    const user = [
+    const userPrompt = [
       `平台：${platformLabel}`,
       `内容类型：${mode === 'avatar_video' ? '真人口播视频' : '产品视频'}`,
       dto.scene?.trim() ? `场景：${dto.scene.trim()}` : '',
@@ -1838,7 +1916,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
       const content = await this.generateTextContent(resolvedConfig, {
         system,
-        user,
+        user: userPrompt,
         errorLabel: '文字模型调用失败',
       });
       if (!content) {
@@ -2034,7 +2112,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         `createAvatarVideoTask userId=${user.userId} scriptChars=${fullScript.length} imageChars=${referenceImageDataUrl.length} segmentDurationSeconds=${segmentDurationSeconds} segmentMaxChars=${segmentMaxChars}`,
       );
 
-      const baseVideoConfig = await this.getEffectiveModelConfig('video');
+      const baseVideoConfig = await this.getEffectiveModelConfig('video', undefined, user.userId);
       const resolvedConfig = this.resolveAvatarVideoConfig(baseVideoConfig, {
         scriptChars: this.estimateAvatarScriptChars(fullScript),
       });
@@ -2322,7 +2400,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     if (!task) return;
     if (task.status !== VideoMainTaskStatus.processing) return;
 
-    const baseVideoConfig = await this.getEffectiveModelConfig('video');
+    const baseVideoConfig = await this.getEffectiveModelConfig('video', undefined, task.userId);
     const resolvedConfig = this.resolveAvatarVideoConfig(baseVideoConfig, {
       scriptChars: this.estimateAvatarScriptChars(task.fullScript),
     });
@@ -2342,6 +2420,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     const { backgroundPlan, backgroundSeed } = await this.ensureAvatarBackgroundPlan({
       id: task.id,
+      userId: task.userId,
       backgroundLock: task.backgroundLock,
       backgroundSeed: task.backgroundSeed,
       backgroundPlan: task.backgroundPlan,
@@ -2672,6 +2751,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
   private async ensureAvatarBackgroundPlan(task: {
     id: string;
+    userId: string;
     backgroundLock: boolean;
     backgroundSeed: number | null;
     backgroundPlan: string | null;
@@ -2699,7 +2779,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     let plan = '';
     try {
-      const textConfig = await this.getEffectiveModelConfig('text');
+      const textConfig = await this.getEffectiveModelConfig('text', undefined, task.userId);
       if (textConfig.enabled && textConfig.baseUrl.trim() && textConfig.apiKey.trim()) {
         const scriptSnippet = task.fullScript.trim().slice(0, 2400);
         const styleHint = (task.style ?? '').trim();
@@ -3184,17 +3264,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listActiveModelConfigs(user: SessionUser) {
-    this.ensureMainCompanyUser(user);
-    return this.modelConfigCache.getAll();
+    return this.modelConfigCache.getAll(user.userId);
   }
 
   async listSavedModelConfigs(user: SessionUser) {
-    this.ensureMainCompanyUser(user);
-    return this.modelConfigCache.getAllSaved();
+    return this.modelConfigCache.getAllSaved(user.userId);
   }
 
   async activateModelConfig(user: SessionUser, type: string, dto: SaveModelConfigDto) {
-    this.ensureMainCompanyUser(user);
     const normalizedType = this.parseModelType(type);
     const resolvedConfig = this.resolveModelConfig(normalizedType, dto);
 
@@ -3202,12 +3279,13 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     this.ensureBaseUrl(resolvedConfig.baseUrl);
 
     await this.modelConfigCache.setSaved(
+      user.userId,
       normalizedType,
       resolvedConfig.providerKey,
       this.toStoredModelConfig(resolvedConfig),
     );
 
-    return this.modelConfigCache.set(normalizedType, this.toStoredModelConfig(resolvedConfig));
+    return this.modelConfigCache.set(user.userId, normalizedType, this.toStoredModelConfig(resolvedConfig));
   }
 
   async listSocialPosts(user: SessionUser) {
@@ -3216,7 +3294,118 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       orderBy: { createdAt: 'desc' },
     });
 
-    return items.map((item) => this.serializeSocialPost(item));
+    const normalizedItems = await Promise.all(
+      items.map((item) => this.repairSocialPostImages(user.userId, item)),
+    );
+
+    return normalizedItems.map((item) => this.serializeSocialPost(item));
+  }
+
+  async listProductImageDrafts(user: SessionUser) {
+    const items = await this.prisma.productImageDraft.findMany({
+      where: { creatorId: user.userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const normalizedItems = await Promise.all(
+      items.map((item) => this.repairProductDraftImages(user.userId, item)),
+    );
+
+    return normalizedItems.map((item) => this.serializeProductImageDraft(item));
+  }
+
+  async listVideoDrafts(user: SessionUser) {
+    const items = await this.prisma.videoDraft.findMany({
+      where: { creatorId: user.userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return items.map((item) => this.serializeVideoDraft(item));
+  }
+
+  async listReviewMaterials(user: SessionUser) {
+    this.ensureMainCompanyUser(user, '仅主公司可查看素材审核列表');
+
+    const [socialItems, productItems, videoItems] = await Promise.all([
+      this.prisma.socialGeneratedPost.findMany({
+        where: { reviewStage: { in: [SocialPostReviewStage.submitted, SocialPostReviewStage.approved] } },
+        include: { creator: { select: { displayName: true, username: true } } },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      this.prisma.productImageDraft.findMany({
+        where: { reviewStage: { in: [SocialPostReviewStage.submitted, SocialPostReviewStage.approved] } },
+        include: { creator: { select: { displayName: true, username: true } } },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      this.prisma.videoDraft.findMany({
+        where: { reviewStage: { in: [SocialPostReviewStage.submitted, SocialPostReviewStage.approved] } },
+        include: { creator: { select: { displayName: true, username: true } } },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ]);
+
+    return [
+      ...socialItems.map((item) => this.serializeReviewMaterial('social', item)),
+      ...productItems.map((item) => this.serializeReviewMaterial('product', item)),
+      ...videoItems.map((item) => this.serializeReviewMaterial('video', item)),
+    ].sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  }
+
+  async approveReviewMaterial(user: SessionUser, source: string, id: string) {
+    this.ensureMainCompanyUser(user, '仅主公司可审核素材');
+    const normalizedSource = this.parseReviewMaterialSource(source);
+
+    if (normalizedSource === 'social') {
+      const updated = await this.prisma.socialGeneratedPost.update({
+        where: { id },
+        data: { reviewStage: SocialPostReviewStage.approved },
+        include: { creator: { select: { displayName: true, username: true } } },
+      });
+      return this.serializeReviewMaterial('social', updated);
+    }
+
+    if (normalizedSource === 'product') {
+      const updated = await this.prisma.productImageDraft.update({
+        where: { id },
+        data: { reviewStage: SocialPostReviewStage.approved },
+        include: { creator: { select: { displayName: true, username: true } } },
+      });
+      return this.serializeReviewMaterial('product', updated);
+    }
+
+    const updated = await this.prisma.videoDraft.update({
+      where: { id },
+      data: { reviewStage: SocialPostReviewStage.approved },
+      include: { creator: { select: { displayName: true, username: true } } },
+    });
+    return this.serializeReviewMaterial('video', updated);
+  }
+
+  async rejectReviewMaterial(user: SessionUser, source: string, id: string, _dto: ReviewMaterialDecisionDto) {
+    this.ensureMainCompanyUser(user, '仅主公司可审核素材');
+    const normalizedSource = this.parseReviewMaterialSource(source);
+
+    if (normalizedSource === 'social') {
+      await this.prisma.socialGeneratedPost.update({
+        where: { id },
+        data: { reviewStage: SocialPostReviewStage.draft },
+      });
+      return { success: true };
+    }
+
+    if (normalizedSource === 'product') {
+      await this.prisma.productImageDraft.update({
+        where: { id },
+        data: { reviewStage: SocialPostReviewStage.draft },
+      });
+      return { success: true };
+    }
+
+    await this.prisma.videoDraft.update({
+      where: { id },
+      data: { reviewStage: SocialPostReviewStage.draft },
+    });
+    return { success: true };
   }
 
   async generateSocialPost(user: SessionUser, dto: GenerateSocialPostDto) {
@@ -3227,13 +3416,13 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const referenceImages = (dto.referenceImages ?? []).filter(Boolean).slice(0, 3);
 
     const [copyResult, imageResult] = await Promise.all([
-      this.generateCopy({
+      this.generateCopy(user, {
         prompt,
         style: style === 'xiaohongshu' ? 'xhs' : style,
         format: 'text',
         modelConfig: dto.textModelConfig,
       }),
-      this.generateImages({
+      this.generateImages(user, {
         prompt,
         sizePreset,
         resolution,
@@ -3245,9 +3434,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const created = await this.prisma.socialGeneratedPost.create({
       data: {
         creatorId: user.userId,
-        title: this.buildSocialPostTitle(copyResult.text, style, prompt),
+        title: copyResult.title,
         prompt,
-        body: copyResult.text,
+        body: copyResult.body,
+        tags: copyResult.tags,
         style,
         sizePreset,
         resolution,
@@ -3262,19 +3452,110 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return this.serializeSocialPost(created);
   }
 
+  async createProductImageDraft(user: SessionUser, dto: CreateProductImageDraftDto) {
+    const title = dto.title.trim();
+    const body = dto.body.trim();
+    const images = dto.images.map((item) => item.trim()).filter(Boolean).slice(0, 12);
+
+    if (!title) {
+      throw new BadRequestException('标题不能为空');
+    }
+
+    if (!body) {
+      throw new BadRequestException('文案不能为空');
+    }
+
+    const created = await this.prisma.productImageDraft.create({
+      data: {
+        creatorId: user.userId,
+        title,
+        body,
+        images,
+        sizePreset: dto.sizePreset,
+        resolution: dto.resolution,
+        reviewStage: this.isMainCompany(user)
+          ? SocialPostReviewStage.approved
+          : SocialPostReviewStage.draft,
+        syncedToLeads: false,
+        syncedToProducts: false,
+      },
+    });
+
+    return this.serializeProductImageDraft(created);
+  }
+
+  async createVideoDraft(user: SessionUser, dto: CreateVideoDraftDto) {
+    const title = dto.title.trim();
+    const durationText = dto.durationText.trim();
+    const generatedScript = dto.generatedScript.trim();
+    const platformStyle = dto.platformStyle?.trim() || null;
+    const publishTitle = dto.publishTitle?.trim() || null;
+    const publishTags = Array.from(
+      new Set(
+        (dto.publishTags ?? [])
+          .map((item) => item.trim().replace(/^#+/, ''))
+          .filter(Boolean)
+          .slice(0, 20),
+      ),
+    );
+    const source = dto.source === 'avatar_video' ? VideoDraftSource.avatar_video : VideoDraftSource.product_video;
+    const status =
+      dto.status === 'ready'
+        ? VideoDraftStatus.ready
+        : dto.status === 'failed'
+          ? VideoDraftStatus.failed
+          : VideoDraftStatus.processing;
+
+    if (!title) {
+      throw new BadRequestException('标题不能为空');
+    }
+
+    if (!durationText) {
+      throw new BadRequestException('时长不能为空');
+    }
+
+    if (!generatedScript) {
+      throw new BadRequestException('脚本不能为空');
+    }
+
+    const created = await this.prisma.videoDraft.create({
+      data: {
+        creatorId: user.userId,
+        source,
+        title,
+        platformStyle,
+        publishTitle,
+        publishTags,
+        completedAt: dto.completedAt ? new Date(dto.completedAt) : null,
+        durationText,
+        generatedScript,
+        videoUrl: dto.videoUrl?.trim() || '',
+        taskId: dto.taskId?.trim() || null,
+        provider: dto.provider?.trim() || null,
+        model: dto.model?.trim() || null,
+        errorMessage: dto.errorMessage?.trim() || null,
+        reviewStage: this.isMainCompany(user)
+          ? SocialPostReviewStage.approved
+          : SocialPostReviewStage.draft,
+        status,
+        syncedToLeads: false,
+      },
+    });
+
+    return this.serializeVideoDraft(created);
+  }
+
   private async getEffectiveModelConfig(
     type: ModelType,
     override?: Partial<TextModelConfigInput & ImageModelConfigInput & VideoModelConfigInput & TestModelConfigDto>,
+    userId?: string | null,
   ) {
-    const cached = await this.modelConfigCache.get(type);
-    if (cached) {
-      const mergedOverride = override
-        ? ({
-            ...cached,
-            ...Object.fromEntries(Object.entries(override).filter(([, value]) => value !== undefined)),
-          } as Partial<TextModelConfigInput & ImageModelConfigInput & VideoModelConfigInput & TestModelConfigDto>)
-        : cached;
-      return this.resolveModelConfig(type, mergedOverride);
+    const normalizedUserId = userId?.trim();
+    if (normalizedUserId) {
+      const cached = await this.modelConfigCache.get(normalizedUserId, type);
+      if (cached) {
+        return this.resolveModelConfig(type, cached);
+      }
     }
     return this.resolveModelConfig(type, override);
   }
@@ -3310,6 +3591,18 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return this.serializeSocialPost(updated);
   }
 
+  async withdrawSocialPostReview(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleSocialPost(user, id);
+    this.ensureDraftReviewWithdrawable(user, existing.reviewStage);
+
+    const updated = await this.prisma.socialGeneratedPost.update({
+      where: { id },
+      data: { reviewStage: SocialPostReviewStage.draft },
+    });
+
+    return this.serializeSocialPost(updated);
+  }
+
   async markSocialPostSynced(user: SessionUser, id: string) {
     const existing = await this.findAccessibleSocialPost(user, id);
 
@@ -3325,10 +3618,340 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return this.serializeSocialPost(updated);
   }
 
+  async updateSocialPost(user: SessionUser, id: string, dto: UpdateSocialPostDto) {
+    const existing = await this.findAccessibleSocialPost(user, id);
+    const nextTitle = dto.title.trim();
+    const nextBody = dto.body.trim();
+    const nextTags = (dto.tags ?? existing.tags)
+      .map((item) => item.trim().replace(/^#+/, ''))
+      .filter(Boolean)
+      .slice(0, 20);
+    const nextImages = (dto.images ?? existing.images).map((item) => item.trim()).filter(Boolean).slice(0, 12);
+
+    if (!nextTitle) {
+      throw new BadRequestException('标题不能为空');
+    }
+
+    if (!nextBody) {
+      throw new BadRequestException('文案不能为空');
+    }
+
+    const updated = await this.prisma.socialGeneratedPost.update({
+      where: { id },
+      data: {
+        title: nextTitle,
+        body: nextBody,
+        tags: Array.from(new Set(nextTags)),
+        images: nextImages,
+        synced: false,
+        reviewStage:
+          existing.reviewStage === SocialPostReviewStage.approved && !this.isMainCompany(user)
+            ? SocialPostReviewStage.draft
+            : existing.reviewStage,
+      },
+    });
+
+    return this.serializeSocialPost(updated);
+  }
+
+  async removeSocialPost(user: SessionUser, id: string) {
+    await this.findAccessibleSocialPost(user, id);
+    await this.prisma.socialGeneratedPost.delete({
+      where: { id },
+    });
+    return { success: true };
+  }
+
+  async updateProductImageDraft(user: SessionUser, id: string, dto: UpdateProductImageDraftDto) {
+    const existing = await this.findAccessibleProductImageDraft(user, id);
+    const nextTitle = dto.title.trim();
+    const nextBody = dto.body.trim();
+    const nextImages = (dto.images ?? existing.images).map((item) => item.trim()).filter(Boolean).slice(0, 12);
+
+    if (!nextTitle) {
+      throw new BadRequestException('标题不能为空');
+    }
+
+    if (!nextBody) {
+      throw new BadRequestException('文案不能为空');
+    }
+
+    const updated = await this.prisma.productImageDraft.update({
+      where: { id },
+      data: {
+        title: nextTitle,
+        body: nextBody,
+        images: nextImages,
+        syncedToLeads: false,
+        syncedToProducts: false,
+        reviewStage:
+          existing.reviewStage === SocialPostReviewStage.approved && !this.isMainCompany(user)
+            ? SocialPostReviewStage.draft
+            : existing.reviewStage,
+      },
+    });
+
+    return this.serializeProductImageDraft(updated);
+  }
+
+  async removeProductImageDraft(user: SessionUser, id: string) {
+    await this.findAccessibleProductImageDraft(user, id);
+    await this.prisma.productImageDraft.delete({
+      where: { id },
+    });
+    return { success: true };
+  }
+
+  async submitProductImageDraft(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleProductImageDraft(user, id);
+
+    if (this.isMainCompany(user)) {
+      throw new ForbiddenException('主公司生成内容无需提审');
+    }
+
+    if (existing.reviewStage !== SocialPostReviewStage.draft) {
+      throw new ForbiddenException('当前状态不可提审');
+    }
+
+    const updated = await this.prisma.productImageDraft.update({
+      where: { id },
+      data: { reviewStage: SocialPostReviewStage.submitted },
+    });
+
+    return this.serializeProductImageDraft(updated);
+  }
+
+  async withdrawProductImageDraftReview(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleProductImageDraft(user, id);
+    this.ensureDraftReviewWithdrawable(user, existing.reviewStage);
+
+    const updated = await this.prisma.productImageDraft.update({
+      where: { id },
+      data: { reviewStage: SocialPostReviewStage.draft },
+    });
+
+    return this.serializeProductImageDraft(updated);
+  }
+
+  async markProductImageDraftSynced(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleProductImageDraft(user, id);
+
+    if (existing.reviewStage !== SocialPostReviewStage.approved) {
+      throw new ForbiddenException('只有审核通过后才能同步到获客');
+    }
+
+    const updated = await this.prisma.productImageDraft.update({
+      where: { id },
+      data: { syncedToLeads: true },
+    });
+
+    return this.serializeProductImageDraft(updated);
+  }
+
+  async markProductImageDraftProductSynced(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleProductImageDraft(user, id);
+
+    if (existing.reviewStage !== SocialPostReviewStage.approved) {
+      throw new ForbiddenException('只有审核通过后才能同步到产品管理');
+    }
+
+    const updated = await this.prisma.productImageDraft.update({
+      where: { id },
+      data: { syncedToProducts: true },
+    });
+
+    return this.serializeProductImageDraft(updated);
+  }
+
+  async updateVideoDraft(user: SessionUser, id: string, dto: UpdateVideoDraftDto) {
+    const existing = await this.findAccessibleVideoDraft(user, id);
+    const nextTitle = dto.title?.trim() ?? existing.title;
+    const nextDurationText = dto.durationText?.trim() ?? existing.durationText;
+    const nextGeneratedScript = dto.generatedScript?.trim() ?? existing.generatedScript;
+    const nextPlatformStyle =
+      dto.platformStyle !== undefined ? dto.platformStyle.trim() || null : existing.platformStyle;
+    const nextPublishTitle =
+      dto.publishTitle !== undefined ? dto.publishTitle.trim() || null : existing.publishTitle;
+    const nextPublishTags =
+      dto.publishTags !== undefined
+        ? Array.from(
+            new Set(
+              dto.publishTags
+                .map((item) => item.trim().replace(/^#+/, ''))
+                .filter(Boolean)
+                .slice(0, 20),
+            ),
+          )
+        : existing.publishTags;
+
+    if (!nextTitle) {
+      throw new BadRequestException('标题不能为空');
+    }
+
+    if (!nextDurationText) {
+      throw new BadRequestException('时长不能为空');
+    }
+
+    if (!nextGeneratedScript) {
+      throw new BadRequestException('脚本不能为空');
+    }
+
+    const nextStatus =
+      dto.status === undefined
+        ? existing.status
+        : dto.status === 'ready'
+          ? VideoDraftStatus.ready
+          : dto.status === 'failed'
+            ? VideoDraftStatus.failed
+            : VideoDraftStatus.processing;
+
+    const updated = await this.prisma.videoDraft.update({
+      where: { id },
+      data: {
+        title: nextTitle,
+        platformStyle: nextPlatformStyle,
+        publishTitle: nextPublishTitle,
+        publishTags: nextPublishTags,
+        durationText: nextDurationText,
+        generatedScript: nextGeneratedScript,
+        videoUrl: dto.videoUrl !== undefined ? dto.videoUrl.trim() : existing.videoUrl,
+        taskId: dto.taskId !== undefined ? dto.taskId.trim() || null : existing.taskId,
+        provider: dto.provider !== undefined ? dto.provider.trim() || null : existing.provider,
+        model: dto.model !== undefined ? dto.model.trim() || null : existing.model,
+        errorMessage:
+          dto.errorMessage !== undefined ? dto.errorMessage.trim() || null : existing.errorMessage,
+        status: nextStatus,
+        syncedToLeads: dto.syncedToLeads ?? existing.syncedToLeads,
+        completedAt: dto.completedAt !== undefined ? new Date(dto.completedAt) : existing.completedAt,
+        reviewStage:
+          existing.reviewStage === SocialPostReviewStage.approved && !this.isMainCompany(user)
+            ? SocialPostReviewStage.draft
+            : existing.reviewStage,
+      },
+    });
+
+    return this.serializeVideoDraft(updated);
+  }
+
+  async submitVideoDraft(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleVideoDraft(user, id);
+
+    if (this.isMainCompany(user)) {
+      throw new ForbiddenException('主公司生成内容无需提审');
+    }
+
+    if (existing.reviewStage !== SocialPostReviewStage.draft) {
+      throw new ForbiddenException('当前状态不可提审');
+    }
+
+    const updated = await this.prisma.videoDraft.update({
+      where: { id },
+      data: { reviewStage: SocialPostReviewStage.submitted },
+    });
+
+    return this.serializeVideoDraft(updated);
+  }
+
+  async withdrawVideoDraftReview(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleVideoDraft(user, id);
+    this.ensureDraftReviewWithdrawable(user, existing.reviewStage);
+
+    const updated = await this.prisma.videoDraft.update({
+      where: { id },
+      data: { reviewStage: SocialPostReviewStage.draft },
+    });
+
+    return this.serializeVideoDraft(updated);
+  }
+
+  async markVideoDraftSynced(user: SessionUser, id: string) {
+    const existing = await this.findAccessibleVideoDraft(user, id);
+
+    if (existing.reviewStage !== SocialPostReviewStage.approved) {
+      throw new ForbiddenException('只有审核通过后才能同步到获客');
+    }
+
+    const updated = await this.prisma.videoDraft.update({
+      where: { id },
+      data: { syncedToLeads: true },
+    });
+
+    return this.serializeVideoDraft(updated);
+  }
+
   private pickStyleLabel(style: 'xhs' | 'douyin' | 'wechat') {
     if (style === 'douyin') return '抖音风';
     if (style === 'wechat') return '视频号风';
     return '小红书风';
+  }
+
+  private ensureDraftReviewWithdrawable(user: SessionUser, reviewStage: SocialPostReviewStage) {
+    if (this.isMainCompany(user)) {
+      throw new ForbiddenException('主公司生成内容无需撤销审核');
+    }
+
+    if (reviewStage !== SocialPostReviewStage.submitted) {
+      throw new ForbiddenException('仅待审核内容可撤销审核');
+    }
+  }
+
+  private buildPromptPolishSystemPrompt(scene: 'social_post' | 'product_image') {
+    const sceneGuide =
+      scene === 'social_post'
+        ? '你要把用户原始想法润色成更适合社媒图文生成的提示词，强化平台风格、画面主体、情绪氛围、文案语气和封面感。'
+        : '你要把用户原始想法润色成更适合商品图与详情图生成的提示词，强化商品主体、卖点表达、构图、材质、光线和详情展示信息。';
+
+    return [
+      '你是一名资深中文视觉提示词优化助手。',
+      sceneGuide,
+      '只返回润色后的提示词正文，不要解释，不要加标题，不要使用代码块。',
+      '输出结果必须保留用户原意，但要更清晰、可执行、适合图像生成模型理解。',
+    ].join('');
+  }
+
+  private buildPromptPolishUserPrompt(scene: 'social_post' | 'product_image', prompt: string) {
+    const sceneLabel = scene === 'social_post' ? '社媒图文生成' : '商品图与详情图生成';
+    return [`当前场景：${sceneLabel}`, '请直接润色下面这段提示词，并输出可直接继续用于生成的版本：', prompt].join('\n');
+  }
+
+  private buildGenerateCopySystemPrompt() {
+    return [
+      '你是一个擅长写“小红书软种草”图文的中文内容创作助手。',
+      '无论发布平台是什么，图文正文都统一采用小红书软种草风格，不写硬广，不写官方宣传腔，不写说明书口吻。',
+      '输出必须贴合用户输入，不要编造不存在的功能、体验、数据或承诺。',
+      '你必须只返回 JSON 对象，不要返回代码块，不要补充解释。',
+      'JSON 固定字段为：title、body、tags。',
+      'title：一个标题，限制 20 个字符以内；要像小红书常见种草标题，口语化、有记忆点，但不过度夸张。',
+      'body：只生成正文文案，不要包含标题，不要包含任何标签，不要包含额外说明。',
+      'body 风格规则：',
+      '1. 按热门种草节奏写：开头先用反差/痛点/场景切入吸引注意，中间展开真实体验感和核心爆点，结尾轻收口或轻推荐。',
+      '2. 多用情绪词和口语化表达，句子尽量短一些，要有真实分享感、聊天感、停顿感。',
+      '3. 必须写出明确使用场景、具体感受和核心卖点，不要空泛堆词，不要只罗列参数。',
+      '4. 爆点结构优先写“原本顾虑/痛点 -> 上手后的反差 -> 最戳人的结果/感受”。',
+      '5. 可参考小红书典型句式，例如：“真的会想反复回购”“一开始没抱太大希望，结果...”“谁懂这种...”“用了才知道...”；可以借鉴这种语气和节奏，但不要整段机械套模板。',
+      'tags：只生成当前平台适用的 #标签，多个标签用单个空格分隔。',
+    ].join('');
+  }
+
+  private buildGenerateCopyUserPrompt(input: {
+    styleLabel: string;
+    prompt: string;
+    productName: string;
+    audience: string;
+    sellingPoints: string;
+  }) {
+    return [
+      `请生成一条图文种草内容，发布平台：${input.styleLabel}。`,
+      '正文风格统一按“小红书软种草”输出；发布平台信息仅用于帮助你判断标签方向，不改变正文风格。',
+      input.prompt ? `补充提示词：${input.prompt}` : '',
+      `产品名称：${input.productName}`,
+      `目标人群：${input.audience}`,
+      `核心卖点：${input.sellingPoints}`,
+      '正文输出为纯文本，段落清晰。',
+      '请严格返回 JSON，例如：{"title":"示例标题","body":"示例正文","tags":"#标签1 #标签2 #标签3"}',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   private buildSocialPostTitle(
@@ -3336,13 +3959,13 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     style: 'xiaohongshu' | 'douyin' | 'wechat',
     prompt: string,
   ) {
-    return (
+    const title =
       body
         .split('\n')
         .map((item) => item.trim())
         .find((item) => item.length > 0)
-        ?.slice(0, 30) || `${this.pickStyleLabel(style === 'xiaohongshu' ? 'xhs' : style)}｜${prompt.slice(0, 16) || '社媒图文'}`
-    );
+        ?.slice(0, 20) || `${this.pickStyleLabel(style === 'xiaohongshu' ? 'xhs' : style)}${prompt.slice(0, 14) || '社媒图文'}`;
+    return Array.from(title).slice(0, 20).join('');
   }
 
   private serializeSocialPost(item: SocialGeneratedPost) {
@@ -3351,13 +3974,178 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       title: item.title,
       createdAt: item.createdAt,
       body: item.body,
+      tags: item.tags,
       images: item.images,
+      downloadableImages: item.images.map((image) => !this.productImageStorage.isManagedPublicUrl(image)),
       style: item.style,
       sizePreset: item.sizePreset,
       resolution: item.resolution,
       reviewStage: item.reviewStage,
       synced: item.synced,
     };
+  }
+
+  private serializeProductImageDraft(item: ProductImageDraft) {
+    return {
+      id: item.id,
+      title: item.title,
+      createdAt: item.createdAt,
+      body: item.body,
+      images: item.images,
+      downloadableImages: item.images.map((image) => !this.productImageStorage.isManagedPublicUrl(image)),
+      sizePreset: item.sizePreset,
+      resolution: item.resolution,
+      reviewStage: item.reviewStage,
+      syncedToLeads: item.syncedToLeads,
+      syncedToProducts: item.syncedToProducts,
+    };
+  }
+
+  private serializeVideoDraft(item: VideoDraft) {
+    return {
+      id: item.id,
+      source: item.source,
+      title: item.title,
+      platformStyle: item.platformStyle,
+      publishTitle: item.publishTitle,
+      publishTags: item.publishTags,
+      createdAt: item.createdAt,
+      completedAt: item.completedAt,
+      durationText: item.durationText,
+      generatedScript: item.generatedScript,
+      videoUrl: item.videoUrl,
+      taskId: item.taskId,
+      provider: item.provider,
+      model: item.model,
+      errorMessage: item.errorMessage,
+      reviewStage: item.reviewStage,
+      status: item.status,
+      syncedToLeads: item.syncedToLeads,
+    };
+  }
+
+  private async repairSocialPostImages(userId: string, item: SocialGeneratedPost) {
+    const nextImages = await this.persistDraftImages(userId, item.images, 'ai-generated-images');
+    if (this.areImagesEqual(item.images, nextImages)) {
+      return item;
+    }
+
+    return this.prisma.socialGeneratedPost.update({
+      where: { id: item.id },
+      data: { images: nextImages },
+    });
+  }
+
+  private async repairProductDraftImages(userId: string, item: ProductImageDraft) {
+    const nextImages = await this.persistDraftImages(userId, item.images, 'ai-generated-images');
+    if (this.areImagesEqual(item.images, nextImages)) {
+      return item;
+    }
+
+    return this.prisma.productImageDraft.update({
+      where: { id: item.id },
+      data: { images: nextImages },
+    });
+  }
+
+  private async persistDraftImages(userId: string, images: string[], folder: string) {
+    const normalized = images
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 12);
+
+    const persisted = await Promise.all(
+      normalized.map(async (image) => {
+        if (this.productImageStorage.isManagedPublicUrl(image)) {
+          return image;
+        }
+        if (image.startsWith('/')) {
+          return image;
+        }
+
+        try {
+          const asset = await this.productImageStorage.mirrorRemoteAsset(userId, image, folder);
+          return asset.url;
+        } catch {
+          return image;
+        }
+      }),
+    );
+
+    return persisted;
+  }
+
+  private areImagesEqual(left: string[], right: string[]) {
+    if (left.length !== right.length) {
+      return false;
+    }
+
+    return left.every((item, index) => item === right[index]);
+  }
+
+  private serializeReviewMaterial(
+    source: ReviewMaterialSource,
+    item:
+      | (SocialGeneratedPost & { creator: { displayName: string; username: string } })
+      | (ProductImageDraft & { creator: { displayName: string; username: string } })
+      | (VideoDraft & { creator: { displayName: string; username: string } }),
+  ) {
+    if (source === 'social') {
+      const social = item as SocialGeneratedPost & { creator: { displayName: string; username: string } };
+      return {
+        id: social.id,
+        source,
+        title: social.title,
+        body: social.body,
+        tags: social.tags,
+        images: social.images,
+        downloadableImages: social.images.map((image) => !this.productImageStorage.isManagedPublicUrl(image)),
+        videoUrl: null,
+        reviewStage: social.reviewStage,
+        submittedByName: social.creator.displayName || social.creator.username,
+        submittedAt: social.updatedAt.toISOString(),
+      };
+    }
+
+    if (source === 'product') {
+      const product = item as ProductImageDraft & { creator: { displayName: string; username: string } };
+      return {
+        id: product.id,
+        source,
+        title: product.title,
+        body: product.body,
+        tags: [] as string[],
+        images: product.images,
+        downloadableImages: product.images.map((image) => !this.productImageStorage.isManagedPublicUrl(image)),
+        videoUrl: null,
+        reviewStage: product.reviewStage,
+        submittedByName: product.creator.displayName || product.creator.username,
+        submittedAt: product.updatedAt.toISOString(),
+      };
+    }
+
+    const video = item as VideoDraft & { creator: { displayName: string; username: string } };
+    return {
+      id: video.id,
+      source,
+      title: video.title,
+      body: video.generatedScript,
+      tags: video.publishTags,
+      images: [] as string[],
+      downloadableImages: [] as boolean[],
+      videoUrl: video.videoUrl,
+      reviewStage: video.reviewStage,
+      submittedByName: video.creator.displayName || video.creator.username,
+      submittedAt: video.updatedAt.toISOString(),
+    };
+  }
+
+  private parseReviewMaterialSource(source: string): ReviewMaterialSource {
+    if (source === 'social' || source === 'product' || source === 'video') {
+      return source;
+    }
+
+    throw new BadRequestException('审核素材来源不支持');
   }
 
   private async findAccessibleSocialPost(user: SessionUser, id: string) {
@@ -3369,6 +4157,34 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     if (item.creatorId !== user.userId) {
       throw new ForbiddenException('无权访问该生成结果');
+    }
+
+    return item;
+  }
+
+  private async findAccessibleProductImageDraft(user: SessionUser, id: string) {
+    const item = await this.prisma.productImageDraft.findUnique({ where: { id } });
+
+    if (!item) {
+      throw new NotFoundException('商品图草稿不存在');
+    }
+
+    if (item.creatorId !== user.userId) {
+      throw new ForbiddenException('无权访问该商品图草稿');
+    }
+
+    return item;
+  }
+
+  private async findAccessibleVideoDraft(user: SessionUser, id: string) {
+    const item = await this.prisma.videoDraft.findUnique({ where: { id } });
+
+    if (!item) {
+      throw new NotFoundException('视频草稿不存在');
+    }
+
+    if (item.creatorId !== user.userId) {
+      throw new ForbiddenException('无权访问该视频草稿');
     }
 
     return item;
@@ -3516,6 +4332,98 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     } catch {
       return { raw: text } as T;
     }
+  }
+
+  private parseJsonFromText<T>(text: string) {
+    const normalized = text.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const candidates: string[] = [normalized];
+    const fencedMatch = normalized.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fencedMatch?.[1]?.trim()) {
+      candidates.unshift(fencedMatch[1].trim());
+    }
+
+    const objectStart = normalized.indexOf('{');
+    const objectEnd = normalized.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      candidates.push(normalized.slice(objectStart, objectEnd + 1));
+    }
+
+    for (const candidate of candidates) {
+      try {
+        return JSON.parse(candidate) as T;
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  private parseGeneratedCopyPayload(
+    raw: string,
+    input: { style: 'xhs' | 'douyin' | 'wechat'; productName: string; prompt: string },
+  ): GeneratedCopyPayload {
+    const parsed = this.parseJsonFromText<{
+      title?: unknown;
+      body?: unknown;
+      tags?: unknown;
+      text?: unknown;
+    }>(raw);
+    const fallbackStyle = input.style === 'xhs' ? 'xiaohongshu' : input.style;
+    const fallbackBody = raw.trim();
+    const bodySource =
+      typeof parsed?.body === 'string'
+        ? parsed.body
+        : typeof parsed?.text === 'string'
+          ? parsed.text
+          : fallbackBody;
+    const body = this.normalizeGeneratedBody(bodySource);
+    const fallbackTitle =
+      input.productName.trim() ||
+      this.buildSocialPostTitle(body || fallbackBody, fallbackStyle, input.prompt);
+
+    return {
+      title: this.normalizeGeneratedTitle(
+        typeof parsed?.title === 'string' ? parsed.title : fallbackTitle,
+        fallbackTitle,
+      ),
+      body,
+      tags: this.normalizeGeneratedTags(parsed?.tags),
+    };
+  }
+
+  private normalizeGeneratedTitle(value: string, fallback: string) {
+    const normalized = value.trim() || fallback.trim() || '营销文案';
+    return Array.from(normalized).slice(0, 20).join('');
+  }
+
+  private normalizeGeneratedBody(value: string) {
+    return value
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  private normalizeGeneratedTags(value: unknown) {
+    const raw = Array.isArray(value)
+      ? value.map((item) => String(item ?? '').trim()).join(' ')
+      : typeof value === 'string'
+        ? value
+        : '';
+
+    return Array.from(
+      new Set(
+        raw
+          .split(/\s+/)
+          .map((item) => item.replace(/^#+/, '').trim())
+          .filter(Boolean),
+      ),
+    ).slice(0, 12);
   }
 
   private buildUpstreamErrorMessage(prefix: string, payload: unknown, status?: number) {
@@ -3826,10 +4734,6 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       return `${baseUrl}/images/generations`;
     }
 
-    if (config.protocol === 'vidu_image') {
-      return `${this.normalizeViduEntV2BaseUrl(baseUrl)}/reference2image`;
-    }
-
     if (config.protocol === 'dashscope_video') {
       return `${baseUrl}/video-generation/video-synthesis`;
     }
@@ -3855,7 +4759,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       return headers;
     }
 
-    if (config.protocol === 'vidu_image' || config.protocol === 'vidu_video') {
+    if (config.protocol === 'vidu_video') {
       headers.Authorization = `Token ${config.apiKey}`;
       return headers;
     }
@@ -3880,25 +4784,6 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     if (sizePreset === '1_1') return '1024x1024';
     if (sizePreset === '16_9') return '1536x1024';
     return '1024x1536';
-  }
-
-  private pickViduImageAspectRatio(sizePreset: '1_1' | '3_4' | '4_5' | '9_16' | '16_9') {
-    if (sizePreset === '1_1') return '1:1';
-    if (sizePreset === '16_9') return '16:9';
-    if (sizePreset === '9_16') return '9:16';
-    if (sizePreset === '4_5') return '4:5';
-    return '3:4';
-  }
-
-  private pickViduImageResolution(resolution: '1k' | '2k' | '4k') {
-    if (resolution === '4k') return '4K';
-    if (resolution === '2k') return '2K';
-    return '1080p';
-  }
-
-  private isViduTextToImageModel(modelName: string) {
-    const model = modelName.trim().toLowerCase();
-    return model.includes('viduq2');
   }
 
   private pickDoubaoImageSize(
@@ -4013,9 +4898,9 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return user.role === MAIN_COMPANY_ROLE_KEY;
   }
 
-  private ensureMainCompanyUser(user: SessionUser) {
+  private ensureMainCompanyUser(user: SessionUser, message = '仅主公司可维护模型配置') {
     if (!this.isMainCompany(user)) {
-      throw new ForbiddenException('仅主公司可维护模型配置');
+      throw new ForbiddenException(message);
     }
   }
 
@@ -4045,8 +4930,8 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       count: number;
     },
   ) {
-    if (config.protocol === 'vidu_image') {
-      return this.viduGenerateImages(config, input);
+    if (config.protocol === 'vidu_video') {
+      throw new BadRequestException('Vidu 当前仅支持视频模型，不支持图片生成');
     }
 
     if (config.protocol === 'openai_image') {
@@ -4118,16 +5003,6 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async testImageModelConnection(config: ResolvedModelConfig) {
-    if (config.protocol === 'vidu_image') {
-      await this.viduTestCredits(config, '图片模型测试失败');
-      return {
-        success: true,
-        message: '图片模型连接成功（Vidu 参考图协议）',
-        provider: config.providerName,
-        model: config.modelName,
-      };
-    }
-
     const urls = await this.generateImagesByProtocol(config, {
       prompt: '测试连接，请生成一张简单图片。',
       sizePreset: '1_1',
@@ -4422,173 +5297,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return urls;
   }
 
-  private async viduGenerateImages(
-    config: ResolvedModelConfig,
-    input: {
-      prompt: string;
-      sizePreset: '1_1' | '3_4' | '4_5' | '9_16' | '16_9';
-      resolution: '1k' | '2k' | '4k';
-      referenceImages: string[];
-      count: number;
-    },
-  ) {
-    if (input.referenceImages.length === 0) {
-      if (!this.isViduTextToImageModel(config.modelName)) {
-        throw new BadRequestException('Vidu 纯文生图当前仅支持 ViduQ2 系列模型，请切换到 viduq2 或上传参考图');
-      }
-      return this.viduTextToImageGenerate(config, input);
-    }
-
-    const response = await fetch(this.buildRequestUrl(config), {
-      method: 'POST',
-      headers: this.createJsonHeaders(config),
-      body: JSON.stringify({
-        model: config.modelName,
-        images: input.referenceImages.slice(0, 3),
-        prompt: input.prompt.slice(0, 5000),
-        seed: Math.floor(Math.random() * 2147483647),
-        aspect_ratio: this.pickViduImageAspectRatio(input.sizePreset),
-        payload: '',
-      }),
-    });
-
-    const data = this.parseJsonSafely(await response.text());
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new BadRequestException(
-          '当前 Vidu API 账号可用的图片能力为参考图生图，纯文生图接口未开放；请上传参考图，或改用 Qwen / OpenAI / Gemini 做纯文生图',
-        );
-      }
-      throw new BadGatewayException(
-        this.buildUpstreamErrorMessage('图片模型调用失败', data, response.status),
-      );
-    }
-
-    const directUrls = this.extractHttpUrls(data)
-      .filter((url) => !/\.mp4(\?|$)/i.test(url))
-      .slice(0, Math.max(1, input.count));
-    if (directUrls.length > 0) {
-      return directUrls;
-    }
-
-    const taskId = this.extractTaskId(data);
-    if (!taskId) {
-      throw new BadGatewayException('图片模型未返回有效任务');
-    }
-
-    return this.waitForViduImageUrls(config, taskId, Math.max(1, input.count));
-  }
-
-  private async viduTextToImageGenerate(
-    config: ResolvedModelConfig,
-    input: {
-      prompt: string;
-      sizePreset: '1_1' | '3_4' | '4_5' | '9_16' | '16_9';
-      resolution: '1k' | '2k' | '4k';
-      count: number;
-    },
-  ) {
-    const baseUrl = this.normalizeViduEntV2BaseUrl(config.baseUrl);
-    const response = await fetch(`${baseUrl}/text2image`, {
-      method: 'POST',
-      headers: this.createJsonHeaders(config),
-      body: JSON.stringify({
-        model: config.modelName,
-        prompt: input.prompt.slice(0, 5000),
-        seed: Math.floor(Math.random() * 2147483647),
-        aspect_ratio: this.pickViduImageAspectRatio(input.sizePreset),
-        resolution: this.pickViduImageResolution(input.resolution),
-        payload: '',
-      }),
-    });
-
-    const data = this.parseJsonSafely(await response.text());
-    if (!response.ok) {
-      throw new BadGatewayException(
-        this.buildUpstreamErrorMessage('图片模型调用失败', data, response.status),
-      );
-    }
-
-    const directUrls = this.extractHttpUrls(data)
-      .filter((url) => !/\.mp4(\?|$)/i.test(url))
-      .slice(0, Math.max(1, input.count));
-    if (directUrls.length > 0) {
-      return directUrls;
-    }
-
-    const taskId = this.extractTaskId(data);
-    if (!taskId) {
-      throw new BadGatewayException('图片模型未返回有效任务');
-    }
-
-    return this.waitForViduImageUrls(config, taskId, Math.max(1, input.count));
-  }
-
-  private async waitForViduImageUrls(config: ResolvedModelConfig, taskId: string, count: number) {
-    const taskQueryTemplate = this.resolveViduTaskQueryTemplate(config, config.taskQueryUrlTemplate);
-    let lastErrorMessage = '图片模型任务未返回图片';
-    const pollIntervalMs = 2000;
-    const maxAttempts = 300;
-
-    // Vidu image tasks can stay in created/queueing/processing for a long time
-    // on busy queues, especially for reference-to-image. Poll for up to ~10 minutes
-    // to avoid reporting false timeouts to the user.
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-
-      try {
-        const response = await fetch(this.buildTaskQueryUrl(taskQueryTemplate, taskId), {
-          method: 'GET',
-          headers: {
-            Authorization: this.createJsonHeaders(config).Authorization,
-          },
-          signal: AbortSignal.timeout(30_000),
-        });
-        const data = this.parseJsonSafely(await response.text());
-        if (!response.ok) {
-          const message = this.buildUpstreamErrorMessage('图片任务查询失败', data, response.status);
-          if (this.shouldStopRetry(response.status, message)) {
-            throw new BadGatewayException(message);
-          }
-          lastErrorMessage = message;
-          continue;
-        }
-
-        const status = this.extractVideoTaskStatus(data);
-        const urls = this.extractHttpUrls(data)
-          .filter((url) => !/\.mp4(\?|$)/i.test(url))
-          .slice(0, count);
-        if (urls.length > 0) {
-          return urls;
-        }
-        if (status === 'success') {
-          lastErrorMessage = '图片模型任务已完成，但未返回图片地址';
-          continue;
-        }
-        if (status === 'failed') {
-          throw new BadGatewayException(
-            this.extractErrorMessage(data) ?? this.extractDeepErrorMessage(data) ?? lastErrorMessage,
-          );
-        }
-      } catch (error) {
-        if (error instanceof BadGatewayException) {
-          throw error;
-        }
-        if (error instanceof Error && error.name === 'TimeoutError') {
-          lastErrorMessage = '图片任务查询超时';
-          continue;
-        }
-        if (error instanceof Error && error.message) {
-          lastErrorMessage = error.message;
-        }
-        continue;
-      }
-    }
-
-    throw new BadGatewayException(`${lastErrorMessage}（Vidu 图片任务轮询超时，已等待约 10 分钟）`);
-  }
-
-  private async viduTestCredits(config: ResolvedModelConfig, errorLabel = '视频模型测试失败') {
+  private async viduTestCredits(config: ResolvedModelConfig) {
     const baseUrl = this.normalizeViduEntV2BaseUrl(config.baseUrl);
     const url = `${baseUrl}/credits?show_detail=false`;
     const response = await fetch(url, {
@@ -4598,7 +5307,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const data = this.parseJsonSafely(await response.text());
     if (!response.ok) {
       throw new BadGatewayException(
-        this.buildUpstreamErrorMessage(errorLabel, data, response.status),
+        this.buildUpstreamErrorMessage('视频模型测试失败', data, response.status),
       );
     }
   }

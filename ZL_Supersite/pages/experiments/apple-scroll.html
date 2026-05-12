@@ -1,0 +1,472 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>志林科技 - 旗舰产品</title>
+  
+  <!-- 字体 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- GSAP & Lenis -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+  <script src="https://unpkg.com/@studio-freight/lenis@1.0.33/dist/lenis.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --ink: #ffffff;
+      --muted: #888888;
+      --accent: #a6533f;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      background-color: var(--bg);
+      color: var(--ink);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow-x: hidden;
+      overscroll-behavior: none;
+    }
+
+    h1, h2, h3 {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 500;
+    }
+
+    /* 首屏：巨幅文字揭示 */
+    .hero {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-title {
+      font-size: clamp(60px, 12vw, 180px);
+      line-height: 0.9;
+      text-align: center;
+      z-index: 2;
+      mix-blend-mode: difference;
+    }
+
+    .hero-title span {
+      display: block;
+      overflow: hidden;
+    }
+    
+    .hero-title span i {
+      display: inline-block;
+      transform: translateY(100%);
+    }
+
+    .hero-bg {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(1.2);
+      width: 60vw;
+      height: 80vh;
+      background-image: url('../../assets/images/landing/img_0.jpeg');
+      background-size: cover;
+      background-position: center;
+      filter: brightness(0.7) contrast(1.2);
+      border-radius: 20px;
+      z-index: 1;
+      will-change: transform, width, height, border-radius;
+    }
+
+    /* 序列二：横向滚动长廊 */
+    .horizontal-scroll-wrapper {
+      height: 300vh; /* 用于撑开滚动距离 */
+      position: relative;
+    }
+
+    .horizontal-scroll-container {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .horizontal-track {
+      display: flex;
+      gap: 10vw;
+      padding: 0 10vw;
+      height: 60vh;
+      will-change: transform;
+    }
+
+    .h-card {
+      width: 40vw;
+      height: 100%;
+      flex-shrink: 0;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .h-card-img {
+      width: 100%;
+      height: 70%;
+      border-radius: 12px;
+      background-size: cover;
+      background-position: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 视差图片内部容器 */
+    .h-card-img-inner {
+      width: 120%;
+      height: 100%;
+      background-size: cover;
+      background-position: center;
+      position: absolute;
+      left: -10%;
+    }
+
+    .h-card h3 {
+      font-size: 48px;
+      margin-top: 32px;
+    }
+
+    .h-card p {
+      color: var(--muted);
+      font-size: 16px;
+      margin-top: 16px;
+      line-height: 1.6;
+      max-width: 80%;
+    }
+
+    /* 序列三：爆炸式文字散开与产品浮现 */
+    .explosion-section {
+      height: 200vh;
+      position: relative;
+      background: #ffffff;
+      color: #000;
+    }
+
+    .explosion-container {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .explosion-text {
+      font-size: clamp(40px, 8vw, 120px);
+      font-family: 'Cormorant Garamond', serif;
+      position: absolute;
+      white-space: nowrap;
+      font-weight: 600;
+      will-change: transform, opacity;
+    }
+
+    .explosion-product {
+      width: 50vw;
+      height: 60vh;
+      background-image: url('../../assets/images/landing/img_4.jpeg');
+      background-size: cover;
+      background-position: center;
+      border-radius: 20px;
+      transform: scale(0.8) translateY(100px);
+      opacity: 0;
+      box-shadow: 0 40px 100px rgba(0,0,0,0.2);
+    }
+
+    /* 序列四：暗黑深渊固定背景淡入 */
+    .abyss-section {
+      position: relative;
+      min-height: 100vh;
+      padding: 20vh 10vw;
+      background: #0a0a0a;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10vw;
+      align-items: center;
+    }
+
+    .abyss-text h2 {
+      font-size: 72px;
+      line-height: 1.1;
+      margin-bottom: 40px;
+    }
+    
+    .abyss-text p {
+      font-size: 18px;
+      color: var(--muted);
+      line-height: 1.8;
+      margin-bottom: 24px;
+    }
+
+    .abyss-media {
+      position: relative;
+      height: 80vh;
+      border-radius: 24px;
+      overflow: hidden;
+    }
+
+    .abyss-media-img {
+      width: 100%;
+      height: 120%;
+      background-image: url('../../assets/images/landing/img_5.jpeg');
+      background-size: cover;
+      background-position: center;
+      position: absolute;
+      top: -10%;
+    }
+
+    /* 遮罩渐变 */
+    .fade-mask {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to bottom, transparent, var(--bg));
+      pointer-events: none;
+    }
+
+  </style>
+</head>
+<body>
+
+  <!-- 首屏 -->
+  <section class="hero">
+    <div class="hero-bg" id="heroBg"></div>
+    <h1 class="hero-title">
+      <span><i class="hero-text-line">Redefining</i></span>
+      <span><i class="hero-text-line">Warmth.</i></span>
+    </h1>
+  </section>
+
+  <!-- 横向滚动区 -->
+  <section class="horizontal-scroll-wrapper" id="hScrollWrapper">
+    <div class="horizontal-scroll-container">
+      <div class="horizontal-track" id="hTrack">
+        
+        <div class="h-card">
+          <div class="h-card-img">
+            <div class="h-card-img-inner" style="background-image: url('../../assets/images/landing/img_1.jpeg')"></div>
+          </div>
+          <h3>Graphene Tech</h3>
+          <p>核心石墨烯发热膜，毫秒级响应。像阳光一样穿透皮肤，带来由内而外的极致温暖。</p>
+        </div>
+
+        <div class="h-card">
+          <div class="h-card-img">
+            <div class="h-card-img-inner" style="background-image: url('../../assets/images/landing/img_2.jpeg')"></div>
+          </div>
+          <h3>Zero Noise</h3>
+          <p>无风机运转，无水暖流声。将绝对的宁静还给睡眠，营造博物馆级别的静谧空间。</p>
+        </div>
+
+        <div class="h-card">
+          <div class="h-card-img">
+            <div class="h-card-img-inner" style="background-image: url('../../assets/images/landing/img_3.jpeg')"></div>
+          </div>
+          <h3>Art Integration</h3>
+          <p>发热与饰面一体化。完美融入大平层、星级酒店与艺术画廊，打破传统取暖设备的审美妥协。</p>
+        </div>
+
+        <div class="h-card">
+          <div class="h-card-img">
+            <div class="h-card-img-inner" style="background-image: url('../../assets/images/landing/img_6.jpeg')"></div>
+          </div>
+          <h3>Absolute Safety</h3>
+          <p>精密印刷绝缘，防水防漏电。自限温技术彻底杜绝过热隐患，从根本上重塑安全标准。</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- 爆炸散开与聚焦区 -->
+  <section class="explosion-section" id="explosionSection">
+    <div class="explosion-container">
+      <div class="explosion-text e-text-1" style="top: 20%; left: 10%;">Aesthetic</div>
+      <div class="explosion-text e-text-2" style="top: 70%; left: 60%;">Performance</div>
+      <div class="explosion-text e-text-3" style="top: 40%; right: 10%;">Invisible</div>
+      <div class="explosion-text e-text-4" style="bottom: 10%; left: 20%;">Comfort</div>
+      <div class="explosion-text e-text-5" style="top: 10%; right: 30%;">Innovation</div>
+      
+      <div class="explosion-product" id="explosionProduct"></div>
+    </div>
+  </section>
+
+  <!-- 底部视差深渊区 -->
+  <section class="abyss-section">
+    <div class="abyss-text">
+      <h2 class="reveal-text">The Future of <br>Living Space.</h2>
+      <p class="reveal-text">志林科技不仅在制造取暖设备，更在重新定义空间的温度维度。</p>
+      <p class="reveal-text">摒弃一切冗余的管线与出风口，让科技完全隐身于高端饰面之下。你感受不到它的存在，却能被它温暖包裹。这是工业设计与家居美学的终极和解。</p>
+    </div>
+    <div class="abyss-media">
+      <div class="abyss-media-img" id="abyssImg"></div>
+      <div class="fade-mask"></div>
+    </div>
+  </section>
+
+
+  <script>
+    // 1. 初始化平滑滚动 Lenis
+    const lenis = new Lenis({
+      duration: 1.2,
+      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      direction: 'vertical',
+      gestureDirection: 'vertical',
+      smooth: true,
+      smoothTouch: false,
+      touchMultiplier: 2,
+    });
+
+    function raf(time) {
+      lenis.raf(time);
+      requestAnimationFrame(raf);
+    }
+    requestAnimationFrame(raf);
+
+    // 整合 GSAP 与 Lenis
+    gsap.registerPlugin(ScrollTrigger);
+    
+    // 2. 首屏加载入场动画
+    const tlIntro = gsap.timeline();
+    tlIntro.to(".hero-text-line", {
+      y: "0%",
+      duration: 1.4,
+      stagger: 0.15,
+      ease: "power4.out",
+      delay: 0.2
+    });
+
+    // 3. 首屏向下滚动：背景图撑满全屏
+    gsap.to("#heroBg", {
+      scrollTrigger: {
+        trigger: ".hero",
+        start: "top top",
+        end: "bottom top",
+        scrub: true,
+      },
+      width: "100vw",
+      height: "100vh",
+      borderRadius: "0px",
+      transform: "translate(-50%, -50%) scale(1)",
+      filter: "brightness(0.3) contrast(1)",
+      ease: "none"
+    });
+
+    gsap.to(".hero-title", {
+      scrollTrigger: {
+        trigger: ".hero",
+        start: "top top",
+        end: "bottom top",
+        scrub: true,
+      },
+      y: -200,
+      opacity: 0,
+      scale: 0.8,
+      ease: "none"
+    });
+
+    // 4. 横向滚动长廊 (Apple 风格平移)
+    const hTrack = document.getElementById("hTrack");
+    const hCards = gsap.utils.toArray(".h-card");
+    
+    // 计算需要平移的距离
+    let scrollTween = gsap.to(hTrack, {
+      x: () => -(hTrack.scrollWidth - window.innerWidth),
+      ease: "none",
+      scrollTrigger: {
+        trigger: "#hScrollWrapper",
+        start: "top top",
+        end: "bottom bottom",
+        scrub: 1, // 增加延迟感，显得更丝滑
+        invalidateOnRefresh: true
+      }
+    });
+
+    // 横向卡片内部图片的视差反向移动
+    hCards.forEach(card => {
+      const imgInner = card.querySelector(".h-card-img-inner");
+      gsap.to(imgInner, {
+        x: "20%", // 图片向右移动，容器向左移动，形成错位视差
+        ease: "none",
+        scrollTrigger: {
+          trigger: "#hScrollWrapper",
+          start: "top top",
+          end: "bottom bottom",
+          scrub: true,
+        }
+      });
+    });
+
+    // 5. 爆炸文字散开与产品浮现
+    const tlExplosion = gsap.timeline({
+      scrollTrigger: {
+        trigger: "#explosionSection",
+        start: "top top",
+        end: "bottom bottom",
+        scrub: 1,
+      }
+    });
+
+    // 文字向四周散开并变淡
+    tlExplosion.to(".e-text-1", { x: -500, y: -300, scale: 2, opacity: 0, duration: 1 }, 0)
+               .to(".e-text-2", { x: 600, y: 200, scale: 2.5, opacity: 0, duration: 1 }, 0)
+               .to(".e-text-3", { x: 500, y: -200, scale: 1.5, opacity: 0, duration: 1 }, 0)
+               .to(".e-text-4", { x: -400, y: 300, scale: 3, opacity: 0, duration: 1 }, 0)
+               .to(".e-text-5", { x: 200, y: -400, scale: 2, opacity: 0, duration: 1 }, 0);
+
+    // 中心产品图浮现、放大、聚焦
+    tlExplosion.to("#explosionProduct", {
+      opacity: 1,
+      scale: 1,
+      y: 0,
+      duration: 0.8,
+      ease: "power2.out"
+    }, 0.2);
+
+    // 6. 底部深渊图视差
+    gsap.to("#abyssImg", {
+      scrollTrigger: {
+        trigger: ".abyss-section",
+        start: "top bottom",
+        end: "bottom top",
+        scrub: true
+      },
+      y: "20%",
+      ease: "none"
+    });
+
+    // 底部文字逐行淡入
+    gsap.utils.toArray(".reveal-text").forEach(text => {
+      gsap.from(text, {
+        scrollTrigger: {
+          trigger: text,
+          start: "top 85%",
+        },
+        y: 40,
+        opacity: 0,
+        duration: 1,
+        ease: "power3.out"
+      });
+    });
+
+  </script>
+</body>
+</html>

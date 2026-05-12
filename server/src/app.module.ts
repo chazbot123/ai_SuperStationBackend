@@ -4,12 +4,15 @@ import { AppController } from './app.controller';
 import { AiModule } from './modules/ai/ai.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { BusinessCardsModule } from './modules/business-cards/business-cards.module';
+import { CustomerManagementModule } from './modules/customer-management/customer-management.module';
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
+import { PublishingModule } from './modules/publishing/publishing.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { ProductsModule } from './modules/products/products.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RulesModule } from './modules/rules/rules.module';
+import { SupportModule } from './modules/support/support.module';
+import { SuperSiteSettingsModule } from './modules/super-site-settings/super-site-settings.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -22,11 +25,14 @@ import { UsersModule } from './modules/users/users.module';
     PrismaModule,
     AuthModule,
     AgentsModule,
-    BusinessCardsModule,
     KnowledgeModule,
+    PublishingModule,
     ProductsModule,
+    CustomerManagementModule,
     RbacModule,
     RulesModule,
+    SupportModule,
+    SuperSiteSettingsModule,
     UsersModule,
   ],
   controllers: [AppController],

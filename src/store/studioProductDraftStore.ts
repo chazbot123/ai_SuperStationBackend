@@ -22,6 +22,7 @@ type StudioProductDraftState = {
   items: ProductImageDraftItem[];
   prependItem: (item: ProductImageDraftItem) => void;
   updateItem: (id: string, patch: Partial<ProductImageDraftItem>) => void;
+  removeItem: (id: string) => void;
 };
 
 export const useStudioProductDraftStore = create<StudioProductDraftState>()(
@@ -35,6 +36,10 @@ export const useStudioProductDraftStore = create<StudioProductDraftState>()(
       updateItem: (id, patch) =>
         set((state) => ({
           items: state.items.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
+        })),
+      removeItem: (id) =>
+        set((state) => ({
+          items: state.items.filter((entry) => entry.id !== id),
         })),
     }),
     {
