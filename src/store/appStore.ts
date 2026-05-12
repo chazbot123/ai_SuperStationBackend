@@ -2,20 +2,13 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { newId, nowIso } from "@/utils/id";
 
-export type PlatformKey =
-  | "xiaohongshu"
-  | "douyin"
-  | "wechat_mp"
-  | "kuaishou"
-  | "taobao"
-  | "super_site"
-  | "jd"
-  | "pdd";
+export type PlatformKey = "xiaohongshu" | "douyin" | "wechat_mp" | "taobao" | "super_site" | "jd" | "pdd";
 export type ContentType = "copy" | "video" | "product";
 export type ReviewStatus = "draft" | "submitted" | "approved" | "rejected";
+
+export type CardSkinKey = "black_gold" | "iridescent" | "geo_green" | "night_gold";
+export type VirtualAvatarKey = "cat" | "dog" | "dragon" | "dilireba" | "robot" | "custom";
 export type SiteTemplateKey = "standard" | "split";
-export type SiteMetricKey = "visits" | "consultations" | "signing_rate" | "purchases";
-export type SiteMetricValueMode = "dynamic" | "fixed";
 
 export type PublishStatus = "queued" | "running" | "success" | "failed";
 
@@ -85,20 +78,6 @@ export type SiteModule = {
   enabled: boolean;
 };
 
-export type SiteMetricItem = {
-  key: SiteMetricKey;
-  label: string;
-  enabled: boolean;
-  valueMode: SiteMetricValueMode;
-  startValue: string;
-  tickInterval: string;
-  incrementMin: string;
-  incrementMax: string;
-  fixedValue: string;
-  suffix: string;
-  highlight: string;
-};
-
 export type SpecialOfferItem = {
   id: string;
   name: string;
@@ -109,38 +88,6 @@ export type SpecialOfferItem = {
   ctaText: string;
   images: string[];
   enabled: boolean;
-};
-
-export type IndustrySourceType = "rss" | "html";
-
-export type IndustrySourceConfig = {
-  key: string;
-  label: string;
-  sourceType: IndustrySourceType;
-  enabled: boolean;
-};
-
-export type IndustryRefreshConfig = {
-  enabled: boolean;
-  frequency: "daily";
-  dailyTime: string;
-};
-
-export type IndustryItem = {
-  id: string;
-  sourceType: IndustrySourceType | "manual";
-  sourceKey: string;
-  title: string;
-  summary: string;
-  coverImage: string;
-  sourceUrl: string;
-  publishedAt: string | null;
-  sortOrder: number;
-  isPinned: boolean;
-  enabled: boolean;
-  manualCreated: boolean;
-  createdAt: string;
-  updatedAt: string;
 };
 
 export type ProductStatus = "draft" | "submitted" | "live" | "rejected" | "offline";
@@ -168,26 +115,14 @@ export type ProductItem = {
 
 export type Settings = {
   enterpriseName: string;
-  superSiteBaseUrl: string;
+  cardSkin: CardSkinKey;
+  virtualAvatar: VirtualAvatarKey;
+  virtualAvatarCustomUrl: string | null;
   siteTemplate: SiteTemplateKey;
   siteModules: SiteModule[];
-  siteMetrics: SiteMetricItem[];
   specialOfferTitle: string;
   specialOfferSubtitle: string;
   specialOffers: SpecialOfferItem[];
-  siteImageSlots: Array<{
-    slotKey: string;
-    moduleKey: string;
-    imageUrl: string;
-    sourceContentId?: string | null;
-    updatedAt?: string | null;
-  }>;
-  industrySourceConfigs: IndustrySourceConfig[];
-  industryKeywords: string[];
-  industryRefreshConfig: IndustryRefreshConfig;
-  industryLastSyncAt: string | null;
-  industryLastSyncStatus: string | null;
-  industryLastSyncError: string | null;
 };
 
 type AppState = {
@@ -246,15 +181,13 @@ type AppState = {
   updateUser: (id: string, patch: Partial<UserProfile>) => void;
   removeUser: (id: string) => void;
 
-  replaceSettings: (settings: Partial<Settings>) => void;
+  setCardSkin: (skin: CardSkinKey) => void;
   setEnterpriseName: (name: string) => void;
+  setVirtualAvatar: (avatar: VirtualAvatarKey) => void;
+  setVirtualAvatarCustomUrl: (url: string | null) => void;
   setSiteTemplate: (tpl: SiteTemplateKey) => void;
   toggleSiteModule: (key: string) => void;
   reorderSiteModules: (fromIndex: number, toIndex: number) => void;
-  toggleSiteMetric: (key: SiteMetricKey) => void;
-  setSiteMetricEnabled: (key: SiteMetricKey, enabled: boolean) => void;
-  updateSiteMetric: (key: SiteMetricKey, patch: Partial<SiteMetricItem>) => void;
-  reorderSiteMetrics: (fromIndex: number, toIndex: number) => void;
   setSpecialOfferTitle: (title: string) => void;
   setSpecialOfferSubtitle: (subtitle: string) => void;
   addSpecialOffer: () => void;
@@ -271,63 +204,6 @@ function defaultSiteModules(): SiteModule[] {
     { key: "special_offer", label: "特价商品", enabled: true },
     { key: "ai_kf", label: "AI客服", enabled: true },
     { key: "ai_video", label: "AI视频", enabled: true },
-  ];
-}
-
-function defaultSiteMetrics(): SiteMetricItem[] {
-  return [
-    {
-      key: "visits",
-      label: "访问量",
-      enabled: true,
-      valueMode: "dynamic",
-      startValue: "2680",
-      tickInterval: "8",
-      incrementMin: "1",
-      incrementMax: "3",
-      fixedValue: "",
-      suffix: "",
-      highlight: "展示站点整体访问热度",
-    },
-    {
-      key: "consultations",
-      label: "咨询量",
-      enabled: true,
-      valueMode: "dynamic",
-      startValue: "126",
-      tickInterval: "15",
-      incrementMin: "1",
-      incrementMax: "2",
-      fixedValue: "",
-      suffix: "",
-      highlight: "突出线索承接效率",
-    },
-    {
-      key: "signing_rate",
-      label: "招商签约率",
-      enabled: true,
-      valueMode: "fixed",
-      startValue: "",
-      tickInterval: "",
-      incrementMin: "",
-      incrementMax: "",
-      fixedValue: "31",
-      suffix: "%",
-      highlight: "适合展示阶段性经营结果",
-    },
-    {
-      key: "purchases",
-      label: "购买量",
-      enabled: true,
-      valueMode: "dynamic",
-      startValue: "880",
-      tickInterval: "20",
-      incrementMin: "1",
-      incrementMax: "2",
-      fixedValue: "",
-      suffix: "",
-      highlight: "适合营造成交活跃感",
-    },
   ];
 }
 
@@ -369,31 +245,6 @@ function defaultSpecialOffers(): SpecialOfferItem[] {
   ];
 }
 
-function defaultIndustrySourceConfigs(): IndustrySourceConfig[] {
-  return [
-    { key: "huxiu_rss", label: "虎嗅", sourceType: "rss", enabled: true },
-    { key: "36kr_rss", label: "36氪", sourceType: "rss", enabled: true },
-    { key: "qbitai_html", label: "量子位", sourceType: "rss", enabled: true },
-    { key: "leiphone_html", label: "雷峰网", sourceType: "rss", enabled: true },
-    { key: "infoq_rss", label: "InfoQ", sourceType: "rss", enabled: true },
-    { key: "ifanr_rss", label: "爱范儿", sourceType: "rss", enabled: true },
-    { key: "sspai_rss", label: "少数派", sourceType: "rss", enabled: true },
-    { key: "geekpark_rss", label: "极客公园", sourceType: "rss", enabled: true },
-  ];
-}
-
-function defaultIndustryKeywords(): string[] {
-  return ["AI建站", "智能营销", "数字化招商"];
-}
-
-function defaultIndustryRefreshConfig(): IndustryRefreshConfig {
-  return {
-    enabled: true,
-    frequency: "daily",
-    dailyTime: "09:00",
-  };
-}
-
 function buildSpecialOffer(index: number, patch?: Partial<SpecialOfferItem>): SpecialOfferItem {
   return {
     id: patch?.id ?? newId("offer"),
@@ -411,42 +262,26 @@ function buildSpecialOffer(index: number, patch?: Partial<SpecialOfferItem>): Sp
 function defaultSettings(): Settings {
   return {
     enterpriseName: "示例科技",
-    superSiteBaseUrl: "",
+    cardSkin: "black_gold",
+    virtualAvatar: "cat",
+    virtualAvatarCustomUrl: null,
     siteTemplate: "standard",
     siteModules: defaultSiteModules(),
-    siteMetrics: defaultSiteMetrics(),
     specialOfferTitle: "特价商品专区",
     specialOfferSubtitle: "支持首页插入限时优惠、秒杀引导与爆款推荐",
     specialOffers: defaultSpecialOffers(),
-    siteImageSlots: [],
-    industrySourceConfigs: defaultIndustrySourceConfigs(),
-    industryKeywords: defaultIndustryKeywords(),
-    industryRefreshConfig: defaultIndustryRefreshConfig(),
-    industryLastSyncAt: null,
-    industryLastSyncStatus: null,
-    industryLastSyncError: null,
   };
 }
 
 function mergeSettings(settings?: Partial<Settings> | null): Settings {
   const defaults = defaultSettings();
   const savedModules = settings?.siteModules ?? [];
-  const savedMetrics = settings?.siteMetrics ?? [];
   const savedOffers = settings?.specialOffers ?? [];
-  const savedImageSlots = settings?.siteImageSlots ?? [];
-  const savedIndustrySourceConfigs = settings?.industrySourceConfigs ?? [];
   const hasSavedOffers = Array.isArray(settings?.specialOffers);
 
   const siteModules = [
     ...savedModules,
     ...defaults.siteModules.filter((module) => !savedModules.some((saved) => saved.key === module.key)),
-  ];
-  const siteMetrics = [
-    ...savedMetrics.map((metric) => ({
-      ...defaults.siteMetrics.find((item) => item.key === metric.key),
-      ...metric,
-    })),
-    ...defaults.siteMetrics.filter((metric) => !savedMetrics.some((saved) => saved.key === metric.key)),
   ];
 
   const specialOffers = hasSavedOffers
@@ -456,35 +291,8 @@ function mergeSettings(settings?: Partial<Settings> | null): Settings {
   return {
     ...defaults,
     ...settings,
-    superSiteBaseUrl:
-      typeof settings?.superSiteBaseUrl === "string" ? settings.superSiteBaseUrl.trim() : defaults.superSiteBaseUrl,
     siteModules,
-    siteMetrics,
     specialOffers,
-    siteImageSlots: savedImageSlots
-      .filter((item) => item?.slotKey?.trim() && item?.moduleKey?.trim() && item?.imageUrl?.trim())
-      .map((item) => ({
-        slotKey: item.slotKey.trim(),
-        moduleKey: item.moduleKey.trim(),
-        imageUrl: item.imageUrl.trim(),
-        sourceContentId: item.sourceContentId?.trim() || null,
-        updatedAt: item.updatedAt?.trim() || null,
-      })),
-    industrySourceConfigs: defaults.industrySourceConfigs.map((item) => ({
-      ...item,
-      enabled: savedIndustrySourceConfigs.find((saved) => saved.key === item.key)?.enabled ?? item.enabled,
-    })),
-    industryKeywords:
-      settings?.industryKeywords?.map((item) => item.trim()).filter(Boolean).length
-        ? settings.industryKeywords.map((item) => item.trim()).filter(Boolean)
-        : defaults.industryKeywords,
-    industryRefreshConfig: {
-      ...defaults.industryRefreshConfig,
-      ...(settings?.industryRefreshConfig ?? {}),
-    },
-    industryLastSyncAt: settings?.industryLastSyncAt ?? defaults.industryLastSyncAt,
-    industryLastSyncStatus: settings?.industryLastSyncStatus ?? defaults.industryLastSyncStatus,
-    industryLastSyncError: settings?.industryLastSyncError ?? defaults.industryLastSyncError,
   };
 }
 
@@ -718,8 +526,10 @@ export const useAppStore = create<AppState>()(
       },
       removeUser: (id) => set({ users: get().users.filter((u) => u.id !== id) }),
 
-      replaceSettings: (settings) => set({ settings: mergeSettings(settings) }),
+      setCardSkin: (skin) => set({ settings: { ...get().settings, cardSkin: skin } }),
       setEnterpriseName: (name) => set({ settings: { ...get().settings, enterpriseName: name } }),
+      setVirtualAvatar: (avatar) => set({ settings: { ...get().settings, virtualAvatar: avatar } }),
+      setVirtualAvatarCustomUrl: (url) => set({ settings: { ...get().settings, virtualAvatarCustomUrl: url } }),
       setSiteTemplate: (tpl) => set({ settings: { ...get().settings, siteTemplate: tpl } }),
       toggleSiteModule: (key) => {
         set({
@@ -728,44 +538,6 @@ export const useAppStore = create<AppState>()(
             siteModules: get().settings.siteModules.map((m) => (m.key === key ? { ...m, enabled: !m.enabled } : m)),
           },
         });
-      },
-      toggleSiteMetric: (key) => {
-        set({
-          settings: {
-            ...get().settings,
-            siteMetrics: get().settings.siteMetrics.map((metric) =>
-              metric.key === key ? { ...metric, enabled: !metric.enabled } : metric
-            ),
-          },
-        });
-      },
-      setSiteMetricEnabled: (key, enabled) => {
-        set({
-          settings: {
-            ...get().settings,
-            siteMetrics: get().settings.siteMetrics.map((metric) =>
-              metric.key === key ? { ...metric, enabled } : metric
-            ),
-          },
-        });
-      },
-      updateSiteMetric: (key, patch) => {
-        set({
-          settings: {
-            ...get().settings,
-            siteMetrics: get().settings.siteMetrics.map((metric) =>
-              metric.key === key ? { ...metric, ...patch, key: metric.key } : metric
-            ),
-          },
-        });
-      },
-      reorderSiteMetrics: (fromIndex, toIndex) => {
-        const list = [...get().settings.siteMetrics];
-        if (fromIndex < 0 || fromIndex >= list.length) return;
-        if (toIndex < 0 || toIndex >= list.length) return;
-        const [metric] = list.splice(fromIndex, 1);
-        list.splice(toIndex, 0, metric);
-        set({ settings: { ...get().settings, siteMetrics: list } });
       },
       reorderSiteModules: (fromIndex, toIndex) => {
         const list = [...get().settings.siteModules];
