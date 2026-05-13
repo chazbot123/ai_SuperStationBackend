@@ -3,13 +3,13 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CustomerSourcePlatform } from '@prisma/client';
 import type { SessionUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAIN_COMPANY_ROLE_KEY } from '../rbac/rbac.constants';
+import { resolveAmapWebServiceKey } from './amap.config';
 import { ImportGaodeStoresDto } from './dto/import-gaode-stores.dto';
 import { ListStoreSearchRegionsQueryDto } from './dto/list-store-search-regions-query.dto';
 import { SearchGaodeStoresDto } from './dto/search-gaode-stores.dto';
@@ -374,11 +374,7 @@ export class PublishingStoreSearchService {
   }
 
   private getAmapKey() {
-    const key = this.configService.get<string>('AMAP_WEB_SERVICE_KEY')?.trim();
-    if (!key) {
-      throw new ServiceUnavailableException('未配置高德地图服务密钥');
-    }
-    return key;
+    return resolveAmapWebServiceKey(this.configService);
   }
 
   private async resolveRegion(

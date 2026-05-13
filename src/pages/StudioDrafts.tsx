@@ -52,6 +52,32 @@ type DraftItem = {
 
 type SourceFilter = "all" | "social" | "product";
 
+function reviewStageMeta(stage: DraftItem["reviewStage"]) {
+  if (stage === "submitted") return { label: "当前状态：待审核", variant: "amber" as const };
+  if (stage === "approved") return { label: "当前状态：审核通过", variant: "green" as const };
+  return { label: "当前状态：草稿", variant: "gray" as const };
+}
+
+function DraftSectionBlock({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <div className="text-sm font-medium text-zinc-100">{title}</div>
+        {action}
+      </div>
+      <div className="p-4">{children}</div>
+    </section>
+  );
+}
+
 function formatTagInput(tags?: string[]) {
   return (tags ?? [])
     .map((item) => item.trim().replace(/^#+/, ""))
@@ -700,7 +726,7 @@ export default function StudioDrafts() {
 
       <Modal
         open={!!editingItem}
-        title="编辑草稿"
+        title="草稿编辑"
         onClose={() => {
           setPreviewImage(null);
           setEditingItem(null);
@@ -736,95 +762,130 @@ export default function StudioDrafts() {
       >
         {editingItem ? (
           <div className="space-y-4">
-            <div>
-              <div className="text-xs text-zinc-500">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={reviewStageMeta(editingItem.reviewStage).variant}>
+                {reviewStageMeta(editingItem.reviewStage).label}
+              </Badge>
+              <Badge variant="blue">{sourceMeta(editingItem.source).label}</Badge>
+              {editingItem.syncedToLeads ? <Badge variant="blue">已同步获客</Badge> : null}
+              {editingItem.syncedToProducts ? <Badge variant="blue">已同步产品</Badge> : null}
+            </div>
+
+            <DraftSectionBlock title="草稿信息">
+              <div className="text-xs text-zinc-400">
                 {new Date(editingItem.createdAt).toLocaleString()} · 来源 {sourceMeta(editingItem.source).label}
               </div>
-            </div>
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
+            </DraftSectionBlock>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.95fr)]">
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="text-sm text-zinc-200">标题</div>
-                  <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} placeholder="请输入标题" />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm text-zinc-200">文案</div>
+                {editingItem.source === "social" ? (
+                  <DraftSectionBlock title="标签">
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {editTags
+                          .split(/\s+/)
+                          .map((item) => item.trim().replace(/^#+/, ""))
+                          .filter(Boolean)
+                          .map((tag) => (
+                            <Badge key={tag} variant="gray">
+                              #{tag}
+                            </Badge>
+                          ))}
+                      </div>
+                      <textarea
+                        value={editTags}
+                        onChange={(event) => setEditTags(event.target.value)}
+                        rows={3}
+                        className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
+                        placeholder="请输入标签，使用空格分隔，例如：#智能好物 #高效工具 #种草推荐"
+                      />
+                      <div className="text-xs text-zinc-500">支持直接输入 #标签，保存时会自动去重。</div>
+                    </div>
+                  </DraftSectionBlock>
+                ) : null}
+
+                <DraftSectionBlock title="标题">
+                  <div className="space-y-2">
+                    <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} placeholder="请输入标题" />
+                  </div>
+                </DraftSectionBlock>
+
+                <DraftSectionBlock title="文案内容">
                   <textarea
                     value={editBody}
                     onChange={(event) => setEditBody(event.target.value)}
                     rows={12}
-                    className="min-h-[220px] w-full rounded-md border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30 sm:min-h-[280px]"
+                    className="min-h-[260px] w-full resize-y rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
                     placeholder="请输入文案"
                   />
-                </div>
-                {editingItem.source === "social" ? (
-                  <div className="space-y-2">
-                    <div className="text-sm text-zinc-200">标签</div>
-                    <textarea
-                      value={editTags}
-                      onChange={(event) => setEditTags(event.target.value)}
-                      rows={3}
-                      className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30"
-                      placeholder="请输入标签，使用空格分隔，例如：#智能好物 #高效工具 #种草推荐"
-                    />
-                    <div className="text-xs text-zinc-500">支持直接输入 #标签，保存时会自动去重。</div>
-                  </div>
-                ) : null}
+                </DraftSectionBlock>
               </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm text-zinc-200">图片</div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={uploadInputRef}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      className="hidden"
-                      onChange={handleUploadImages}
-                    />
-                    <Button type="button" variant="secondary" size="sm" onClick={() => uploadInputRef.current?.click()}>
-                      <Upload className="h-4 w-4" />
-                      {uploadingImages ? "上传中..." : "上传图片"}
-                    </Button>
-                  </div>
-                </div>
-                {getVisibleImages(editImages).length > 0 ? (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                    {getVisibleImages(editImages).map(({ index: originalIndex, image }, index) => (
-                      <div key={`${editingItem.id}_${originalIndex}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                        <button
-                          type="button"
-                          className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-red-500"
-                          onClick={() => handleRemoveImage(originalIndex)}
-                          aria-label="删除图片"
-                        >
-                          ×
-                        </button>
-                        <button
-                          type="button"
-                          className="absolute bottom-2 right-2 z-10 inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-black/70 px-2 text-white transition hover:bg-amber-500"
-                          onClick={() => handleDownloadImage(editingItem, image, originalIndex)}
-                          aria-label="下载图片到本地"
-                        >
-                          <Download className="h-4 w-4" />
-                        </button>
-                        <button type="button" className="block w-full" onClick={() => setPreviewImage(image)} aria-label="放大预览图片">
-                          <img src={image} alt={`${editingItem.title}_${index + 1}`} className="aspect-[4/3] w-full object-cover transition hover:scale-[1.01]" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-zinc-500">
-                    当前草稿还没有图片，你可以自己上传
-                  </div>
-                )}
+
+              <div className="space-y-4">
+                <DraftSectionBlock
+                  title="结果预览"
+                  action={
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={uploadInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={handleUploadImages}
+                      />
+                      <Button type="button" variant="secondary" size="sm" onClick={() => uploadInputRef.current?.click()}>
+                        <Upload className="h-4 w-4" />
+                        {uploadingImages ? "上传中..." : "上传图片"}
+                      </Button>
+                    </div>
+                  }
+                >
+                  {getVisibleImages(editImages).length > 0 ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                      {getVisibleImages(editImages).map(({ index: originalIndex, image }, index) => (
+                        <div key={`${editingItem.id}_${originalIndex}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/30">
+                          <button
+                            type="button"
+                            className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-red-500"
+                            onClick={() => handleRemoveImage(originalIndex)}
+                            aria-label="删除图片"
+                          >
+                            ×
+                          </button>
+                          <button
+                            type="button"
+                            className="absolute bottom-2 right-2 z-10 inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-black/70 px-2 text-white transition hover:bg-amber-500"
+                            onClick={() => handleDownloadImage(editingItem, image, originalIndex)}
+                            aria-label="下载图片到本地"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            className="block w-full"
+                            onClick={() => setPreviewImage(image)}
+                            aria-label="放大预览图片"
+                          >
+                            <img
+                              src={image}
+                              alt={`${editingItem.title}_${index + 1}`}
+                              className="aspect-[4/3] w-full object-cover transition hover:scale-[1.01]"
+                            />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-zinc-500">
+                      当前草稿还没有图片，你可以自己上传。
+                    </div>
+                  )}
+                </DraftSectionBlock>
               </div>
             </div>
-            {editingItem.reviewStage === "submitted" ? <Badge variant="amber">当前状态：待审核</Badge> : null}
-            {editingItem.reviewStage === "approved" ? <Badge variant="green">当前状态：审核通过</Badge> : null}
-            {editingItem.reviewStage === "draft" ? <Badge variant="gray">当前状态：草稿</Badge> : null}
+
             {isAgent && editingItem.reviewStage === "draft" ? (
               <div className="flex justify-end">
                 <Button type="button" variant="secondary" size="sm" onClick={() => void handleSubmitReview(editingItem)}>

@@ -172,9 +172,7 @@ function getPlatformPublishUrl(platform, job) {
       : "https://channels.weixin.qq.com/platform/post/finderNewLifeCreate";
   }
   if (platform === "kuaishou") {
-    return hasVideo
-      ? "https://cp.kuaishou.com/article/publish/video"
-      : "https://cp.kuaishou.com/article/publish/video?tabType=2";
+    return "https://cp.kuaishou.com/profile";
   }
   return "https://www.google.com/";
 }
@@ -278,7 +276,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             tabId: tab.id,
             job: payload.session.job,
             status: "pending",
-            executionRequested: false,
+            lastDispatchUrl: "",
+            lastDispatchAt: 0,
           });
           sendResponseSafe(sendResponse, { ok: true });
         } catch (error) {
@@ -296,12 +295,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     scheduleSync(message.payload.platform, message.payload);
 
     const publishSession = sender.tab?.id ? getPublishSessionByTabId(sender.tab.id) : null;
+    const readyUrl = String(message.payload.url || "");
+    const isTerminal =
+      publishSession?.status === "success" || publishSession?.status === "failed";
+    const dispatchedRecently =
+      publishSession &&
+      publishSession.lastDispatchUrl === readyUrl &&
+      Date.now() - Number(publishSession.lastDispatchAt || 0) < 15000;
     if (
       publishSession &&
       publishSession.platform === message.payload.platform &&
-      !publishSession.executionRequested
+      !isTerminal &&
+      !dispatchedRecently
     ) {
-      publishSession.executionRequested = true;
+      publishSession.lastDispatchUrl = readyUrl;
+      publishSession.lastDispatchAt = Date.now();
       chrome.tabs.sendMessage(
         sender.tab.id,
         {
@@ -316,7 +324,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         },
         () => {
           if (chrome.runtime.lastError) {
-            publishSession.executionRequested = false;
+            publishSession.lastDispatchUrl = "";
+            publishSession.lastDispatchAt = 0;
             notifyPublishError(publishSession, "扩展未能注入本地发布脚本");
           }
         },
@@ -332,6 +341,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (item) => item.sessionToken === message.payload.sessionToken,
     );
     if (publishSession) {
+      if (message.payload.status === "running") {
+        publishSession.status = "running";
+      }
       void syncPublishResult(publishSession, message.payload);
     }
     sendResponseSafe(sendResponse, { ok: true });

@@ -1,5 +1,0 @@
-2026/05/12-10:21:17.897 955c Creating DB D:\zhilin_project\server\.runtime\publishing-platform-sessions\cmp20761p00036cu9jj3d7xo7\Default\EdgeCoupons/coupons_data.db since it was missing.
-2026/05/12-10:21:17.906 955c Reusing MANIFEST D:\zhilin_project\server\.runtime\publishing-platform-sessions\cmp20761p00036cu9jj3d7xo7\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
-2026/05/12-10:21:18.082 760c Level-0 table #5: started
-2026/05/12-10:21:18.086 760c Level-0 table #5: 682457 bytes OK
-2026/05/12-10:21:18.088 760c Delete type=0 #3

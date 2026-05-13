@@ -125,7 +125,7 @@ describe('PlatformLoginBrowserService', () => {
         reader({
           context: {} as never,
           page: {
-            url: () => 'https://cp.kuaishou.com/article/publish/video?tabType=2',
+            url: () => 'https://cp.kuaishou.com/profile',
           } as never,
         }),
       );
@@ -148,7 +148,7 @@ describe('PlatformLoginBrowserService', () => {
     });
 
     expect(publishKuaishouImagePost).toHaveBeenCalled();
-    expect(result.draftUrl).toBe('https://cp.kuaishou.com/article/publish/video?tabType=2');
+    expect(result.draftUrl).toBe('https://cp.kuaishou.com/profile');
   });
 
   it('dispatches Wechat publish jobs through a dedicated browser flow', async () => {
@@ -221,7 +221,7 @@ describe('PlatformLoginBrowserService', () => {
     ).toBe(false);
   });
 
-  it('clicks the first visible Xiaohongshu topic candidate', async () => {
+  it('clicks the first visible matching candidate text', async () => {
     const hiddenCandidate = {
       isVisible: jest.fn().mockResolvedValue(false),
       textContent: jest.fn().mockResolvedValue('隐藏候选'),
@@ -242,7 +242,7 @@ describe('PlatformLoginBrowserService', () => {
 
     const humanClick = jest.spyOn(service as never, 'humanClick').mockResolvedValue(undefined);
 
-    const result = await (service as never)['clickFirstVisibleXiaohongshuTopicCandidate'](page);
+    const result = await (service as never)['clickFirstVisibleMatchingText'](locator, /露营/);
 
     expect(result).toBe(true);
     expect(humanClick).toHaveBeenCalledWith(visibleCandidate);
@@ -282,7 +282,7 @@ describe('PlatformLoginBrowserService', () => {
 
   it('does not treat the Kuaishou publish page as a login page', async () => {
     const page = {
-      url: jest.fn().mockReturnValue('https://cp.kuaishou.com/article/publish/video?tabType=2'),
+      url: jest.fn().mockReturnValue('https://cp.kuaishou.com/profile'),
       waitForLoadState: jest.fn().mockResolvedValue(undefined),
       goto: jest.fn().mockResolvedValue(undefined),
       waitForTimeout: jest.fn().mockResolvedValue(undefined),
@@ -320,7 +320,7 @@ describe('PlatformLoginBrowserService', () => {
     );
   });
 
-  it('appends Xiaohongshu tags on a new line and converts them through the topic flow', async () => {
+  it('appends Xiaohongshu tags as plain text on a new line', async () => {
     const editor = {};
     const page = {
       keyboard: {
@@ -334,16 +334,12 @@ describe('PlatformLoginBrowserService', () => {
       .spyOn(service as never, 'findAndHighlightFirst')
       .mockResolvedValue(editor);
     const humanClick = jest.spyOn(service as never, 'humanClick').mockResolvedValue(undefined);
-    const clickTopicCandidate = jest
-      .spyOn(service as never, 'clickFirstVisibleXiaohongshuTopicCandidate')
-      .mockResolvedValue(true);
 
-    await (service as never)['tryAppendXiaohongshuTopics'](page, ['露营']);
+    await (service as never)['appendPlainTagsAfterBody'](page, editor, ['露营']);
 
     expect(page.keyboard.press).toHaveBeenCalledWith('Control+End');
     expect(page.keyboard.press).toHaveBeenCalledWith('Enter');
     expect(page.keyboard.type).toHaveBeenCalledWith('#露营', { delay: 60 });
-    expect(clickTopicCandidate).toHaveBeenCalledWith(page, '露营');
     expect(humanClick).toHaveBeenCalledWith(editor);
   });
 
@@ -385,23 +381,8 @@ describe('PlatformLoginBrowserService', () => {
     expect(humanClick).toHaveBeenCalledWith(topicButton);
   });
 
-  it('clicks the first visible Douyin topic candidate by default', async () => {
-    const hiddenCandidate = {
-      textContent: jest.fn().mockResolvedValue('隐藏候选'),
-      isVisible: jest.fn().mockResolvedValue(false),
-      locator: jest.fn(),
-    };
-    const firstVisibleCandidate = {
-      textContent: jest.fn().mockResolvedValue('平台推荐标签'),
-      isVisible: jest.fn().mockResolvedValue(true),
-      locator: jest.fn(),
-    };
-    const locator = {
-      count: jest.fn().mockResolvedValue(2),
-      nth: jest.fn((index: number) => (index === 0 ? hiddenCandidate : firstVisibleCandidate)),
-    };
+  it('applies Douyin topic through keyboard selection flow', async () => {
     const page = {
-      locator: jest.fn().mockReturnValue(locator),
       keyboard: {
         press: jest.fn().mockResolvedValue(undefined),
       },
@@ -409,13 +390,17 @@ describe('PlatformLoginBrowserService', () => {
     };
     const editor = {};
 
-    const humanClick = jest.spyOn(service as never, 'humanClick').mockResolvedValue(undefined);
-    jest.spyOn(service as never, 'hasAppliedDouyinTopic').mockResolvedValue(true);
+    jest
+      .spyOn(service as never, 'hasAppliedDouyinTopic')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
 
     const result = await (service as never)['clickDouyinTopicOption'](page, editor, '露营');
 
     expect(result).toBe(true);
-    expect(humanClick).toHaveBeenCalledWith(firstVisibleCandidate);
+    expect(page.keyboard.press).toHaveBeenNthCalledWith(1, 'Enter');
+    expect(page.keyboard.press).toHaveBeenNthCalledWith(2, 'ArrowDown');
+    expect(page.keyboard.press).toHaveBeenNthCalledWith(3, 'Enter');
   });
   it('uses Kuaishou fast humanized typing when filling the image post editor', async () => {
     const editor = {};
@@ -438,22 +423,23 @@ describe('PlatformLoginBrowserService', () => {
     });
   });
 
-  it('uses Kuaishou fast humanized clicking for the publish button', async () => {
+  it('uses slower humanized clicking for the Kuaishou publish button', async () => {
     const publishButton = {};
     const page = {
       waitForTimeout: jest.fn().mockResolvedValue(undefined),
     };
 
     jest.spyOn(service as never, 'findAndHighlightFirst').mockResolvedValue(publishButton);
-    const humanClickFast = jest
-      .spyOn(service as never, 'humanClickFast')
+    const humanClick = jest
+      .spyOn(service as never, 'humanClick')
       .mockResolvedValue(undefined);
-    jest.spyOn(service as never, 'waitForActionFinished').mockResolvedValue(undefined);
+    const humanPauseFast = jest.spyOn(service as never, 'humanPauseFast').mockResolvedValue(undefined);
 
     await (service as never)['clickKuaishouPublish'](page);
 
-    expect(page.waitForTimeout).toHaveBeenCalledWith(320);
-    expect(humanClickFast).toHaveBeenCalledWith(publishButton);
+    expect(page.waitForTimeout).toHaveBeenCalledWith(420);
+    expect(humanClick).toHaveBeenCalledWith(publishButton);
+    expect(humanPauseFast).toHaveBeenCalledWith(page, 280, 520);
   });
 
   it('uploads through the native file chooser when the Kuaishou upload button opens one', async () => {

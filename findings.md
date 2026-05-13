@@ -151,3 +151,40 @@
 - 浏览器扩展当前只具备 `PING / START_LOGIN` 登录回传能力，相关桥接在 `src/lib/platformLoginExtension.ts`，扩展目录在 `scripts/browser-extension/platform-login-helper`
 - 扩展 background/content 目前只处理 Cookie 读取和登录回传，没有“本地执行发布脚本”的消息协议
 - 旧的 4 平台发布步骤仍集中在 `server/src/modules/publishing/platform-login-browser.service.ts`：`publishXiaohongshu* / publishDouyinContent / publishWechatMp* / publishKuaishou*`
+
+## 2026-05-12 快手发布链路补充
+- 用户提供的快手真实发布路径应从 `https://cp.kuaishou.com/profile` 进入，而不是旧的 `/article/publish/video`
+- 图文发布真实步骤为：点击 `发布图文` 卡片 -> 点击 `上传图片` 按钮 -> 上传图片 -> 点击 `#work-description-edit` 描述区 -> 输入标题/回车/文案/回车 -> 每个标签输入后点击候选 `span` -> 点击 `发布`
+- 视频发布真实步骤为：点击 `发布视频` 卡片 -> 点击 `上传视频` 按钮 -> 上传视频 -> 点击 `#work-description-edit` 描述区 -> 输入标题/回车/文案/回车 -> 每个标签输入后点击候选 `span` -> 点击 `发布`
+- 快手当前描述区是 `div[contenteditable="true"]#work-description-edit`，不是常规 `input/textarea`
+- 快手标签候选当前可优先按 `span[class*="at-tag-name"]` 与示例类 `span._at-tag-name_eho7l_222` 识别
+- 用户额外要求快手步骤需做模拟鼠标点击且速度不要太快；因此扩展本地发布与后端备用 Playwright 都需使用更慢的人类化点击节奏
+- 当前扩展后台对发布会话只在第一次 `AI_SUPERWEB_PLATFORM_PAGE_READY` 时下发一次 `EXECUTE_PUBLISH`
+- 快手从 `/profile` 点击 `发布图文/发布视频` 卡片后会进入新页面，原页面脚本上下文会被销毁；若后台不在新页面再次下发执行指令，流程会卡在跨页步骤附近
+
+## 2026-05-12 AiToEarn 源码迁移评估
+- AiToEarn 当前主链路不是本地浏览器扩展发帖，而是 `Relay OAuth + 渠道账号 + PublishRecord + 队列任务` 的服务端架构
+- `docker-compose.yml` 暴露的是 `aitoearn-web + aitoearn-server + aitoearn-ai + MongoDB + Redis + RustFS`，不是单体发布脚本
+- `src/core/channel/publish.controller.ts` 会把本地发布记录和 Relay 侧发布记录合并返回，说明“自部署 + 官方 Relay”是混合架构
+- `src/core/relay/relay-oauth.controller.ts` 负责接收官方 Relay OAuth 回调并在本地创建账号，`relay-client.service.ts` 用 `x-api-key` 访问官方 `RELAY_SERVER_URL`
+- `src/core/channel/publishing/publishing.service.ts` 创建发布任务时若账号带 `relayAccountRef` 会直接抛异常，说明 Relay 账号与本地直发账号是两套分流逻辑，不是简单同库同流程
+- `src/core/channel/publishing/providers/douyin.service.ts` 依赖抖音开放能力与 share schema；`providers/kwai.service.ts` 依赖快手 OAuth token + 分片上传 + 官方发布接口
+- 当前公开源码能看到 `douyin / kwai / bilibili / youtube / facebook / instagram / threads / twitter / pinterest / wx-gzh` 等 provider，但未看到你们现阶段最关键的“本机扩展 + Cookie 回传 + 页面自动化”实现
+- 对你们现有系统而言，可借鉴的是“账号模型、任务队列、平台 provider 分层”；不能低成本直接迁的是“授权体系、数据模型、基础设施、发布执行方式”
+
+## 2026-05-12 AiToEarn MCP 公开工具补充
+- README 中公开给 Claude/Cursor 的 MCP 地址是 `/api/unified/mcp`，统一入口不是单独 publish API
+- `UnifiedMcpModule` 当前把 `AccountMcpController + PublishMcpController + ContentMcpController` 聚合到 `apiPrefix: unified`
+- 同时还存在 3 个单独 MCP 模块：`account`、`publish`、`content`
+- 已确认账号类工具 2 个：`getAccountGroupList`、`getAccountListByGroupId`
+- 已确认内容类工具 4 个：`getMediaGroupInfoByName`、`createMedia`、`getDraftGroupInfoByName`、`createDraft`
+- 已确认发布类工具至少 12 个：`getPublishingTaskStatus`、`publishRestrictions`、`publishPostToBilibili`、`publishPostToWxGzh`、`publishPostToYoutube`、`publishPostToPinterest`、`publishPostToThreads`、`publishPostToTiktok`、`publishPostToFacebook`、`publishPostToInstagram`、`publishPostToKwai`、`publishPostToTwitter`
+- 从当前 `publish.mcp.controller.ts` 可见导入判断，未确认公开 MCP 里存在 `publishPostToDouyin`、`publishPostToXhs`、`视频号` 相关工具；至少当前已抓到的 controller 片段里没有这些 schema 导入
+- “一键发布”能力是有的，但形态是“按平台的 publishPostTo* 工具逐个创建发布任务”，不是你们系统里那种多平台单按钮聚合接口
+- “查状态”能力已确认有：`getPublishingTaskStatus(flowId)`
+- “渠道账号”能力已确认有基础查询：账号分组与分组下账号列表；未确认有“直接创建/发起 OAuth 登录账号”的 MCP 工具
+
+## 2026-05-12 草稿箱编辑页 UI 对齐补充
+- 图文草稿箱编辑弹窗在 `src/pages/StudioDrafts.tsx`，当前仍是旧的“标题/文案/标签/图片”表单堆叠布局
+- 视频草稿箱编辑弹窗在 `src/pages/VideoDrafts.tsx`，当前结构是“状态徽标 -> 标签区 -> 标题区 -> 主内容预览 -> 文案编辑”的统一结果页样式
+- 图文草稿箱若要模仿视频草稿箱 UI，最小改造点集中在 `StudioDrafts.tsx` 的编辑 `Modal`，无需改后端或草稿读写接口

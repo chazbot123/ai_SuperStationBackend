@@ -212,7 +212,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       case LeadPublishPlatform.wechat_mp:
         return 'https://channels.weixin.qq.com/';
       case LeadPublishPlatform.kuaishou:
-        return 'https://cp.kuaishou.com/article/publish/video';
+        return 'https://cp.kuaishou.com/profile';
       default:
         return 'https://www.google.com/';
     }
@@ -556,7 +556,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
           ? 'https://channels.weixin.qq.com/platform/post/create'
           : 'https://channels.weixin.qq.com/platform/post/finderNewLifeCreate';
       case LeadPublishPlatform.kuaishou:
-        return 'https://cp.kuaishou.com/article/publish/video?origin=www.kuaishou.com';
+        return 'https://cp.kuaishou.com/profile';
       default:
         return this.getPlatformLoginUrl(platform);
     }
@@ -1133,47 +1133,48 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   ) {
     this.logger.log(`[kuaishou-publish] start job=${input.jobId} imageCount=${uploadFiles.length}`);
     await this.enterKuaishouImagePublish(page);
+    await this.assertKuaishouLoginStillValid(page);
     this.logger.log(`[kuaishou-publish] entered-image-page job=${input.jobId} url=${page.url()}`);
 
     const uploadTrigger = await this.findFirstLocator(
       page,
-      ['button._upload-btn_ysbff_57', 'button[class*="upload"]', '[role="button"][class*="upload"]'],
+      [
+        'button._upload-btn_ysbff_57',
+        'button:has-text("上传图片")',
+        '[role="button"]:has-text("上传图片")',
+        'div:has-text("上传图片")',
+        'text=上传图片',
+        'button[class*="upload"]',
+        '[role="button"][class*="upload"]',
+      ],
       true,
     );
     if (uploadTrigger) {
-      await this.humanClickFast(uploadTrigger).catch(() => undefined);
-      await this.humanPauseFast(page, 80, 180);
+      await this.humanClick(uploadTrigger).catch(() => undefined);
+      await this.humanPauseFast(page, 220, 420);
     }
+    await this.assertKuaishouLoginStillValid(page);
 
-    await this.uploadFiles(page, uploadFiles, 'image', [
-      'input[type="file"][accept*="image/png"]',
-      'input[type="file"][accept*="image/jpeg"]',
-      'input[type="file"][accept*="image/webp"]',
-      'input[type="file"][accept*="image/*"]',
-      'input[accept*="image/png"]',
-      'input[accept*="image/jpeg"]',
-      'input[accept*="image/webp"]',
-      'input[accept*="image/*"]',
-    ]);
+    const uploadedByChooser = uploadTrigger
+      ? await this.tryUploadWithFileChooser(page, uploadTrigger, uploadFiles).catch(() => false)
+      : false;
+
+    if (!uploadedByChooser) {
+      await this.uploadFiles(page, uploadFiles, 'image', [
+        'input[type="file"][accept*="image/png"]',
+        'input[type="file"][accept*="image/jpeg"]',
+        'input[type="file"][accept*="image/webp"]',
+        'input[type="file"][accept*="image/*"]',
+        'input[accept*="image/png"]',
+        'input[accept*="image/jpeg"]',
+        'input[accept*="image/webp"]',
+        'input[accept*="image/*"]',
+      ]);
+    }
     this.logger.log(`[kuaishou-publish] upload-finished job=${input.jobId}`);
     await this.waitForUploadSettled(page);
     this.logger.log(`[kuaishou-publish] upload-settled job=${input.jobId}`);
-    await this.fillEditor(
-      page,
-      [
-        'div._edit-desc-container_eho7l_43',
-        'div[contenteditable="true"][class*="edit-desc"]',
-        'textarea[placeholder*="@"]',
-        'textarea[placeholder*="#"]',
-        'textarea[placeholder*="描述"]',
-        'textarea[placeholder*="文案"]',
-        'textarea[placeholder*="内容"]',
-        '[class*="editor"] [contenteditable="true"]',
-        'div[contenteditable="true"]',
-      ],
-      input.body,
-      { humanizedMode: 'kuaishou-fast' },
-    );
+    await this.fillKuaishouDescription(page, input.title, input.body, input.tags);
     this.logger.log(`[kuaishou-publish] description-filled job=${input.jobId}`);
     await this.clickKuaishouPublish(page);
     this.logger.log(`[kuaishou-publish] publish-clicked job=${input.jobId}`);
@@ -1191,6 +1192,24 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     uploadFiles: string[],
   ) {
     await this.enterKuaishouVideoPublish(page);
+    await this.assertKuaishouLoginStillValid(page);
+    const uploadTrigger = await this.findFirstLocator(
+      page,
+      [
+        'button._upload-btn_1j3uy_87',
+        'button:has-text("上传视频")',
+        '[role="button"]:has-text("上传视频")',
+        'div:has-text("上传视频")',
+        'text=上传视频',
+      ],
+      true,
+    );
+    if (uploadTrigger) {
+      await this.humanClick(uploadTrigger).catch(() => undefined);
+      await this.humanPauseFast(page, 220, 420);
+    }
+    await this.assertKuaishouLoginStillValid(page);
+
     const uploadSelectors = [
       'input[type="file"][accept*="video/mp4"]',
       'input[type="file"][accept*="video/"]',
@@ -1202,17 +1221,6 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       '[class*="upload"] input[accept*="video"]',
       'input[type="file"]',
     ];
-    const uploadTrigger = await this.findFirstLocator(
-      page,
-      [
-        'button._upload-btn_1j3uy_87',
-        '[class*="upload-btn"]:has-text("上传视频")',
-        'button:has-text("上传视频")',
-        '[role="button"]:has-text("上传视频")',
-        'text=上传视频',
-      ],
-      true,
-    );
     const uploadedByChooser = uploadTrigger
       ? await this.tryUploadWithFileChooser(page, uploadTrigger, uploadFiles)
       : false;
@@ -1221,32 +1229,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       await this.uploadFiles(page, uploadFiles, 'video', uploadSelectors, true);
     }
     await this.waitForUploadSettled(page);
-    await this.fillFirst(
-      page,
-      [
-        'input[placeholder*="作品标题"]',
-        'input[placeholder*="添加标题"]',
-        'textarea[placeholder*="作品标题"]',
-        'input[placeholder*="标题"]',
-        'textarea[placeholder*="标题"]',
-        'input[type="text"]',
-      ],
-      input.title,
-    ).catch(() => undefined);
-    await this.fillEditor(
-      page,
-      [
-        'textarea[placeholder*="添加描述"]',
-        'textarea[placeholder*="作品描述"]',
-        'textarea[placeholder*="作品文案"]',
-        'textarea[placeholder*="描述"]',
-        'textarea[placeholder*="作品"]',
-        '[class*="editor"] [contenteditable="true"]',
-        'div[contenteditable="true"]',
-      ],
-      input.body,
-      { humanizedMode: 'kuaishou-fast' },
-    );
+    await this.fillKuaishouDescription(page, input.title, input.body, input.tags);
     await this.clickKuaishouPublish(page);
     await this.waitForActionFinished(page, {
       successHints: ['发布成功', '作品发布成功', '发布完成', '审核中', '正在审核', '已发布'],
@@ -1255,74 +1238,197 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     });
   }
 
+  private async assertKuaishouLoginStillValid(page: Page) {
+    const expiredPrompt = await this.findFirstLocator(
+      page,
+      [
+        'text=您的登录状态已过期',
+        'text=点击确定重新登录',
+        'text=您的登录状态已过期，点击确定重新登录',
+      ],
+      false,
+    );
+    if (expiredPrompt) {
+      throw new ConflictException('快手登录已失效，请重新登录后再发布');
+    }
+  }
+
+  private async isKuaishouImageEditorReady(page: Page) {
+    return Boolean(
+      await this.findFirstLocator(
+        page,
+        [
+          'button:has-text("上传图片")',
+          '[role="button"]:has-text("上传图片")',
+          'div:has-text("上传图片")',
+          'text=上传图片',
+          'input[type="file"][accept*="image/png"]',
+          'input[type="file"][accept*="image/jpeg"]',
+          'input[type="file"][accept*="image/webp"]',
+          'input[type="file"][accept*="image/*"]',
+          'input[accept*="image/png"]',
+          'input[accept*="image/jpeg"]',
+          'input[accept*="image/webp"]',
+          'input[accept*="image/*"]',
+        ],
+        false,
+      ),
+    );
+  }
+
+  private async isKuaishouVideoEditorReady(page: Page) {
+    return Boolean(
+      await this.findFirstLocator(
+        page,
+        [
+          'button:has-text("上传视频")',
+          '[role="button"]:has-text("上传视频")',
+          'div:has-text("上传视频")',
+          'text=上传视频',
+          'input[type="file"][accept*="video/mp4"]',
+          'input[type="file"][accept*="video/"]',
+          'input[type="file"][accept*="video"]',
+          'input[accept*="video/mp4"]',
+          'input[accept*="video/"]',
+          'input[accept*="video"]',
+          'div#work-description-edit',
+          'div[contenteditable="true"]#work-description-edit',
+        ],
+        false,
+      ),
+    );
+  }
+
   private async enterKuaishouImagePublish(page: Page) {
     await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
     await page.waitForTimeout(1000);
 
-    if (page.url().includes('/profile')) {
-      await this.clickFirst(page, [
-        'div.publish-button__text:has-text("鍙戝竷浣滃搧")',
-        'section.sidebar .publish-button:has-text("鍙戝竷浣滃搧")',
-        'text=鍙戝竷浣滃搧',
-      ]).catch(() => undefined);
-      await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
-      await page.waitForTimeout(1200);
+    if (await this.isKuaishouImageEditorReady(page)) {
+      return;
     }
 
-    if (!page.url().includes('tabType=2')) {
-      await this.clickFirst(page, [
-        'div#rc-tabs-6-tab-2',
-        '[role="tab"]:has-text("涓婁紶鍥炬枃")',
-        'text=涓婁紶鍥炬枃',
-      ]).catch(() => undefined);
-      await page.waitForTimeout(1200);
-    }
-
-    if (!page.url().includes('tabType=2')) {
-      await page.goto('https://cp.kuaishou.com/article/publish/video?tabType=2', {
+    if (!page.url().includes('/profile')) {
+      await page.goto('https://cp.kuaishou.com/profile', {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
       });
       await page.waitForTimeout(1500);
     }
 
+    if (await this.isKuaishouImageEditorReady(page)) {
+      return;
+    }
+
     await this.clickFirst(page, [
-      'div#rc-tabs-6-tab-2',
-      '[role="tab"]:has-text("涓婁紶鍥炬枃")',
-      'text=涓婁紶鍥炬枃',
+      'button:has-text("发布作品")',
+      '[role="button"]:has-text("发布作品")',
+      'div:has-text("发布作品")',
+      'text=发布作品',
     ]).catch(() => undefined);
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(500);
+
+    await this.clickFirst(page, [
+      'div.item:has-text("发布图文")',
+      'div[class*="item"]:has-text("发布图文")',
+      'button:has-text("发布图文")',
+      '[role="button"]:has-text("发布图文")',
+      'div:has-text("发布图文")',
+      'text=发布图文',
+    ]).catch(() => undefined);
+    await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
+    await page.waitForTimeout(1200);
+    if (await this.isKuaishouImageEditorReady(page)) {
+      return;
+    }
+
+    await page.goto('https://cp.kuaishou.com/article/publish/video?tabType=1', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+    await page.waitForTimeout(1500);
+    await this.clickFirst(page, [
+      'button:has-text("发布图文")',
+      '[role="tab"]:has-text("发布图文")',
+      '[role="button"]:has-text("发布图文")',
+      'div:has-text("发布图文")',
+      'text=发布图文',
+      'button:has-text("图文")',
+      'text=图文',
+    ]).catch(() => undefined);
+    await page.waitForTimeout(1200);
+    if (await this.isKuaishouImageEditorReady(page)) {
+      return;
+    }
+
+    throw new ConflictException('未进入快手图文发布页');
   }
 
   private async enterKuaishouVideoPublish(page: Page) {
     await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
     await page.waitForTimeout(1000);
 
-    if (page.url().includes('/profile')) {
-      await this.clickFirst(page, [
-        'div.publish-button__text:has-text("发布作品")',
-        'section.sidebar .publish-button:has-text("发布作品")',
-        'text=发布作品',
-      ]).catch(() => undefined);
-      await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
-      await page.waitForTimeout(1200);
+    if (await this.isKuaishouVideoEditorReady(page)) {
+      return;
     }
 
-    if (!page.url().includes('/article/publish/video')) {
-      await page.goto('https://cp.kuaishou.com/article/publish/video', {
+    if (!page.url().includes('/profile')) {
+      await page.goto('https://cp.kuaishou.com/profile', {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
       });
       await page.waitForTimeout(1500);
     }
 
+    if (await this.isKuaishouVideoEditorReady(page)) {
+      return;
+    }
+
     await this.clickFirst(page, [
-      'button._upload-btn_1j3uy_87',
-      '[role="tab"]:has-text("上传视频")',
-      'text=上传视频',
-      'button:has-text("上传视频")',
+      'button:has-text("发布作品")',
+      '[role="button"]:has-text("发布作品")',
+      'div:has-text("发布作品")',
+      'text=发布作品',
     ]).catch(() => undefined);
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(500);
+
+    await this.clickFirst(page, [
+      'div.item:has-text("发布视频")',
+      'div[class*="item"]:has-text("发布视频")',
+      'button:has-text("发布视频")',
+      '[role="button"]:has-text("发布视频")',
+      'div:has-text("发布视频")',
+      'text=发布视频',
+    ]).catch(() => undefined);
+    await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
+    await page.waitForTimeout(1200);
+    if (await this.isKuaishouVideoEditorReady(page)) {
+      return;
+    }
+
+    await page.goto('https://cp.kuaishou.com/article/publish/video?tabType=1', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+    await page.waitForTimeout(1500);
+    if (await this.isKuaishouVideoEditorReady(page)) {
+      return;
+    }
+
+    await this.clickFirst(page, [
+      'button:has-text("发布视频")',
+      '[role="tab"]:has-text("发布视频")',
+      '[role="button"]:has-text("发布视频")',
+      'div:has-text("发布视频")',
+      'text=发布视频',
+      'button:has-text("视频")',
+      'text=视频',
+    ]).catch(() => undefined);
+    await page.waitForTimeout(1200);
+    if (await this.isKuaishouVideoEditorReady(page)) {
+      return;
+    }
+
+    throw new ConflictException('未进入快手视频发布页');
   }
 
   private async uploadFiles(
@@ -1837,10 +1943,74 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       'div._button_3a3lq_1._button-primary_3a3lq_60',
       'button:has-text("发布")',
       'div[role="button"]:has-text("发布")',
+      'div:has-text("发布")',
       'text=发布',
     ]);
-    await page.waitForTimeout(320);
-    await this.humanClickFast(publishButton);
+    await page.waitForTimeout(420);
+    await this.humanClick(publishButton);
+    await this.humanPauseFast(page, 280, 520);
+  }
+
+  private async fillKuaishouDescription(page: Page, title: string, body: string, tags: string[]) {
+    const editor = await this.findAndHighlightFirst(page, [
+      'div#work-description-edit',
+      'div._description_eho7l_59#work-description-edit',
+      'div[contenteditable="true"]#work-description-edit',
+      'div[contenteditable="true"][placeholder*="添加合适的话题"]',
+      'div[contenteditable="true"]',
+    ]);
+
+    await this.humanPauseFast(page, 180, 320);
+    await this.humanClick(editor).catch(() => undefined);
+    await page.keyboard.press('Control+A').catch(() => undefined);
+    await page.keyboard.press('Backspace').catch(() => undefined);
+    await this.humanPauseFast(page, 160, 280);
+
+    const normalizedTitle = title.trim();
+    if (normalizedTitle) {
+      await page.keyboard.type(normalizedTitle, { delay: 90 }).catch(() => undefined);
+    }
+
+    await page.keyboard.press('Enter').catch(() => undefined);
+    await this.humanPauseFast(page, 220, 420);
+
+    const normalizedBody = body.trim();
+    if (normalizedBody) {
+      await page.keyboard.type(normalizedBody, { delay: 90 }).catch(() => undefined);
+    }
+
+    const normalizedTags = Array.from(new Set(tags.map((item) => item.replace(/^#+/, '').trim()).filter(Boolean)));
+    for (const tag of normalizedTags) {
+      await page.keyboard.press('Enter').catch(() => undefined);
+      await this.humanPauseFast(page, 180, 320);
+      await page.keyboard.type(`#${tag}`, { delay: 95 }).catch(() => undefined);
+      await this.humanPauseFast(page, 420, 760);
+      await this.clickKuaishouTagCandidate(page, tag);
+      await this.humanPauseFast(page, 320, 620);
+    }
+  }
+
+  private async clickKuaishouTagCandidate(page: Page, tag: string) {
+    const matcher = new RegExp(this.escapeRegExp(tag), 'i');
+    const candidateGroups = [
+      page.locator('span._at-tag-name_eho7l_222'),
+      page.locator('span[class*="at-tag-name"]'),
+      page.locator('[class*="tag"] span'),
+      page.locator('[role="option"]'),
+    ];
+
+    for (const group of candidateGroups) {
+      const applied = await this.clickFirstVisibleMatchingText(group, matcher, ['上传', '发布']);
+      if (applied) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   private async appendDouyinTopicsAfterBody(page: Page, editor: Locator | null, tags: string[]) {

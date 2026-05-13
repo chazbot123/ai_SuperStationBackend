@@ -83,6 +83,10 @@
 - [completed] 阶段 162：将部署文档切到 `Xvfb + PM2` 正式启动方式
 - [completed] 阶段 163：核对脚本、文档与执行顺序一致性
 - [completed] 阶段 164：同步运行包中的后端产物、脚本与部署文档
+- [completed] 阶段 165：确认快手发布链路当前实现与目标页面步骤差异
+- [completed] 阶段 166：按图文/视频两条链路改造快手本地发布步骤
+- [completed] 阶段 167：执行诊断与最小验证并确认扩展发布无回归
+- [completed] 阶段 168：修复快手从 `/profile` 跨页后扩展执行中断问题
 
 ## 当前决定
 - 保留现有 `personalization` 路由与权限键，优先改展示文案，避免扩大 RBAC 影响面
@@ -139,6 +143,9 @@
 - 服务器平台登录链路本轮改为依赖 `Xvfb + Chrome` 提供虚拟显示，再由 `PM2` 托管启动脚本
 - `PM2` 不再直接启动 `server/dist/main.js`，而是启动仓库内 `scripts/start-server-with-xvfb.sh`
 - 后端 `server/.env` 需显式配置 `PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome` 与 `PUBLISHING_BROWSER_HEADLESS=false`
+- 快手发布链路本轮以用户提供的 `cp.kuaishou.com/profile` 页面真实操作步骤为准，优先修正元素定位与输入顺序，不扩其他平台逻辑
+- 图文与视频发布都先进入 `https://cp.kuaishou.com/profile`；再按页面卡片点击“发布图文/发布视频”，接着点击上传按钮、填写描述区、逐个选择标签候选、最后点击发布
+- 扩展发布调度需支持同一 tab 跨页面续跑；对同一 URL 做短时间去重，避免重复执行
 - 运行包 `backups/deploy_bundle_20260509_143128/project-root` 也需要同步携带 `scripts/*.sh`、`docs/ubuntu-install-and-deploy-with-test-data.md` 与最新 `server/dist`
 
 ## 风险
@@ -168,6 +175,8 @@
 - 超级站首页和 `/products` 路径都依赖前端启动脚本；若脚本链路被外部 CDN 阻断，页面会一直停在 `CHILINTECH` 加载层
 - `public/legacy-home.html` 静态入口文件当前仍可能保留旧乱码文本；若未来重新启用该独立静态入口，还需同步清理
 - 服务器若未安装 `Xvfb` 或 `Chrome`，即使后端代码已支持无显示环境判断，平台登录仍无法以可视浏览器方式启动
+- 快手发布页前端类名存在哈希，若只依赖长类名选择器会不稳定；需要尽量结合文案、可编辑区域 ID 与按钮文本定位
+- 快手从 `/profile` 点击卡片后会跨页；若扩展后台仍只在首次页面就绪时下发一次执行消息，后续新页面会失去执行接力
 
 ## 完成结果
 - 前端“超级站配置中心”与“运营指标”第一版已完成
@@ -217,6 +226,11 @@
 - 已修正 `legacy-home.js` 中仍会显示到页面的乱码文案，`/` 与 `/products` 本地预览中文显示正常
 - 已修正 `LegacyHomePage.tsx` 启动成功后未清理超时器的问题，控制台不再误报 `bootstrap timeout`
 - 已将最新超级站前端 `dist` 覆盖到 `D:\zhilin_project\backups\deploy_bundle_20260509_143128\project-root\ZL_Supersite\dist`
+- 快手发布链路已统一改为先进入 `https://cp.kuaishou.com/profile`，再按真实页面卡片与上传按钮执行图文/视频发布
+- 扩展本地发布脚本与后端备用 Playwright 快手链路均已支持“标题 -> 回车 -> 文案 -> 回车 -> 逐个标签候选点击 -> 发布”
+- 快手关键点击已改为更慢的人类化点击节奏，避免过快直点导致页面交互不稳定
+- 快手相关后端定向测试已通过：`platform-login-browser.service.spec.ts / publishing.service.spec.ts`
+- 扩展 `background.js / content.js` 已补跨页续跑与同页幂等，快手从 `/profile` 跳转到后续页面后可继续接力执行
 
 ## 冲突处理记录
 | 文件 | 冲突主题 | 处理原则 |

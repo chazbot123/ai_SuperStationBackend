@@ -354,6 +354,7 @@ FFPROBE_PATH=/usr/bin/ffprobe
 PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome
 PUBLISHING_BROWSER_HEADLESS=false
 
+# 默认走代码内置高德 Key，仅在启用环境变量覆盖时才需要配置
 AMAP_WEB_SERVICE_KEY=
 EOF
 ```
@@ -385,6 +386,7 @@ FFPROBE_PATH=/usr/bin/ffprobe
 PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome
 PUBLISHING_BROWSER_HEADLESS=false
 
+# 默认走代码内置高德 Key，仅在启用环境变量覆盖时才需要配置
 AMAP_WEB_SERVICE_KEY=
 ```
 
@@ -398,6 +400,7 @@ AMAP_WEB_SERVICE_KEY=
 - 视频后处理建议显式指定 `FFMPEG_PATH=/usr/bin/ffmpeg`、`FFPROBE_PATH=/usr/bin/ffprobe`
 - `PUBLISHING_BROWSER_EXECUTABLE_PATH` 固定指向服务器 Chrome
 - `PUBLISHING_BROWSER_HEADLESS=false` 的前提是后端由 `Xvfb` 提供虚拟显示
+- 高德门店搜索当前默认读取代码内置 Key，`AMAP_WEB_SERVICE_KEY` 仅作为可选覆盖项
 
 ## 13. 启动后端
 

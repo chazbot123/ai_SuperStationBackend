@@ -208,3 +208,9 @@ pm run check，结果均通过。
 - [2026-05-12 13:08:00] 已完成前端一键发布默认切到扩展执行：发布前先检测扩展，创建任务后逐个启动本地发布会话。
 - [2026-05-12 13:08:00] 已完成扩展首版本地发布链路：新增 `publish-automation.js`，`background.js` 可打开平台发布页并向 `content.js` 下发执行命令，执行结果会回传后端发布记录。
 - [2026-05-12 13:08:00] 已执行前端 `npm run check` 与后端 `server npm run build`，结果通过。
+- [2026-05-12 13:32:00] 已恢复规划文件并确认新任务：按用户提供的真实页面步骤重写快手发布链路，统一从 `https://cp.kuaishou.com/profile` 进入。
+- [2026-05-12 13:32:00] 已确认扩展本地发布和后端备用 Playwright 快手链路此前都仍指向旧的 `/article/publish/video` 页面，且未按“标题 -> 回车 -> 文案 -> 回车 -> 逐个标签候选点击”的顺序执行。
+- [2026-05-12 13:32:00] 已完成快手链路改造：扩展 `background.js / publish-automation.js` 与后端 `platform-login-browser.service.ts` 均改为进入 `/profile`，再按“发布图文/发布视频卡片 -> 上传按钮 -> 描述区 -> 标签候选 -> 发布”执行。
+- [2026-05-12 13:32:00] 已按用户补充要求把快手关键点击改为慢速模拟鼠标点击，不再使用过快的直接点击节奏。
+- [2026-05-12 13:32:00] 已执行 `GetDiagnostics`，扩展脚本与后端发布相关文件诊断均为 0。
+- [2026-05-12 13:32:00] 已执行后端定向测试 `npm test -- modules/publishing/platform-login-browser.service.spec.ts modules/publishing/publishing.service.spec.ts --runInBand`，30 项全部通过。

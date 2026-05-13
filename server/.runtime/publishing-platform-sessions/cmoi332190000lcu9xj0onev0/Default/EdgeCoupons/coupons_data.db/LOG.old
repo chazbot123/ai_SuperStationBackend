@@ -1,5 +1,0 @@
-2026/04/28-11:46:02.305 c74c Creating DB D:\zhilin_project\AI-SuperWeb\AI-SuperWeb\server\.runtime\publishing-platform-sessions\cmoi332190000lcu9xj0onev0\Default\EdgeCoupons/coupons_data.db since it was missing.
-2026/04/28-11:46:02.330 c74c Reusing MANIFEST D:\zhilin_project\AI-SuperWeb\AI-SuperWeb\server\.runtime\publishing-platform-sessions\cmoi332190000lcu9xj0onev0\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
-2026/04/28-11:46:02.514 bea8 Level-0 table #5: started
-2026/04/28-11:46:02.517 bea8 Level-0 table #5: 682121 bytes OK
-2026/04/28-11:46:02.519 bea8 Delete type=0 #3

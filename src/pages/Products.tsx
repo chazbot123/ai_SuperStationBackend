@@ -401,19 +401,19 @@ export default function Products() {
                 ) : (
                   visibleProducts.map((item) => (
                     <Tr key={item.id}>
-                      <Td>
-                        <div className="flex items-center gap-3">
-                          <div className="h-12 w-12 overflow-hidden rounded-lg border border-white/10 bg-white/5">
+                      <Td className="w-[360px] min-w-[360px]">
+                        <div className="flex w-[360px] min-w-[360px] items-center gap-3">
+                          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/5">
                             {item.images[0] ? (
                               <img src={item.images[0]} alt={item.name} className="h-full w-full object-cover" />
                             ) : null}
                           </div>
-                          <div>
-                            <div className="font-medium text-zinc-100">{item.name}</div>
-                            <div className="text-xs text-zinc-500">{item.englishName}</div>
-                            <div className="text-xs text-zinc-400">{item.summary}</div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium text-zinc-100">{item.name}</div>
+                            <div className="truncate text-xs text-zinc-500">{item.englishName}</div>
+                            <div className="line-clamp-2 text-xs text-zinc-400">{item.summary}</div>
                             {item.rejectReason ? (
-                              <div className="text-xs text-red-300">驳回原因：{item.rejectReason}</div>
+                              <div className="line-clamp-2 text-xs text-red-300">驳回原因：{item.rejectReason}</div>
                             ) : null}
                           </div>
                         </div>

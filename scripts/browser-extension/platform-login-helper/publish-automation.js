@@ -1,5 +1,10 @@
 (function () {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const randomBetween = (min, max) => {
+    const lower = Math.min(min, max);
+    const upper = Math.max(min, max);
+    return Math.floor(lower + Math.random() * (upper - lower + 1));
+  };
 
   function normalize(value) {
     return String(value || "")
@@ -108,11 +113,86 @@
     throw new Error(`未找到目标元素：${selectors[0] || "unknown"}`);
   }
 
-  async function clickFirst(selectors, timeoutMs = 30000, root = document) {
+  async function humanClickElement(node, options = {}) {
+    if (!(node instanceof HTMLElement)) {
+      throw new Error("目标元素不可点击");
+    }
+
+    const beforeMoveMin = options.beforeMoveMin ?? 120;
+    const beforeMoveMax = options.beforeMoveMax ?? 260;
+    const movePauseMin = options.movePauseMin ?? 80;
+    const movePauseMax = options.movePauseMax ?? 180;
+    const holdPauseMin = options.holdPauseMin ?? 90;
+    const holdPauseMax = options.holdPauseMax ?? 160;
+    const afterClickMin = options.afterClickMin ?? 220;
+    const afterClickMax = options.afterClickMax ?? 420;
+
+    node.scrollIntoView({ block: "center", inline: "center" });
+    await sleep(randomBetween(beforeMoveMin, beforeMoveMax));
+
+    const rect = node.getBoundingClientRect();
+    const clientX = rect.left + Math.max(6, Math.min(rect.width - 6, rect.width * 0.45));
+    const clientY = rect.top + Math.max(6, Math.min(rect.height - 6, rect.height * 0.5));
+
+    const dispatchPointer = (type, overrides = {}) => {
+      if (typeof PointerEvent === "undefined") {
+        return;
+      }
+      node.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+          clientX,
+          clientY,
+          button: 0,
+          buttons: 1,
+          ...overrides,
+        }),
+      );
+    };
+
+    const dispatchMouse = (type, overrides = {}) => {
+      node.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          view: window,
+          clientX,
+          clientY,
+          button: 0,
+          buttons: 1,
+          ...overrides,
+        }),
+      );
+    };
+
+    node.focus();
+    dispatchPointer("pointerover");
+    dispatchMouse("mouseover");
+    dispatchPointer("pointerenter");
+    dispatchMouse("mouseenter");
+    await sleep(randomBetween(movePauseMin, movePauseMax));
+    dispatchPointer("pointermove");
+    dispatchMouse("mousemove");
+    await sleep(randomBetween(movePauseMin, movePauseMax));
+    dispatchPointer("pointerdown");
+    dispatchMouse("mousedown");
+    await sleep(randomBetween(holdPauseMin, holdPauseMax));
+    dispatchPointer("pointerup", { buttons: 0 });
+    dispatchMouse("mouseup", { buttons: 0 });
+    node.click();
+    await sleep(randomBetween(afterClickMin, afterClickMax));
+  }
+
+  async function clickFirst(selectors, timeoutMs = 30000, root = document, options = {}) {
     const node = await waitForVisible(selectors, timeoutMs, root, true);
     if (node instanceof HTMLElement) {
-      node.scrollIntoView({ block: "center", inline: "center" });
-      node.click();
+      await humanClickElement(node, options);
       return node;
     }
     throw new Error("目标元素不可点击");
@@ -173,6 +253,186 @@
     return null;
   }
 
+  function placeCaretAtEnd(node) {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    const selection = window.getSelection();
+    if (!selection) {
+      return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function clearEditable(node) {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    node.focus();
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    document.execCommand("delete", false);
+    node.textContent = "";
+    dispatchInputEvents(node);
+    placeCaretAtEnd(node);
+  }
+
+  function insertEditableText(node, text) {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    node.focus();
+    placeCaretAtEnd(node);
+    const inserted = document.execCommand("insertText", false, text);
+    if (!inserted) {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) {
+        node.textContent = `${node.textContent || ""}${text}`;
+      } else {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(document.createTextNode(text));
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    dispatchInputEvents(node);
+    placeCaretAtEnd(node);
+  }
+
+  async function typeEditableTextHuman(node, text, minDelay = 70, maxDelay = 120) {
+    const normalized = String(text || "");
+    if (!normalized) {
+      return;
+    }
+    for (const char of normalized) {
+      insertEditableText(node, char);
+      await sleep(randomBetween(minDelay, maxDelay));
+    }
+  }
+
+  async function pressEditableEnter(node) {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    node.focus();
+    placeCaretAtEnd(node);
+    node.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+    const inserted =
+      document.execCommand("insertParagraph", false) ||
+      document.execCommand("insertLineBreak", false) ||
+      document.execCommand("insertHTML", false, "<div><br></div>");
+    if (!inserted) {
+      insertEditableText(node, "\n");
+    } else {
+      dispatchInputEvents(node);
+    }
+    node.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true }));
+    placeCaretAtEnd(node);
+    await sleep(randomBetween(240, 420));
+  }
+
+  function escapeHasText(value) {
+    return String(value || "")
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"');
+  }
+
+  function normalizeTags(tags) {
+    return Array.from(
+      new Set(
+        (tags || [])
+          .map((tag) => String(tag || "").replace(/^#+/, "").trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  async function clickKuaishouTagCandidate(tag) {
+    const safeTag = escapeHasText(tag);
+    const selectors = [
+      `span._at-tag-name_eho7l_222:has-text("${safeTag}")`,
+      `span[class*="at-tag-name"]:has-text("${safeTag}")`,
+      `span:has-text("${safeTag}")`,
+      `div:has-text("${safeTag}")`,
+    ];
+    return clickFirst(selectors, 5000, document, {
+      beforeMoveMin: 160,
+      beforeMoveMax: 320,
+      movePauseMin: 100,
+      movePauseMax: 220,
+      holdPauseMin: 110,
+      holdPauseMax: 180,
+      afterClickMin: 260,
+      afterClickMax: 520,
+    })
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  async function fillKuaishouDescription(job) {
+    const editor = await waitForVisible(
+      [
+        "div#work-description-edit",
+        'div._description_eho7l_59#work-description-edit',
+        'div[contenteditable="true"]#work-description-edit',
+        'div[contenteditable="true"][placeholder*="添加合适的话题"]',
+        'div[contenteditable="true"]',
+      ],
+      20000,
+      document,
+      true,
+    );
+    if (!(editor instanceof HTMLElement)) {
+      throw new Error("未找到快手描述输入框");
+    }
+
+    await humanClickElement(editor, {
+      beforeMoveMin: 180,
+      beforeMoveMax: 360,
+      movePauseMin: 120,
+      movePauseMax: 240,
+      holdPauseMin: 120,
+      holdPauseMax: 220,
+      afterClickMin: 260,
+      afterClickMax: 520,
+    });
+    await sleep(randomBetween(180, 320));
+    clearEditable(editor);
+    await sleep(randomBetween(180, 320));
+
+    const title = String(job?.draftTitle || "").trim();
+    const body = String(job?.draftBody || "").trim();
+    const tags = normalizeTags(job?.draftTags);
+
+    if (title) {
+      await typeEditableTextHuman(editor, title, 80, 135);
+    }
+    await pressEditableEnter(editor);
+
+    if (body) {
+      await typeEditableTextHuman(editor, body, 80, 135);
+    }
+
+    for (const tag of tags) {
+      await pressEditableEnter(editor);
+      await typeEditableTextHuman(editor, `#${tag}`, 85, 140);
+      await sleep(randomBetween(500, 900));
+      await clickKuaishouTagCandidate(tag);
+      await sleep(randomBetween(380, 720));
+    }
+  }
+
   async function uploadFiles(selectors, urls, kind, root = document) {
     if (!Array.isArray(urls) || urls.length === 0) {
       return;
@@ -217,48 +477,96 @@
     await sleep(2500);
   }
 
-  async function ensureKuaishouImagePublishReady() {
+  async function ensureKuaishouPublishReady(isVideo) {
     await sleep(1500);
-
-    if (!window.location.href.includes("tabType=2")) {
-      try {
-        await clickFirst(
-          [
-            '[role="tab"]:has-text("上传图文")',
-            'button:has-text("上传图文")',
-            'div:has-text("上传图文")',
-            'text=上传图文',
-            '[role="tab"]:has-text("图文")',
-            'button:has-text("图文")',
-            'text=图文',
-          ],
-          6000,
-        );
-        await sleep(1200);
-      } catch (_) {
-        // ignore and fallback to direct navigation
-      }
-    }
-
-    if (!window.location.href.includes("tabType=2")) {
-      await gotoUrl("https://cp.kuaishou.com/article/publish/video?tabType=2");
-      await sleep(1500);
-    }
+    const entryTitle = isVideo ? "发布视频" : "发布图文";
+    const uploadLabel = isVideo ? "上传视频" : "上传图片";
 
     await clickFirst(
       [
-        '[role="tab"]:has-text("上传图文")',
-        'button:has-text("上传图文")',
-        'div:has-text("上传图文")',
-        'text=上传图文',
-        '[role="tab"]:has-text("图文")',
-        'button:has-text("图文")',
-        'text=图文',
+        `div.item:has-text("${entryTitle}")`,
+        `div[class*="item"]:has-text("${entryTitle}")`,
+        `div:has-text("${entryTitle}")`,
+        `text=${entryTitle}`,
       ],
-      8000,
+      10000,
+      document,
+      {
+        beforeMoveMin: 180,
+        beforeMoveMax: 360,
+        movePauseMin: 120,
+        movePauseMax: 240,
+        holdPauseMin: 120,
+        holdPauseMax: 220,
+        afterClickMin: 320,
+        afterClickMax: 700,
+      },
+    );
+
+    await sleep(1000);
+
+    await clickFirst(
+      [
+        isVideo ? "button._upload-btn_1j3uy_87" : "button._upload-btn_ysbff_57",
+        `button:has-text("${uploadLabel}")`,
+        `[role="button"]:has-text("${uploadLabel}")`,
+        `div:has-text("${uploadLabel}")`,
+        `text=${uploadLabel}`,
+      ],
+      10000,
+      document,
+      {
+        beforeMoveMin: 160,
+        beforeMoveMax: 320,
+        movePauseMin: 100,
+        movePauseMax: 220,
+        holdPauseMin: 100,
+        holdPauseMax: 180,
+        afterClickMin: 260,
+        afterClickMax: 520,
+      },
     ).catch(() => null);
 
-    await sleep(800);
+    await sleep(700);
+  }
+
+  function assertKuaishouLoginStillValid() {
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    if (pageText.includes("您的登录状态已过期") || pageText.includes("点击确定重新登录")) {
+      throw new Error("快手登录已失效，请重新登录后再发布");
+    }
+  }
+
+  function isKuaishouProfilePage() {
+    return window.location.href.startsWith("https://cp.kuaishou.com/profile");
+  }
+
+  function isKuaishouEditorPage(isVideo) {
+    const inputSelectors = isVideo
+      ? ['input[type="file"][accept*="video"]', 'input[type="file"]']
+      : [
+          'input[type="file"][accept*="image/png"]',
+          'input[type="file"][accept*="image/jpeg"]',
+          'input[type="file"][accept*="image/webp"]',
+          'input[type="file"][accept*="image/*"]',
+          'input[accept*="image/png"]',
+          'input[accept*="image/jpeg"]',
+          'input[accept*="image/webp"]',
+          'input[accept*="image/*"]',
+          'input[type="file"][accept*="image"]',
+          'input[type="file"]',
+        ];
+    return Boolean(
+      queryFirst(
+        [
+          "div#work-description-edit",
+          'div[contenteditable="true"]#work-description-edit',
+          ...inputSelectors,
+        ],
+        document,
+        false,
+      ),
+    );
   }
 
   async function ensureXiaohongshuPublishReady(isVideo) {
@@ -504,26 +812,16 @@
 
   async function publishKuaishou(job) {
     const isVideo = Boolean(job.draftVideoUrl);
-    await gotoUrl(
-      isVideo
-        ? "https://cp.kuaishou.com/article/publish/video"
-        : "https://cp.kuaishou.com/article/publish/video?tabType=2",
-    );
-    if (!isVideo) {
-      await ensureKuaishouImagePublishReady();
-      await clickFirst(
-        [
-          'button:has-text("上传图文")',
-          '[role="button"]:has-text("上传图文")',
-          'div:has-text("上传图文")',
-          'text=上传图文',
-          'button[class*="upload"]',
-          '[role="button"][class*="upload"]',
-        ],
-        8000,
-      ).catch(() => null);
-      await sleep(500);
+    if (!window.location.hostname.includes("cp.kuaishou.com")) {
+      await gotoUrl("https://cp.kuaishou.com/profile");
     }
+    if (isKuaishouProfilePage()) {
+      await ensureKuaishouPublishReady(isVideo);
+    } else if (!isKuaishouEditorPage(isVideo)) {
+      await gotoUrl("https://cp.kuaishou.com/profile");
+      await ensureKuaishouPublishReady(isVideo);
+    }
+    assertKuaishouLoginStillValid();
     await uploadFiles(
       isVideo
         ? ['input[type="file"][accept*="video"]', 'input[type="file"]']
@@ -542,18 +840,30 @@
       isVideo ? [job.draftVideoUrl] : job.draftImages,
       isVideo ? "video" : "image",
     );
-    await sleep(2500);
-    if (isVideo) {
-      await fillFirst(
-        ['input[placeholder*="作品标题"]', 'input[placeholder*="添加标题"]', 'textarea[placeholder*="标题"]'],
-        job.draftTitle,
-      ).catch(() => null);
-    }
-    await fillFirst(
-      ['div[contenteditable="true"]', 'textarea[placeholder*="描述"]', 'textarea[placeholder*="文案"]'],
-      job.draftBody,
+    assertKuaishouLoginStillValid();
+    await sleep(3200);
+    await fillKuaishouDescription(job);
+    await clickFirst(
+      [
+        'div._button_3a3lq_1._button-primary_3a3lq_60',
+        'button:has-text("发布")',
+        'div[role="button"]:has-text("发布")',
+        'div:has-text("发布")',
+        'text=发布',
+      ],
+      10000,
+      document,
+      {
+        beforeMoveMin: 180,
+        beforeMoveMax: 340,
+        movePauseMin: 120,
+        movePauseMax: 240,
+        holdPauseMin: 130,
+        holdPauseMax: 220,
+        afterClickMin: 320,
+        afterClickMax: 620,
+      },
     );
-    await clickFirst(['button:has-text("发布")', 'div[role="button"]:has-text("发布")', 'text=发布']);
     await waitForHints(
       ["发布成功", "作品发布成功", "发布完成", "审核中", "已发布"],
       ["发布失败", "上传失败", "请完善", "请填写内容"],

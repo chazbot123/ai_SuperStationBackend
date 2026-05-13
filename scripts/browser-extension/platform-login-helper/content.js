@@ -1,6 +1,11 @@
 (function () {
   const PAGE_SOURCE = "ai-superweb-page";
   const EXTENSION_SOURCE = "ai-superweb-extension";
+  const publishExecutionState = {
+    sessionToken: "",
+    pageUrl: "",
+    running: false,
+  };
 
   function resolvePlatformFromHost(hostname) {
     if (hostname.includes("xiaohongshu.com")) return "xiaohongshu";
@@ -289,6 +294,18 @@
 
     if (message.type === "AI_SUPERWEB_EXTENSION_EXECUTE_PUBLISH" && message.payload?.session) {
       const session = message.payload.session;
+      const currentUrl = window.location.href;
+      if (
+        publishExecutionState.running &&
+        publishExecutionState.sessionToken === session.sessionToken &&
+        publishExecutionState.pageUrl === currentUrl
+      ) {
+        return;
+      }
+
+      publishExecutionState.sessionToken = session.sessionToken;
+      publishExecutionState.pageUrl = currentUrl;
+      publishExecutionState.running = true;
       const sendStatus = async (payload) => {
         const profile = extractProfile(platform);
         return new Promise((resolve) => {
@@ -307,15 +324,17 @@
         });
       };
 
-      void globalThis.AISuperWebPublishAutomation.executePublishSession(session, sendStatus).catch(
-        async (error) => {
+      void globalThis.AISuperWebPublishAutomation.executePublishSession(session, sendStatus)
+        .catch(async (error) => {
           await sendStatus({
             status: "failed",
             lastError: error instanceof Error ? error.message : "扩展本地发布失败",
             sourceUrl: window.location.href,
           });
-        },
-      );
+        })
+        .finally(() => {
+          publishExecutionState.running = false;
+        });
       return;
     }
 
