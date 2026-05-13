@@ -39,6 +39,105 @@ describe('PublishingService draft payloads', () => {
     ).toBe(true);
   });
 
+  it('builds AiToEarn MCP login url with platform query', async () => {
+    service = new PublishingService(
+      {} as never,
+      {
+        get: jest.fn((key: string) => {
+          if (key === 'AITOEARN_CONNECT_CHANNEL_URL') {
+            return 'https://aitoearn.cn/zh-CN/accounts?role=creator';
+          }
+          return undefined;
+        }),
+      } as unknown as ConfigService,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const result = await service.startMcpPlatformLogin({ userId: 'u1' } as never, {
+      platform: 'douyin',
+    });
+
+    expect(result).toMatchObject({
+      provider: 'mcp',
+      platform: LeadPublishPlatform.douyin,
+    });
+    expect(result.loginUrl).toContain('aitoearn.cn/zh-CN/accounts');
+    expect(result.loginUrl).toContain('role=creator');
+    expect(result.loginUrl).toContain('from=ai-superweb');
+    expect(result.syncHint).toContain('AiToEarn 官方当前会先进入频道管理');
+  });
+
+  it('builds Bilibili official OAuth url with gourl callback', () => {
+    service = new PublishingService(
+      {} as never,
+      {
+        get: jest.fn((key: string) => {
+          const values: Record<string, string> = {
+            BILIBILI_OPEN_CLIENT_ID: 'bili_client_id',
+            BILIBILI_OPEN_CLIENT_SECRET: 'bili_client_secret',
+            BILIBILI_OPEN_SCOPE: 'USER_INFO',
+            PLATFORM_OAUTH_APP_BASE_URL: 'https://app.example.com',
+          };
+          return values[key];
+        }),
+      } as unknown as ConfigService,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const url = (service as never)['buildOfficialOauthAuthorizeUrl'](
+      LeadPublishPlatform.bilibili,
+      'state_123',
+    );
+
+    expect(url).toContain('https://account.bilibili.com/pc/account-pc/auth/oauth?');
+    expect(url).toContain('client_id=bili_client_id');
+    expect(url).toContain('response_type=code');
+    expect(url).toContain('state=state_123');
+    expect(url).toContain(encodeURIComponent('https://app.example.com/api/publishing/platform-accounts/official-oauth/callback?platform=bilibili'));
+  });
+
+  it('builds Wechat Official authorize url with pre auth code', () => {
+    service = new PublishingService(
+      {} as never,
+      {
+        get: jest.fn((key: string) => {
+          const values: Record<string, string> = {
+            WECHAT_OPEN_COMPONENT_APP_ID: 'wx_component_appid',
+            WECHAT_OPEN_COMPONENT_APP_SECRET: 'wx_component_secret',
+            WECHAT_OPEN_AUTH_TYPE: '1',
+            WECHAT_OPEN_PRE_AUTH_CODE: 'pre_auth_code_123',
+            WECHAT_OPEN_BIZ_APP_ID: 'wx_authorizer_appid',
+            PLATFORM_OAUTH_APP_BASE_URL: 'https://app.example.com',
+          };
+          return values[key];
+        }),
+      } as unknown as ConfigService,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const url = (service as never)['buildOfficialOauthAuthorizeUrl'](
+      LeadPublishPlatform.wechat_official,
+      'state_ignored',
+    );
+
+    expect(url).toContain('https://mp.weixin.qq.com/cgi-bin/componentloginpage?');
+    expect(url).toContain('component_appid=wx_component_appid');
+    expect(url).toContain('pre_auth_code=pre_auth_code_123');
+    expect(url).toContain('auth_type=1');
+    expect(url).toContain('biz_appid=wx_authorizer_appid');
+    expect(url).toContain(
+      encodeURIComponent(
+        'https://app.example.com/api/publishing/platform-accounts/official-oauth/callback?platform=wechat_official&state=state_ignored',
+      ),
+    );
+  });
+
   it('removes raw hashtag text from Xiaohongshu draft body and keeps draft tags separate', () => {
     const payload = (service as never)['buildPublishDraftPayload'](
       {

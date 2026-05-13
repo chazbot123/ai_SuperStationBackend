@@ -3109,6 +3109,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         '[class*="nickname"]',
         '[class*="profile"] [class*="name"]',
       ],
+      [LeadPublishPlatform.bilibili]: [],
+      [LeadPublishPlatform.wechat_official]: [],
     };
 
     const directProfile = await this.readDirectProfile(page, platform);
@@ -3195,6 +3197,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       [LeadPublishPlatform.douyin]: ['抖音号'],
       [LeadPublishPlatform.wechat_mp]: ['视频号ID', '视频号'],
       [LeadPublishPlatform.kuaishou]: ['快手号'],
+      [LeadPublishPlatform.bilibili]: [],
+      [LeadPublishPlatform.wechat_official]: [],
     };
 
     for (const anchorText of anchors[platform]) {
@@ -3378,6 +3382,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       [LeadPublishPlatform.douyin]: ['抖音号', '获赞', '粉丝'],
       [LeadPublishPlatform.wechat_mp]: ['视频号ID', '视频号认证', '被赞', '关注'],
       [LeadPublishPlatform.kuaishou]: ['快手号', '获赞', '粉丝'],
+      [LeadPublishPlatform.bilibili]: [],
+      [LeadPublishPlatform.wechat_official]: [],
     };
 
     try {
@@ -3585,6 +3591,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
           display: /([^\s]{1,40})\s+[A-Za-z0-9_-]{4,}\s+(?:获赞|关注|粉丝)/i,
         },
       ],
+      [LeadPublishPlatform.bilibili]: [],
+      [LeadPublishPlatform.wechat_official]: [],
     };
 
     for (const matcher of matchers[platform]) {
@@ -3652,6 +3660,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       [LeadPublishPlatform.douyin]: ['抖音', 'douyin', '创作者平台'],
       [LeadPublishPlatform.wechat_mp]: ['视频号', '视频号助手', 'channels', 'wechat'],
       [LeadPublishPlatform.kuaishou]: ['快手', 'kuaishou'],
+      [LeadPublishPlatform.bilibili]: ['哔哩哔哩', 'bilibili', 'b站'],
+      [LeadPublishPlatform.wechat_official]: ['微信公众号', '公众号', 'mp.weixin'],
     };
     return labels[platform].some((label) => normalized.includes(label.toLowerCase()));
   }

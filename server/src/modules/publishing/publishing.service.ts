@@ -1,5 +1,6 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -15,6 +16,7 @@ import {
   LeadPublishStatus,
   PlatformAccountAuthType,
   PlatformAccountLoginStatus,
+  PlatformAccountProvider,
   PlatformAccountStatus,
   Prisma,
 } from '@prisma/client';
@@ -28,6 +30,8 @@ import { ListPublishingContentsQueryDto } from './dto/list-publishing-contents-q
 import { ListPublishingJobsQueryDto } from './dto/list-publishing-jobs-query.dto';
 import { ListPlatformAccountsQueryDto } from './dto/list-platform-accounts-query.dto';
 import { PublishLeadContentDto } from './dto/publish-lead-content.dto';
+import { StartMcpPlatformLoginDto } from './dto/start-mcp-platform-login.dto';
+import { StartOfficialOauthLoginDto } from './dto/start-official-oauth-login.dto';
 import { StartExtensionPublishJobDto } from './dto/start-extension-publish-job.dto';
 import { StartPlatformExtensionLoginDto } from './dto/start-platform-extension-login.dto';
 import { StartPlatformLoginDto } from './dto/start-platform-login.dto';
@@ -35,6 +39,7 @@ import { SyncExtensionPublishJobDto } from './dto/sync-extension-publish-job.dto
 import { SyncPlatformExtensionLoginDto } from './dto/sync-platform-extension-login.dto';
 import { SyncPublishingContentDto } from './dto/sync-publishing-content.dto';
 import { UpdatePlatformAccountDto } from './dto/update-platform-account.dto';
+import { AitoearnUnifiedMcpService } from './aitoearn-unified-mcp.service';
 import { PlatformLoginBrowserService } from './platform-login-browser.service';
 
 const leadContentInclude = {
@@ -73,11 +78,14 @@ const leadPublishJobInclude = {
     select: {
       id: true,
       platform: true,
+      provider: true,
       authType: true,
       authPayloadEncrypted: true,
       accountName: true,
       displayName: true,
       browserSessionPath: true,
+      externalAccountId: true,
+      externalGroupId: true,
       status: true,
       loginStatus: true,
     },
@@ -107,6 +115,7 @@ const PENDING_LOGIN_PLACEHOLDER = '__PLATFORM_LOGIN_PENDING__';
 const PENDING_LOGIN_PREVIEW = '浏览器登录中，完成后自动回收 Cookie';
 const EXTENSION_LOGIN_TOKEN_PURPOSE = 'publishing_extension_login';
 const EXTENSION_PUBLISH_TOKEN_PURPOSE = 'publishing_extension_publish';
+const OFFICIAL_OAUTH_STATE_PURPOSE = 'publishing_official_oauth';
 const EXTENSION_LOGIN_TTL_SECONDS = 5 * 60;
 const EXTENSION_PUBLISH_TTL_SECONDS = 10 * 60;
 const SUPPORTED_AUTO_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
@@ -114,6 +123,12 @@ const SUPPORTED_AUTO_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
   LeadPublishPlatform.xiaohongshu,
   LeadPublishPlatform.wechat_mp,
   LeadPublishPlatform.kuaishou,
+]);
+const SUPPORTED_OFFICIAL_OAUTH_PLATFORMS = new Set<LeadPublishPlatform>([
+  LeadPublishPlatform.douyin,
+  LeadPublishPlatform.kuaishou,
+  LeadPublishPlatform.bilibili,
+  LeadPublishPlatform.wechat_official,
 ]);
 
 type ExtensionLoginSession = {
@@ -142,6 +157,21 @@ type ExtensionPublishTokenPayload = {
   aid: string;
 };
 
+type OfficialOauthStatePayload = {
+  purpose: typeof OFFICIAL_OAUTH_STATE_PURPOSE;
+  uid: string;
+  platform: LeadPublishPlatform;
+  aid?: string | null;
+};
+
+type OfficialOauthClientConfig = {
+  clientId: string;
+  clientSecret: string;
+  scope: string;
+  preAuthCode?: string;
+  bizAppId?: string;
+};
+
 @Injectable()
 export class PublishingService {
   private readonly logger = new Logger(PublishingService.name);
@@ -154,6 +184,7 @@ export class PublishingService {
     private readonly jwtService: JwtService,
     private readonly productImageStorageService: ProductImageStorageService,
     private readonly platformLoginBrowserService: PlatformLoginBrowserService,
+    private readonly aitoearnUnifiedMcpService: AitoearnUnifiedMcpService,
   ) {}
 
   async listContents(user: SessionUser, query: ListPublishingContentsQueryDto) {
@@ -341,6 +372,7 @@ export class PublishingService {
             leadContentId: content.id,
             createdById: user.userId,
             platform: target.platform as LeadPublishPlatform,
+            provider: account.provider,
             platformAccountId: account.id,
             publishMode: LeadPublishMode.draft_box,
             status: LeadPublishStatus.queued,
@@ -557,6 +589,7 @@ export class PublishingService {
       ...(this.isMainCompany(user) ? {} : { creatorId: user.userId }),
       ...(query.platform ? { platform: query.platform as LeadPublishPlatform } : {}),
       ...(query.status ? { status: query.status as PlatformAccountStatus } : {}),
+      ...(query.provider ? { provider: query.provider as PlatformAccountProvider } : {}),
       ...(query.loginStatus
         ? { loginStatus: query.loginStatus as PlatformAccountLoginStatus }
         : {}),
@@ -705,6 +738,151 @@ export class PublishingService {
       expiresAt: new Date(expiresAt).toISOString(),
       loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(platform),
     };
+  }
+
+  async startMcpPlatformLogin(_user: SessionUser, dto: StartMcpPlatformLoginDto) {
+    const platform = dto.platform as LeadPublishPlatform;
+
+    return {
+      provider: 'mcp' as const,
+      platform,
+      loginUrl: this.buildAitoearnMcpLoginUrl(platform),
+      syncHint: this.buildAitoearnMcpLoginHint(platform),
+    };
+  }
+
+  async startOfficialOauthLogin(user: SessionUser, dto: StartOfficialOauthLoginDto) {
+    const platform = dto.platform as LeadPublishPlatform;
+    if (!this.isOfficialOauthPlatformSupported(platform)) {
+      throw new ConflictException('当前平台暂未开放官方 OAuth 登录');
+    }
+
+    const accountId = dto.accountId?.trim() || null;
+    if (accountId) {
+      const current = await this.findAccessiblePlatformAccount(user, accountId);
+      if (current.platform !== platform) {
+        throw new ConflictException('平台与所选账号不匹配');
+      }
+    }
+
+    this.getOfficialOauthClientConfig(platform);
+
+    const state = await this.jwtService.signAsync(
+      {
+        purpose: OFFICIAL_OAUTH_STATE_PURPOSE,
+        uid: user.userId,
+        platform,
+        aid: accountId,
+      } satisfies OfficialOauthStatePayload,
+      {
+        expiresIn: '10m',
+      },
+    );
+
+    return {
+      provider: 'official_oauth' as const,
+      platform,
+      loginUrl: this.buildOfficialOauthAuthorizeUrl(platform, state),
+      syncHint: '授权完成后会自动回到系统并保存平台账号。',
+    };
+  }
+
+  async completeOfficialOauthLogin(input: { platform: string; code: string; state: string }) {
+    try {
+      const platform = this.parseOfficialOauthPlatform(input.platform);
+      if (!input.code?.trim()) {
+        throw new BadRequestException('授权回调缺少 code');
+      }
+      if (!input.state?.trim()) {
+        throw new BadRequestException('授权回调缺少 state');
+      }
+
+      const statePayload = await this.verifyOfficialOauthState(input.state.trim());
+      if (statePayload.platform !== platform) {
+        throw new BadRequestException('授权回调平台不匹配');
+      }
+
+      const tokenResult = await this.exchangeOfficialOauthToken(platform, input.code.trim());
+      const accountName =
+        tokenResult.accountName ||
+        tokenResult.externalAccountId ||
+        `oauth_${platform}_${new Date().getTime().toString(36)}`;
+      const authPayload = JSON.stringify(tokenResult.authPayload);
+      const existing = statePayload.aid
+        ? await this.prisma.leadPlatformAccount.findFirst({
+            where: {
+              id: statePayload.aid,
+              creatorId: statePayload.uid,
+            },
+            include: leadPlatformAccountInclude,
+          })
+        : tokenResult.externalAccountId
+          ? await this.prisma.leadPlatformAccount.findFirst({
+              where: {
+                creatorId: statePayload.uid,
+                platform,
+                provider: PlatformAccountProvider.official_oauth,
+                externalAccountId: tokenResult.externalAccountId,
+              },
+              include: leadPlatformAccountInclude,
+            })
+          : null;
+
+      const saved = existing
+        ? await this.prisma.leadPlatformAccount.update({
+            where: { id: existing.id },
+            data: {
+              provider: PlatformAccountProvider.official_oauth,
+              authType: PlatformAccountAuthType.token,
+              accountName,
+              displayName: tokenResult.displayName,
+              authPayloadEncrypted: this.encryptAuthPayload(authPayload),
+              authPayloadPreview: this.maskAuthPayload(tokenResult.authPayload.accessToken),
+              status: PlatformAccountStatus.valid,
+              loginStatus: PlatformAccountLoginStatus.authenticated,
+              loginUrl: this.buildOfficialOauthAuthorizeUrl(platform, input.state.trim()),
+              externalAccountId: tokenResult.externalAccountId,
+              externalMeta: tokenResult.externalMeta as Prisma.InputJsonValue,
+              lastLoginCompletedAt: new Date(),
+              lastValidatedAt: new Date(),
+              lastError: null,
+            },
+            include: leadPlatformAccountInclude,
+          })
+        : await this.prisma.leadPlatformAccount.create({
+            data: {
+              creatorId: statePayload.uid,
+              platform,
+              provider: PlatformAccountProvider.official_oauth,
+              authType: PlatformAccountAuthType.token,
+              accountName,
+              displayName: tokenResult.displayName,
+              authPayloadEncrypted: this.encryptAuthPayload(authPayload),
+              authPayloadPreview: this.maskAuthPayload(tokenResult.authPayload.accessToken),
+              status: PlatformAccountStatus.valid,
+              loginStatus: PlatformAccountLoginStatus.authenticated,
+              loginUrl: this.buildOfficialOauthAuthorizeUrl(platform, input.state.trim()),
+              externalAccountId: tokenResult.externalAccountId,
+              externalMeta: tokenResult.externalMeta as Prisma.InputJsonValue,
+              lastLoginCompletedAt: new Date(),
+              lastValidatedAt: new Date(),
+            },
+            include: leadPlatformAccountInclude,
+          });
+
+      return this.buildOfficialOauthResultRedirectUrl({
+        platform,
+        status: 'success',
+        accountId: saved.id,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '官方授权登录失败';
+      return this.buildOfficialOauthResultRedirectUrl({
+        platform: this.parseOfficialOauthPlatform(input.platform, false),
+        status: 'failed',
+        error: message,
+      });
+    }
   }
 
   async syncPlatformExtensionLogin(dto: SyncPlatformExtensionLoginDto) {
@@ -1167,6 +1345,38 @@ export class PublishingService {
     });
 
     try {
+      const useMcp =
+        current.platform === LeadPublishPlatform.douyin &&
+        current.platformAccount.provider === PlatformAccountProvider.mcp &&
+        this.aitoearnUnifiedMcpService.isEnabled();
+
+      if (useMcp) {
+        const mcpResult = await this.aitoearnUnifiedMcpService.publishDouyinDraft({
+          accountId:
+            current.platformAccount.externalAccountId ||
+            current.platformAccount.accountName ||
+            current.platformAccount.id,
+          title: current.draftTitle,
+          body: current.draftBody,
+          tags: current.draftTags,
+          images: current.draftImages,
+          videoUrl: current.draftVideoUrl,
+        });
+
+        return this.prisma.leadPublishJob.update({
+          where: { id: current.id },
+          data: {
+            status: LeadPublishStatus.success,
+            draftUrl: mcpResult.draftUrl || null,
+            externalDraftId: mcpResult.externalDraftId || null,
+            externalFlowId: mcpResult.externalFlowId || null,
+            draftedAt: new Date(),
+            lastError: null,
+          },
+          include: leadPublishJobInclude,
+        });
+      }
+
       const result = await this.platformLoginBrowserService.publish({
         accountId: current.platformAccount.id,
         sessionPath:
@@ -1341,6 +1551,7 @@ export class PublishingService {
       leadContentId: item.leadContentId,
       createdById: item.createdById,
       platform: item.platform,
+      provider: item.provider,
       platformAccountId: item.platformAccountId,
       publishMode: item.publishMode,
       status: item.status,
@@ -1350,7 +1561,13 @@ export class PublishingService {
       draftImages: item.draftImages,
       draftVideoUrl: item.draftVideoUrl,
       draftUrl: item.draftUrl,
+      externalDraftId: item.externalDraftId,
+      externalFlowId: item.externalFlowId,
+      externalStatus: item.externalStatus,
       draftedAt: item.draftedAt?.toISOString() ?? null,
+      queuedAt: item.queuedAt?.toISOString() ?? null,
+      startedAt: item.startedAt?.toISOString() ?? null,
+      completedAt: item.completedAt?.toISOString() ?? null,
       lastError: item.lastError,
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString(),
@@ -1445,6 +1662,531 @@ export class PublishingService {
     return SUPPORTED_AUTO_PUBLISH_PLATFORMS.has(platform);
   }
 
+  private isOfficialOauthPlatformSupported(platform: LeadPublishPlatform) {
+    return SUPPORTED_OFFICIAL_OAUTH_PLATFORMS.has(platform);
+  }
+
+  private parseOfficialOauthPlatform(
+    platform: string,
+    strict = true,
+  ): LeadPublishPlatform | null {
+    if (
+      platform === LeadPublishPlatform.douyin ||
+      platform === LeadPublishPlatform.kuaishou ||
+      platform === LeadPublishPlatform.bilibili ||
+      platform === LeadPublishPlatform.wechat_official
+    ) {
+      return platform;
+    }
+    if (strict) {
+      throw new BadRequestException('当前平台暂未开放官方 OAuth 登录');
+    }
+    return null;
+  }
+
+  private getOfficialOauthClientConfig(platform: LeadPublishPlatform): OfficialOauthClientConfig {
+    if (platform === LeadPublishPlatform.douyin) {
+      const clientKey = this.configService.get<string>('DOUYIN_OPEN_CLIENT_KEY')?.trim();
+      const clientSecret = this.configService.get<string>('DOUYIN_OPEN_CLIENT_SECRET')?.trim();
+      if (!clientKey || !clientSecret) {
+        throw new ConflictException('未配置抖音开放平台 Client Key / Client Secret');
+      }
+      return {
+        clientId: clientKey,
+        clientSecret,
+        scope: this.configService.get<string>('DOUYIN_OPEN_SCOPE')?.trim() || 'user_info',
+      };
+    }
+
+    if (platform === LeadPublishPlatform.kuaishou) {
+      const appId = this.configService.get<string>('KUAISHOU_OPEN_APP_ID')?.trim();
+      const appSecret = this.configService.get<string>('KUAISHOU_OPEN_APP_SECRET')?.trim();
+      if (!appId || !appSecret) {
+        throw new ConflictException('未配置快手开放平台 App ID / App Secret');
+      }
+      return {
+        clientId: appId,
+        clientSecret: appSecret,
+        scope:
+          this.configService.get<string>('KUAISHOU_OPEN_SCOPE')?.trim() ||
+          'user_info,user_video_publish,user_video_info',
+      };
+    }
+
+    if (platform === LeadPublishPlatform.bilibili) {
+      const clientId = this.configService.get<string>('BILIBILI_OPEN_CLIENT_ID')?.trim();
+      const clientSecret = this.configService.get<string>('BILIBILI_OPEN_CLIENT_SECRET')?.trim();
+      if (!clientId || !clientSecret) {
+        throw new ConflictException('未配置哔哩哔哩开放平台 Client ID / Client Secret');
+      }
+      return {
+        clientId,
+        clientSecret,
+        scope: this.configService.get<string>('BILIBILI_OPEN_SCOPE')?.trim() || '',
+      };
+    }
+
+    if (platform === LeadPublishPlatform.wechat_official) {
+      const clientId = this.configService.get<string>('WECHAT_OPEN_COMPONENT_APP_ID')?.trim();
+      const clientSecret = this.configService.get<string>('WECHAT_OPEN_COMPONENT_APP_SECRET')?.trim();
+      if (!clientId || !clientSecret) {
+        throw new ConflictException('未配置微信开放平台第三方平台 AppID / AppSecret');
+      }
+      const preAuthCode = this.configService.get<string>('WECHAT_OPEN_PRE_AUTH_CODE')?.trim();
+      if (!preAuthCode) {
+        throw new ConflictException(
+          '未配置微信第三方平台 pre_auth_code，当前还未完成自动票据刷新链路',
+        );
+      }
+      return {
+        clientId,
+        clientSecret,
+        scope: this.configService.get<string>('WECHAT_OPEN_AUTH_TYPE')?.trim() || '2',
+        preAuthCode,
+        bizAppId: this.configService.get<string>('WECHAT_OPEN_BIZ_APP_ID')?.trim() || '',
+      };
+    }
+
+    throw new ConflictException('当前平台暂未开放官方 OAuth 登录');
+  }
+
+  private buildOfficialOauthAuthorizeUrl(platform: LeadPublishPlatform, state: string) {
+    const config = this.getOfficialOauthClientConfig(platform);
+    const redirectUri = this.getOfficialOauthCallbackUrl(platform);
+    const params = new URLSearchParams();
+
+    if (platform === LeadPublishPlatform.douyin) {
+      params.set('client_key', config.clientId);
+      params.set('response_type', 'code');
+      params.set('scope', config.scope);
+      params.set('redirect_uri', redirectUri);
+      params.set('state', state);
+      return `https://open.douyin.com/platform/oauth/connect/?${params.toString()}`;
+    }
+
+    if (platform === LeadPublishPlatform.kuaishou) {
+      params.set('app_id', config.clientId);
+      params.set('scope', config.scope);
+      params.set('response_type', 'code');
+      params.set('redirect_uri', redirectUri);
+      params.set('state', state);
+      params.set('ua', 'pc');
+      return `https://open.kuaishou.com/oauth2/authorize?${params.toString()}`;
+    }
+
+    if (platform === LeadPublishPlatform.bilibili) {
+      params.set('client_id', config.clientId);
+      params.set('response_type', 'code');
+      params.set('gourl', redirectUri);
+      params.set('state', state);
+      if (config.scope) {
+        params.set('scope', config.scope);
+      }
+      return `https://account.bilibili.com/pc/account-pc/auth/oauth?${params.toString()}`;
+    }
+
+    if (platform === LeadPublishPlatform.wechat_official) {
+      params.set('component_appid', config.clientId);
+      params.set('pre_auth_code', config.preAuthCode || '');
+      const callbackUrl = new URL(redirectUri);
+      callbackUrl.searchParams.set('state', state);
+      params.set('redirect_uri', callbackUrl.toString());
+      params.set('auth_type', config.scope);
+      if (config.bizAppId) {
+        params.set('biz_appid', config.bizAppId);
+      }
+      return `https://mp.weixin.qq.com/cgi-bin/componentloginpage?${params.toString()}`;
+    }
+
+    throw new ConflictException('当前平台暂未开放官方 OAuth 登录');
+  }
+
+  private getOfficialOauthCallbackUrl(platform: LeadPublishPlatform) {
+    const appBaseUrl = this.getPublicAppBaseUrl();
+    const url = new URL('/api/publishing/platform-accounts/official-oauth/callback', appBaseUrl);
+    url.searchParams.set('platform', platform);
+    return url.toString();
+  }
+
+  private getPublicAppBaseUrl() {
+    const explicit =
+      this.configService.get<string>('PLATFORM_OAUTH_APP_BASE_URL')?.trim() ||
+      this.configService.get<string>('APP_BASE_URL')?.trim() ||
+      this.configService.get<string>('CORS_ORIGIN')?.trim();
+
+    if (!explicit) {
+      throw new ConflictException('未配置平台 OAuth 回调基础地址');
+    }
+
+    return explicit.endsWith('/') ? explicit : `${explicit}/`;
+  }
+
+  private buildOfficialOauthResultRedirectUrl(input: {
+    platform: LeadPublishPlatform | null;
+    status: 'success' | 'failed';
+    accountId?: string;
+    error?: string;
+  }) {
+    const resultUrl = new URL('/publishing/platform-login', this.getPublicAppBaseUrl());
+    if (input.platform) {
+      resultUrl.searchParams.set('oauth_platform', input.platform);
+    }
+    resultUrl.searchParams.set('oauth_status', input.status);
+    if (input.accountId) {
+      resultUrl.searchParams.set('oauth_account_id', input.accountId);
+    }
+    if (input.error) {
+      resultUrl.searchParams.set('oauth_error', input.error);
+    }
+    return resultUrl.toString();
+  }
+
+  private async exchangeOfficialOauthToken(platform: LeadPublishPlatform, code: string) {
+    const config = this.getOfficialOauthClientConfig(platform);
+    const redirectUri = this.getOfficialOauthCallbackUrl(platform);
+
+    if (platform === LeadPublishPlatform.douyin) {
+      const payload = await this.requestOfficialOauthTokenJson(
+        'https://open.douyin.com/oauth/access_token/',
+        {
+          client_key: config.clientId,
+          client_secret: config.clientSecret,
+          code,
+          grant_type: 'authorization_code',
+        },
+      );
+      const data = this.pickOauthResponseData(payload);
+      const accessToken = this.readOauthField(data, ['access_token']);
+      const refreshToken = this.readOauthField(data, ['refresh_token']);
+      const externalAccountId = this.readOauthField(data, ['open_id', 'openId']);
+
+      return {
+        accountName: externalAccountId,
+        displayName: null,
+        externalAccountId,
+        authPayload: {
+          accessToken,
+          refreshToken,
+          openId: externalAccountId,
+          expiresIn: this.readOauthField(data, ['expires_in'], false),
+          refreshExpiresIn: this.readOauthField(data, ['refresh_expires_in'], false),
+        },
+        externalMeta: data,
+      };
+    }
+
+    if (platform === LeadPublishPlatform.bilibili) {
+      const payload = await this.requestOfficialOauthTokenJson(
+        'https://api.bilibili.com/x/account-oauth2/v1/token',
+        {
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+          code,
+          grant_type: 'authorization_code',
+        },
+      );
+      const data = this.pickOauthResponseData(payload);
+      const accessToken = this.readOauthField(data, ['access_token']);
+      const refreshToken = this.readOauthField(data, ['refresh_token'], false);
+      const profile = await this.fetchBilibiliOauthUserInfo(
+        accessToken,
+        config.clientId,
+        config.clientSecret,
+      );
+      const externalAccountId =
+        this.readOauthField(profile, ['openid', 'open_id'], false) ||
+        this.readOauthField(data, ['openid', 'open_id'], false);
+      const displayName = this.readOauthField(profile, ['name'], false) || null;
+
+      return {
+        accountName:
+          externalAccountId ||
+          displayName ||
+          `bilibili_${new Date().getTime().toString(36)}`,
+        displayName,
+        externalAccountId: externalAccountId || null,
+        authPayload: {
+          accessToken,
+          refreshToken,
+          openId: externalAccountId || '',
+          expiresIn: this.readOauthField(data, ['expires_in'], false),
+          scopes: Array.isArray(data.scopes) ? data.scopes : [],
+        },
+        externalMeta: {
+          token: data,
+          profile,
+        },
+      };
+    }
+
+    if (platform === LeadPublishPlatform.wechat_official) {
+      const componentAccessToken = this.configService
+        .get<string>('WECHAT_OPEN_COMPONENT_ACCESS_TOKEN')
+        ?.trim();
+      if (!componentAccessToken) {
+        throw new ConflictException(
+          '未配置微信第三方平台 component_access_token，当前还未完成自动票据刷新链路',
+        );
+      }
+
+      const payload = await this.requestOfficialOauthJson(
+        `https://api.weixin.qq.com/cgi-bin/component/api_query_auth?component_access_token=${encodeURIComponent(
+          componentAccessToken,
+        )}`,
+        {
+          component_appid: config.clientId,
+          authorization_code: code,
+        },
+      );
+      const data = this.pickOauthResponseData(payload);
+      const authorizationInfo = this.pickOauthResponseData(
+        this.readOauthObject(data, ['authorization_info']),
+      );
+      const externalAccountId = this.readOauthField(authorizationInfo, ['authorizer_appid']);
+      const accessToken = this.readOauthField(authorizationInfo, ['authorizer_access_token']);
+      const refreshToken = this.readOauthField(
+        authorizationInfo,
+        ['authorizer_refresh_token'],
+        false,
+      );
+
+      return {
+        accountName: externalAccountId,
+        displayName: null,
+        externalAccountId,
+        authPayload: {
+          accessToken,
+          refreshToken,
+          authorizerAppId: externalAccountId,
+          expiresIn: this.readOauthField(authorizationInfo, ['expires_in'], false),
+        },
+        externalMeta: data,
+      };
+    }
+
+    const payload = await this.requestOfficialOauthTokenJson(
+      'https://open.kuaishou.com/oauth2/access_token',
+      {
+        app_id: config.clientId,
+        app_secret: config.clientSecret,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+      },
+    );
+    const data = this.pickOauthResponseData(payload);
+    const accessToken = this.readOauthField(data, ['access_token']);
+    const refreshToken = this.readOauthField(data, ['refresh_token'], false);
+    const externalAccountId = this.readOauthField(data, ['open_id', 'openId', 'user_id'], false);
+
+    return {
+      accountName: externalAccountId || this.readOauthField(data, ['kwai_user_id'], false),
+      displayName: null,
+      externalAccountId: externalAccountId || null,
+      authPayload: {
+        accessToken,
+        refreshToken,
+        openId: externalAccountId,
+        expiresIn: this.readOauthField(data, ['expires_in'], false),
+        refreshExpiresIn: this.readOauthField(data, ['refresh_token_expires_in'], false),
+      },
+      externalMeta: data,
+    };
+  }
+
+  private async requestOfficialOauthTokenJson(
+    url: string,
+    body: Record<string, string>,
+  ): Promise<Record<string, unknown>> {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'application/json',
+      },
+      body: new URLSearchParams(body),
+    });
+    const text = await response.text();
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      throw new ConflictException(`OAuth Token 接口返回异常：${text || 'empty response'}`);
+    }
+
+    if (!response.ok) {
+      throw new ConflictException(this.resolveOauthErrorMessage(payload, 'OAuth Token 换取失败'));
+    }
+
+    this.assertOauthPayloadSuccess(payload, 'OAuth Token 换取失败');
+    return payload;
+  }
+
+  private async requestOfficialOauthJson(
+    url: string,
+    body: Record<string, string>,
+  ): Promise<Record<string, unknown>> {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      throw new ConflictException(`OAuth 接口返回异常：${text || 'empty response'}`);
+    }
+
+    if (!response.ok) {
+      throw new ConflictException(this.resolveOauthErrorMessage(payload, 'OAuth 请求失败'));
+    }
+
+    this.assertOauthPayloadSuccess(payload, 'OAuth 请求失败');
+    return payload;
+  }
+
+  private async fetchBilibiliOauthUserInfo(
+    accessToken: string,
+    clientId: string,
+    clientSecret: string,
+  ) {
+    const response = await fetch('https://member.bilibili.com/arcopen/fn/user/account/info', {
+      headers: this.buildBilibiliOauthHeaders(accessToken, clientId, clientSecret),
+    });
+    const text = await response.text();
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      throw new ConflictException(`B站用户信息接口返回异常：${text || 'empty response'}`);
+    }
+
+    if (!response.ok) {
+      throw new ConflictException(this.resolveOauthErrorMessage(payload, 'B站用户信息获取失败'));
+    }
+
+    this.assertOauthPayloadSuccess(payload, 'B站用户信息获取失败');
+    return this.pickOauthResponseData(payload);
+  }
+
+  private buildBilibiliOauthHeaders(
+    accessToken: string,
+    clientId: string,
+    clientSecret: string,
+  ): Record<string, string> {
+    const nonce = randomBytes(16).toString('base64url');
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const headers = {
+      'Accept': 'application/json',
+      'Access-Token': accessToken,
+      'Content-Type': 'application/json',
+      'X-Bili-AccessKeyId': clientId,
+      'X-Bili-Content-Md5': createHash('md5').update('').digest('hex'),
+      'X-Bili-Signature-Method': 'HMAC-SHA256',
+      'X-Bili-Signature-Nonce': nonce,
+      'X-Bili-Signature-Version': '2.0',
+      'X-Bili-Timestamp': timestamp,
+    };
+
+    const signaturePayload = [
+      `x-bili-accesskeyid:${headers['X-Bili-AccessKeyId']}`,
+      `x-bili-content-md5:${headers['X-Bili-Content-Md5']}`,
+      `x-bili-signature-method:${headers['X-Bili-Signature-Method']}`,
+      `x-bili-signature-nonce:${headers['X-Bili-Signature-Nonce']}`,
+      `x-bili-signature-version:${headers['X-Bili-Signature-Version']}`,
+      `x-bili-timestamp:${headers['X-Bili-Timestamp']}`,
+    ].join('\n');
+
+    return {
+      ...headers,
+      Authorization: createHmac('sha256', clientSecret).update(signaturePayload).digest('hex'),
+    };
+  }
+
+  private pickOauthResponseData(payload: Record<string, unknown>) {
+    const data = payload.data;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return data as Record<string, unknown>;
+    }
+    return payload;
+  }
+
+  private readOauthObject(payload: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = payload[key];
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return value as Record<string, unknown>;
+      }
+    }
+    throw new ConflictException(`OAuth 返回缺少对象字段：${keys.join('/')}`);
+  }
+
+  private readOauthField(
+    payload: Record<string, unknown>,
+    keys: string[],
+    required = true,
+  ) {
+    for (const key of keys) {
+      const value = payload[key];
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+      if (typeof value === 'number') {
+        return String(value);
+      }
+    }
+
+    if (required) {
+      throw new ConflictException(`OAuth 返回缺少字段：${keys.join('/')}`);
+    }
+    return '';
+  }
+
+  private resolveOauthErrorMessage(payload: Record<string, unknown>, fallback: string) {
+    const candidates = [
+      payload.message,
+      payload.description,
+      payload.error_description,
+      payload.msg,
+      payload.error_msg,
+      payload.errmsg,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+    return fallback;
+  }
+
+  private assertOauthPayloadSuccess(payload: Record<string, unknown>, fallback: string) {
+    const code = this.readOauthStatusCode(payload, ['code', 'errcode']);
+    if (code !== null && code !== 0) {
+      throw new ConflictException(this.resolveOauthErrorMessage(payload, fallback));
+    }
+  }
+
+  private readOauthStatusCode(payload: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = payload[key];
+      if (typeof value === 'number') {
+        return value;
+      }
+      if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        if (!Number.isNaN(parsed)) {
+          return parsed;
+        }
+      }
+    }
+    return null;
+  }
+
   private async ensureLeadContentAssetsPersisted(content: LeadContentWithRelations) {
     const persistedAssets = await this.persistLeadContentAssets(content.creatorId, {
       coverImage: content.coverImage,
@@ -1530,17 +2272,27 @@ export class PublishingService {
   }
 
   private serializePlatformAccount(item: LeadPlatformAccountWithRelations) {
+    const loginSourceLabel =
+      item.provider === 'mcp'
+        ? 'MCP 渠道'
+        : item.provider === 'official_oauth'
+          ? '官方授权'
+          : '本地扩展';
     return {
       id: item.id,
       creatorId: item.creatorId,
       creatorName: item.creator.displayName,
       platform: item.platform,
+      provider: item.provider,
       authType: item.authType,
       accountName: item.accountName,
       displayName: item.displayName,
       authPayloadPreview: item.authPayloadPreview,
       loginStatus: item.loginStatus,
       loginUrl: item.loginUrl,
+      externalAccountId: item.externalAccountId,
+      externalGroupId: item.externalGroupId,
+      loginSourceLabel,
       status: item.status,
       remark: item.remark,
       lastLoginStartedAt: item.lastLoginStartedAt?.toISOString() ?? null,
@@ -1550,6 +2302,65 @@ export class PublishingService {
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString(),
     };
+  }
+
+  private buildAitoearnMcpLoginUrl(platform: LeadPublishPlatform) {
+    const explicitUrl = this.configService.get<string>('AITOEARN_CONNECT_CHANNEL_URL')?.trim();
+    if (explicitUrl) {
+      return this.appendAitoearnLoginQuery(explicitUrl, platform);
+    }
+
+    const webBaseUrl = this.configService.get<string>('AITOEARN_WEB_BASE_URL')?.trim();
+    if (webBaseUrl) {
+      return this.appendAitoearnLoginQuery(this.normalizeAitoearnAccountsUrl(webBaseUrl), platform);
+    }
+
+    const mcpBaseUrl = this.configService.get<string>('AITOEARN_MCP_BASE_URL')?.trim();
+    if (mcpBaseUrl) {
+      try {
+        const next = new URL(mcpBaseUrl);
+        next.pathname = '/zh-CN/accounts';
+        next.search = '';
+        next.hash = '';
+        return this.appendAitoearnLoginQuery(next.toString(), platform);
+      } catch {
+        // Fall through to the explicit configuration error below.
+      }
+    }
+
+    return this.appendAitoearnLoginQuery('https://aitoearn.cn/zh-CN/accounts?role=creator', platform);
+  }
+
+  private appendAitoearnLoginQuery(urlLike: string, platform: LeadPublishPlatform) {
+    const url = new URL(urlLike);
+    if (!url.pathname || url.pathname === '/' || url.pathname === '/zh-CN') {
+      url.pathname = '/zh-CN/accounts';
+    }
+    if (!url.searchParams.has('role')) {
+      url.searchParams.set('role', 'creator');
+    }
+    url.searchParams.set('from', 'ai-superweb');
+    return url.toString();
+  }
+
+  private normalizeAitoearnAccountsUrl(urlLike: string) {
+    const url = new URL(urlLike);
+    if (!url.pathname || url.pathname === '/' || url.pathname === '/zh-CN') {
+      url.pathname = '/zh-CN/accounts';
+    }
+    return url.toString();
+  }
+
+  private buildAitoearnMcpLoginHint(platform: LeadPublishPlatform) {
+    if (platform === LeadPublishPlatform.xiaohongshu) {
+      return 'AiToEarn 官方当前该平台走插件授权。进入频道管理后需按它的小红书插件链路登录，再回到本页同步云账号。';
+    }
+
+    if (platform === LeadPublishPlatform.wechat_mp) {
+      return 'AiToEarn 官方当前该平台走插件授权。进入频道管理后需按它的视频号插件链路登录，再回到本页同步云账号。';
+    }
+
+    return 'AiToEarn 官方当前会先进入频道管理，再由站内接口拉起对应平台授权。完成连接后回到本页继续同步云账号。';
   }
 
   private encryptAuthPayload(value: string) {
@@ -1675,6 +2486,21 @@ export class PublishingService {
         throw error;
       }
       throw new UnauthorizedException('扩展发布令牌无效或已过期');
+    }
+  }
+
+  private async verifyOfficialOauthState(token: string) {
+    try {
+      const payload = await this.jwtService.verifyAsync<OfficialOauthStatePayload>(token);
+      if (payload.purpose !== OFFICIAL_OAUTH_STATE_PURPOSE) {
+        throw new UnauthorizedException('官方 OAuth state 用途无效');
+      }
+      return payload;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('官方 OAuth state 无效或已过期');
     }
   }
 

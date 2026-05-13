@@ -5,10 +5,18 @@ import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Modal from "@/components/ui/Modal";
 import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
+import bilibiliIconUrl from "@/assets/哔哩哔哩.svg";
+import facebookIconUrl from "@/assets/Facebook.svg";
+import instagramIconUrl from "@/assets/githair-instagram.svg";
+import tiktokIconUrl from "@/assets/TIKTOK.svg";
+import wechatOfficialIconUrl from "@/assets/公众号.svg";
+import xTwitterIconUrl from "@/assets/XTwitter.svg?url";
+import youtubeIconUrl from "@/assets/youtube.svg";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import {
   deletePlatformAccount,
   listPlatformAccounts,
+  startOfficialOauthLogin,
   startExtensionPlatformLogin,
   type LeadPlatformStyle,
   type PlatformAccountItem,
@@ -98,6 +106,37 @@ function KuaishouIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function AssetIcon({
+  src,
+  className = "",
+}: {
+  src: string;
+  className?: string;
+}) {
+  return (
+    <img src={src} alt="" className={`object-contain ${className}`} aria-hidden="true" />
+  );
+}
+
+function CircleLetterIcon({
+  text,
+  className = "",
+  bgClassName = "bg-zinc-700",
+}: {
+  text: string;
+  className?: string;
+  bgClassName?: string;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-center rounded-[10px] text-sm font-semibold text-white ${bgClassName} ${className}`}
+      aria-hidden="true"
+    >
+      {text}
+    </div>
+  );
+}
+
 const platformOptions: Array<{
   value: LeadPlatformStyle;
   label: string;
@@ -127,6 +166,167 @@ const platformOptions: Array<{
     label: "快手",
     icon: <KuaishouIcon className="h-8 w-8" />,
     iconWrapClassName: "rounded-[10px]",
+  },
+  {
+    value: "bilibili",
+    label: "哔哩哔哩",
+    icon: <AssetIcon src={bilibiliIconUrl} className="h-10 w-10" />,
+    iconWrapClassName: "rounded-[10px]",
+  },
+  {
+    value: "wechat_official",
+    label: "微信公众号",
+    icon: <AssetIcon src={wechatOfficialIconUrl} className="h-10 w-10" />,
+    iconWrapClassName: "rounded-[10px]",
+  },
+];
+
+const connectChannelIconClassName = "h-10 w-10";
+
+type ConnectChannelPlatform = {
+  key: string;
+  label: string;
+  icon: JSX.Element;
+  iconWrapClassName: string;
+  enabled: boolean;
+  badge?: string;
+  hint: string;
+  actionLabel: string;
+  oauthPlatform?: Extract<LeadPlatformStyle, "douyin" | "kuaishou" | "bilibili" | "wechat_official">;
+};
+
+const connectChannelPlatforms: ConnectChannelPlatform[] = [
+  {
+    key: "xiaohongshu",
+    label: "小红书",
+    icon: <XiaohongshuIcon className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    badge: "浏览器插件",
+    hint: "暂未开放官方授权，当前仍建议走本地扩展登录。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "kuaishou",
+    label: "快手",
+    icon: <KuaishouIcon className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    hint: "已预留官方 OAuth 入口，本轮优先接入。",
+    actionLabel: "即将接入",
+    oauthPlatform: "kuaishou",
+  },
+  {
+    key: "bilibili",
+    label: "哔哩哔哩",
+    icon: <AssetIcon src={bilibiliIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    hint: "已预留哔哩哔哩官方 OAuth 入口，本轮接入。",
+    actionLabel: "立即授权",
+    oauthPlatform: "bilibili",
+  },
+  {
+    key: "douyin",
+    label: "抖音",
+    icon: <DouyinIcon className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    hint: "已预留官方 OAuth 入口，本轮优先接入。",
+    actionLabel: "即将接入",
+    oauthPlatform: "douyin",
+  },
+  {
+    key: "wechat_video",
+    label: "微信视频号",
+    icon: <WechatVideoIcon className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    badge: "浏览器插件",
+    hint: "暂未确认可用官方第三方 OAuth，先做灰色占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "wechat_official",
+    label: "微信公众号",
+    icon: <AssetIcon src={wechatOfficialIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    hint: "已预留微信公众号第三方平台授权入口，本轮接入。",
+    actionLabel: "立即授权",
+    oauthPlatform: "wechat_official",
+  },
+  {
+    key: "tiktok",
+    label: "TikTok",
+    icon: <AssetIcon src={tiktokIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "youtube",
+    label: "YouTube",
+    icon: <AssetIcon src={youtubeIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "twitter",
+    label: "Twitter",
+    icon: <AssetIcon src={xTwitterIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "facebook",
+    label: "Facebook",
+    icon: <AssetIcon src={facebookIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "instagram",
+    label: "Instagram",
+    icon: <AssetIcon src={instagramIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "threads",
+    label: "Threads",
+    icon: <CircleLetterIcon text="@" className="h-11 w-11 bg-zinc-500" />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "pinterest",
+    label: "Pinterest",
+    icon: <CircleLetterIcon text="P" className="h-11 w-11 bg-zinc-500" />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "linkedin",
+    label: "LinkedIn",
+    icon: <CircleLetterIcon text="in" className="h-11 w-11 bg-zinc-500" />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
   },
 ];
 
@@ -181,9 +381,22 @@ function getPlatformLoginUrl(platform: LeadPlatformStyle) {
       return "https://channels.weixin.qq.com/platform";
     case "kuaishou":
       return "https://cp.kuaishou.com/article/publish/video";
+    case "bilibili":
+      return "https://member.bilibili.com/";
+    case "wechat_official":
+      return "https://mp.weixin.qq.com/";
     default:
       return "";
   }
+}
+
+function isExtensionLoginPlatform(platform: LeadPlatformStyle) {
+  return (
+    platform === "xiaohongshu" ||
+    platform === "douyin" ||
+    platform === "wechat_mp" ||
+    platform === "kuaishou"
+  );
 }
 
 export default function PublishingPlatformLogin() {
@@ -199,6 +412,8 @@ export default function PublishingPlatformLogin() {
   const [startingPlatform, setStartingPlatform] = useState<LeadPlatformStyle | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
   const [extensionReady, setExtensionReady] = useState<boolean | null>(null);
+  const [mcpConnectOpen, setMcpConnectOpen] = useState(false);
+  const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PlatformAccountItem | null>(null);
   const [accountName, setAccountName] = useState("");
@@ -228,6 +443,29 @@ export default function PublishingPlatformLogin() {
 
   useEffect(() => {
     void loadAccounts(true);
+  }, [loadAccounts]);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const oauthStatus = searchParams.get("oauth_status");
+    if (!oauthStatus) return;
+
+    const oauthPlatform = searchParams.get("oauth_platform");
+    const oauthError = searchParams.get("oauth_error");
+    if (oauthStatus === "success") {
+      setHint(`${oauthPlatform ? `${platformLabel(oauthPlatform as LeadPlatformStyle)} ` : ""}官方授权已完成，账号已自动保存。`);
+      void loadAccounts();
+    } else {
+      setHint(oauthError || "官方授权失败");
+    }
+
+    searchParams.delete("oauth_status");
+    searchParams.delete("oauth_platform");
+    searchParams.delete("oauth_account_id");
+    searchParams.delete("oauth_error");
+    const nextQuery = searchParams.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", nextUrl);
   }, [loadAccounts]);
 
   useEffect(() => {
@@ -311,16 +549,36 @@ export default function PublishingPlatformLogin() {
       return;
     }
 
-    const opened = window.open(targetUrl, "_blank", "noopener,noreferrer");
-    if (!opened) {
-      setHint("浏览器拦截了新窗口，请允许弹窗后重试。");
-      return;
+    openExternalUrl(targetUrl);
+  }
+
+  function openExternalUrl(targetUrl: string) {
+    const normalizedUrl = targetUrl.trim();
+    if (!normalizedUrl) {
+      setHint("跳转地址为空，请稍后重试。");
+      return false;
     }
+
+    const opened = window.open(normalizedUrl, "_blank", "noopener");
+    if (opened) {
+      opened.focus?.();
+      return true;
+    }
+
+    // Some browsers block or break popup navigation for scripted windows.
+    // Fall back to same-tab navigation so the user can still complete authorization.
+    window.location.assign(normalizedUrl);
+    return true;
   }
 
   async function handleStartLogin(platform: LeadPlatformStyle) {
     if (!accessToken) {
       setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    if (!isExtensionLoginPlatform(platform)) {
+      setHint(`${platformLabel(platform)} 当前请走“连接新频道”里的官方授权入口。`);
       return;
     }
 
@@ -343,6 +601,32 @@ export default function PublishingPlatformLogin() {
       setHint(error instanceof Error ? error.message : "发起平台登录失败");
     } finally {
       setStartingPlatform(null);
+    }
+  }
+
+  async function handleConnectChannel(platform: ConnectChannelPlatform) {
+    if (!platform.enabled || !platform.oauthPlatform) {
+      setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
+      return;
+    }
+
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    try {
+      setConnectingPlatform(platform.key);
+      const session = await startOfficialOauthLogin({
+        accessToken,
+        platform: platform.oauthPlatform,
+      });
+      openExternalUrl(session.loginUrl);
+      setHint(`${platform.label} 已打开官方授权页，授权完成后会自动回到平台登录页。`);
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : `${platform.label} 官方授权发起失败`);
+    } finally {
+      setConnectingPlatform(null);
     }
   }
 
@@ -385,6 +669,27 @@ export default function PublishingPlatformLogin() {
   async function handleRestartLogin(item: PlatformAccountItem) {
     if (!accessToken) {
       setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    if (item.provider === "official_oauth") {
+      try {
+        setRestartingId(item.id);
+        const session = await startOfficialOauthLogin({
+          accessToken,
+          platform: item.platform as Extract<
+            LeadPlatformStyle,
+            "douyin" | "kuaishou" | "bilibili" | "wechat_official"
+          >,
+          accountId: item.id,
+        });
+        openExternalUrl(session.loginUrl);
+        setHint(`${platformLabel(item.platform)} 已重新打开官方授权页。`);
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : "重新发起官方授权失败");
+      } finally {
+        setRestartingId(null);
+      }
       return;
     }
 
@@ -461,23 +766,23 @@ export default function PublishingPlatformLogin() {
           <CardTitle>平台登录</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-zinc-300">
-          <div>这里用于预登录发布任务要使用的平台账号，统一存放小红书、抖音、视频号、快手账号。</div>
+          <div>这里统一管理发布任务使用的平台账号，当前支持本地扩展预登录，并预留官方授权接入入口。</div>
           <div className="flex flex-wrap gap-2 text-xs text-zinc-400">
             <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
               <KeyRound className="h-3.5 w-3.5" />
-              预登录平台账号
+              本地扩展登录
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
               <ShieldCheck className="h-3.5 w-3.5" />
-              供发布任务调用
+              官方授权占位
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
               <Smartphone className="h-3.5 w-3.5" />
-              浏览器真实登录
+              分平台逐步开放
             </span>
           </div>
           <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-3 text-xs text-zinc-300">
-            点击“发起登录”后，会在你的本机浏览器打开对应平台官方登录页。完成登录后，浏览器扩展会自动回传并保存登录信息。
+            本地扩展登录会在你的浏览器打开平台官方页并自动回传 Cookie。“连接新频道”当前先展示平台占位，已开放的平台会逐步切到官方 OAuth。
           </div>
           <div className="text-xs text-zinc-500">
             扩展状态：
@@ -487,6 +792,11 @@ export default function PublishingPlatformLogin() {
             <span>账号总数：{summary.total}</span>
             <span>有效账号：{summary.validCount}</span>
             <span>登录中：{summary.pendingCount}</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setMcpConnectOpen(true)}>
+              连接新频道
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -526,13 +836,15 @@ export default function PublishingPlatformLogin() {
                         </div>
                       </div>
 
-                      <Button
-                        size="sm"
-                        onClick={() => void handleStartLogin(platformGroup.value)}
-                        disabled={startingPlatform === platformGroup.value}
-                      >
-                        {startingPlatform === platformGroup.value ? "发起中..." : `发起${platformGroup.label}登录`}
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => void handleStartLogin(platformGroup.value)}
+                          disabled={startingPlatform === platformGroup.value}
+                        >
+                          {startingPlatform === platformGroup.value ? "发起中..." : `发起${platformGroup.label}登录`}
+                        </Button>
+                      </div>
                     </div>
 
                     {platformGroup.accounts.length === 0 ? (
@@ -564,7 +876,12 @@ export default function PublishingPlatformLogin() {
 
                               return (
                                 <Tr key={item.id}>
-                                  <Td className="text-zinc-300">{item.authType === "cookie" ? "Cookie" : "Token"}</Td>
+                                  <Td className="text-zinc-300">
+                                    <div>{item.loginSourceLabel}</div>
+                                    <div className="text-xs text-zinc-500">
+                                      {item.authType === "cookie" ? "Cookie" : "Token"}
+                                    </div>
+                                  </Td>
                                   <Td>
                                     <Badge variant={currentLogin.variant}>{currentLogin.label}</Badge>
                                   </Td>
@@ -594,7 +911,7 @@ export default function PublishingPlatformLogin() {
                                       <Button
                                         size="sm"
                                         variant="secondary"
-                                        onClick={() => void handleRestartLogin(item)}
+                                        onClick={() => void handleOpenLoginUrl(item)}
                                         disabled={restartingId === item.id}
                                       >
                                         {restartingId === item.id ? "打开中..." : "重新登录"}
@@ -656,6 +973,70 @@ export default function PublishingPlatformLogin() {
             : null}
         </CardContent>
       </Card>
+
+      <Modal
+        open={mcpConnectOpen}
+        title="连接新频道"
+        onClose={() => setMcpConnectOpen(false)}
+        panelClassName="max-w-5xl"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setMcpConnectOpen(false)}>
+              关闭
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-zinc-300">
+            先按截图把平台都展示出来。已开放的平台高亮可点，未开放的平台灰色占位。
+          </div>
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+            {connectChannelPlatforms.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => void handleConnectChannel(item)}
+                disabled={connectingPlatform !== null && connectingPlatform !== item.key}
+                className={`relative flex min-h-36 flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-4 text-center transition-colors disabled:cursor-not-allowed ${
+                  item.enabled
+                    ? "border-white/10 bg-white/5 hover:border-orange-400/40 hover:bg-orange-500/10"
+                    : "border-white/8 bg-zinc-900/40 opacity-65"
+                }`}
+              >
+                {item.badge ? (
+                  <span
+                    className={`absolute right-3 top-3 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ring-1 ${
+                      item.enabled
+                        ? "bg-orange-500/15 text-orange-200 ring-orange-400/20"
+                        : "bg-white/10 text-zinc-200 ring-white/15"
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                ) : null}
+                <span
+                  className={`inline-flex h-14 w-14 items-center justify-center overflow-hidden ${item.iconWrapClassName}`}
+                  aria-hidden="true"
+                >
+                  {item.icon}
+                </span>
+                <div className="space-y-1">
+                  <div className="text-sm font-medium text-zinc-100">{item.label}</div>
+                  <div className={`text-xs ${item.enabled ? "text-zinc-400" : "text-zinc-500"}`}>
+                    {connectingPlatform === item.key ? "处理中..." : item.actionLabel}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/10 px-4 py-3 text-xs text-zinc-400">
+            {connectingPlatform
+              ? connectChannelPlatforms.find((item) => item.key === connectingPlatform)?.hint
+              : "当前优先接入抖音、快手官方 OAuth；其余平台先按占位展示。"}
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={editorOpen}

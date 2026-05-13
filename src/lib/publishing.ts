@@ -1,12 +1,19 @@
 import { requestJson } from "@/lib/api";
 
-export type LeadPlatformStyle = "xiaohongshu" | "douyin" | "wechat_mp" | "kuaishou";
+export type LeadPlatformStyle =
+  | "xiaohongshu"
+  | "douyin"
+  | "wechat_mp"
+  | "kuaishou"
+  | "bilibili"
+  | "wechat_official";
 export type LeadContentType = "copy" | "image_text" | "video" | "product_asset";
 export type LeadContentSourceType = "social" | "product" | "video" | "manual";
 export type LeadContentStatus = "active" | "archived" | "deleted";
 export type LeadPublishStatus = "queued" | "running" | "success" | "failed";
 export type LeadPublishMode = "draft_box";
 export type PublishExecutionMode = "server" | "extension";
+export type PlatformAccountProvider = "extension" | "mcp" | "official_oauth";
 export type PlatformAccountAuthType = "cookie" | "token";
 export type PlatformAccountStatus = "saved" | "valid" | "invalid" | "disabled";
 export type PlatformAccountLoginStatus = "idle" | "pending" | "authenticated" | "failed" | "cancelled";
@@ -36,6 +43,7 @@ export type PublishingJobItem = {
   leadContentId: string;
   createdById: string;
   platform: LeadPlatformStyle;
+  provider: PlatformAccountProvider;
   platformAccountId: string;
   platformAccountName?: string;
   platformAccountDisplayName?: string | null;
@@ -47,7 +55,13 @@ export type PublishingJobItem = {
   draftImages: string[];
   draftVideoUrl: string | null;
   draftUrl?: string | null;
+  externalDraftId?: string | null;
+  externalFlowId?: string | null;
+  externalStatus?: string | null;
   draftedAt?: string | null;
+  queuedAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
@@ -100,12 +114,16 @@ export type PlatformAccountItem = {
   creatorId: string;
   creatorName: string;
   platform: LeadPlatformStyle;
+  provider: PlatformAccountProvider;
   authType: PlatformAccountAuthType;
   accountName: string;
   displayName: string | null;
   authPayloadPreview: string;
   loginStatus: PlatformAccountLoginStatus;
   loginUrl: string | null;
+  externalAccountId: string | null;
+  externalGroupId: string | null;
+  loginSourceLabel: string;
   status: PlatformAccountStatus;
   remark: string | null;
   lastLoginStartedAt: string | null;
@@ -129,6 +147,20 @@ export type PlatformExtensionPublishSession = {
   sessionToken: string;
   expiresAt: string;
   job: PublishingJobItem;
+};
+
+export type PlatformMcpLoginSession = {
+  provider: "mcp";
+  platform: LeadPlatformStyle;
+  loginUrl: string;
+  syncHint: string;
+};
+
+export type PlatformOfficialOauthLoginSession = {
+  provider: "official_oauth";
+  platform: LeadPlatformStyle;
+  loginUrl: string;
+  syncHint: string;
 };
 
 type PlatformAccountsResponse = {
@@ -297,6 +329,7 @@ export async function retryPublishingJob(input: { accessToken: string; jobId: st
 export async function listPlatformAccounts(input: {
   accessToken: string;
   platform?: LeadPlatformStyle;
+  provider?: PlatformAccountProvider;
   status?: PlatformAccountStatus;
   loginStatus?: PlatformAccountLoginStatus;
   autoComplete?: "none" | "pending";
@@ -305,6 +338,7 @@ export async function listPlatformAccounts(input: {
 }) {
   const searchParams = new URLSearchParams();
   if (input.platform) searchParams.set("platform", input.platform);
+  if (input.provider) searchParams.set("provider", input.provider);
   if (input.status) searchParams.set("status", input.status);
   if (input.loginStatus) searchParams.set("loginStatus", input.loginStatus);
   if (input.autoComplete) searchParams.set("autoComplete", input.autoComplete);
@@ -358,6 +392,38 @@ export async function startExtensionPlatformLogin(input: {
     headers: getAuthHeaders(accessToken),
     body: JSON.stringify(payload),
   });
+}
+
+export async function startMcpPlatformLogin(input: {
+  accessToken: string;
+  platform: LeadPlatformStyle;
+}) {
+  const { accessToken, ...payload } = input;
+  return requestJson<PlatformMcpLoginSession>("/api/publishing/platform-accounts/mcp-login/start", {
+    method: "POST",
+    headers: getAuthHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function startOfficialOauthLogin(input: {
+  accessToken: string;
+  platform: Extract<LeadPlatformStyle, "douyin" | "kuaishou" | "bilibili" | "wechat_official">;
+  accountId?: string;
+}) {
+  const searchParams = new URLSearchParams();
+  searchParams.set("platform", input.platform);
+  if (input.accountId) {
+    searchParams.set("accountId", input.accountId);
+  }
+  return requestJson<PlatformOfficialOauthLoginSession>(
+    `/api/publishing/platform-accounts/official-oauth/start?${searchParams.toString()}`,
+    {
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+      },
+    },
+  );
 }
 
 export async function updatePlatformAccount(input: {

@@ -9,6 +9,7 @@ import { ListPublishingJobsQueryDto } from './dto/list-publishing-jobs-query.dto
 import { ListPlatformAccountsQueryDto } from './dto/list-platform-accounts-query.dto';
 import { PublishLeadContentDto } from './dto/publish-lead-content.dto';
 import { SearchGaodeStoresDto } from './dto/search-gaode-stores.dto';
+import { StartMcpPlatformLoginDto } from './dto/start-mcp-platform-login.dto';
 import { StartPlatformExtensionLoginDto } from './dto/start-platform-extension-login.dto';
 import { StartPlatformLoginDto } from './dto/start-platform-login.dto';
 import { SyncPublishingContentDto } from './dto/sync-publishing-content.dto';
@@ -143,6 +144,14 @@ export class PublishingController {
     @Body() dto: StartPlatformExtensionLoginDto,
   ) {
     return this.publishingService.startPlatformExtensionLogin(req.user, dto);
+  }
+
+  @Post('platform-accounts/mcp-login/start')
+  startPlatformMcpLogin(
+    @Req() req: { user: SessionUser },
+    @Body() dto: StartMcpPlatformLoginDto,
+  ) {
+    return this.publishingService.startMcpPlatformLogin(req.user, dto);
   }
 
   @Post('platform-accounts/:id/update')

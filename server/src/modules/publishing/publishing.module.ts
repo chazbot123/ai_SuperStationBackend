@@ -7,8 +7,10 @@ import { ProductsModule } from '../products/products.module';
 import { PublishingCleanupService } from './publishing-cleanup.service';
 import { PublishingController } from './publishing.controller';
 import { PublishingExtensionController } from './publishing-extension.controller';
+import { PublishingOauthController } from './publishing-oauth.controller';
 import { PublishingStoreSearchService } from './publishing-store-search.service';
 import { PlatformLoginBrowserService } from './platform-login-browser.service';
+import { AitoearnUnifiedMcpService } from './aitoearn-unified-mcp.service';
 import { PublishingService } from './publishing.service';
 
 @Module({
@@ -28,10 +30,11 @@ import { PublishingService } from './publishing.service';
     PrismaModule,
     ProductsModule,
   ],
-  controllers: [PublishingController, PublishingExtensionController],
+  controllers: [PublishingController, PublishingExtensionController, PublishingOauthController],
   providers: [
     PublishingService,
     PlatformLoginBrowserService,
+    AitoearnUnifiedMcpService,
     PublishingCleanupService,
     PublishingStoreSearchService,
   ],

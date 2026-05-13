@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
-const PUBLISH_PLATFORMS = ['xiaohongshu', 'douyin', 'wechat_mp', 'kuaishou'] as const;
+const PUBLISH_PLATFORMS = ['xiaohongshu', 'douyin', 'wechat_mp', 'kuaishou', 'bilibili', 'wechat_official'] as const;
 const PLATFORM_ACCOUNT_STATUSES = ['saved', 'valid', 'invalid', 'disabled'] as const;
 const PLATFORM_ACCOUNT_LOGIN_STATUSES = [
   'idle',
@@ -10,6 +10,7 @@ const PLATFORM_ACCOUNT_LOGIN_STATUSES = [
   'failed',
   'cancelled',
 ] as const;
+const PLATFORM_ACCOUNT_PROVIDERS = ['extension', 'mcp', 'official_oauth'] as const;
 const PLATFORM_ACCOUNT_AUTO_COMPLETE = ['none', 'pending'] as const;
 
 export class ListPlatformAccountsQueryDto {
@@ -27,6 +28,11 @@ export class ListPlatformAccountsQueryDto {
   @IsString()
   @IsIn(PLATFORM_ACCOUNT_LOGIN_STATUSES)
   loginStatus?: (typeof PLATFORM_ACCOUNT_LOGIN_STATUSES)[number];
+
+  @IsOptional()
+  @IsString()
+  @IsIn(PLATFORM_ACCOUNT_PROVIDERS)
+  provider?: (typeof PLATFORM_ACCOUNT_PROVIDERS)[number];
 
   @IsOptional()
   @IsString()

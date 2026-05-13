@@ -105,6 +105,8 @@ enum LeadPublishPlatform {
   douyin
   wechat_mp
   kuaishou
+  bilibili
+  wechat_official
 }
 
 enum LeadPublishStatus {
@@ -116,6 +118,12 @@ enum LeadPublishStatus {
 
 enum LeadPublishMode {
   draft_box
+}
+
+enum PlatformAccountProvider {
+  extension
+  mcp
+  official_oauth
 }
 
 enum PlatformAccountAuthType {
@@ -617,6 +625,8 @@ model LeadPublishJob {
   createdById  String
   /// 目标平台
   platform     LeadPublishPlatform
+  /// 发布提供方
+  provider     PlatformAccountProvider @default(extension)
   /// 目标平台账号 ID
   platformAccountId String?
   /// 发布模式
@@ -635,8 +645,20 @@ model LeadPublishJob {
   draftVideoUrl String?
   /// 草稿箱保存页地址
   draftUrl     String?
+  /// 外部草稿 ID
+  externalDraftId String?
+  /// 外部发布任务 ID
+  externalFlowId String?
+  /// 外部任务状态
+  externalStatus String?
   /// 草稿保存时间
   draftedAt    DateTime?
+  /// 入队时间
+  queuedAt     DateTime?
+  /// 开始执行时间
+  startedAt    DateTime?
+  /// 完成时间
+  completedAt  DateTime?
   /// 错误信息
   lastError    String?
   /// 创建时间
@@ -652,8 +674,10 @@ model LeadPublishJob {
 
   @@index([leadContentId, createdAt])
   @@index([createdById, createdAt])
+  @@index([provider, status, createdAt])
   @@index([platform, status, createdAt])
   @@index([platformAccountId, createdAt])
+  @@index([externalFlowId])
 }
 
 model LeadPlatformAccount {
@@ -663,6 +687,8 @@ model LeadPlatformAccount {
   creatorId          String
   /// 平台
   platform           LeadPublishPlatform
+  /// 账号来源
+  provider           PlatformAccountProvider @default(extension)
   /// 登录信息类型
   authType           PlatformAccountAuthType @default(cookie)
   /// 账号名称
@@ -683,6 +709,12 @@ model LeadPlatformAccount {
   lastLoginCompletedAt DateTime?
   /// 最近登录页地址
   loginUrl            String?
+  /// 外部平台账号 ID
+  externalAccountId   String?
+  /// 外部账号组 ID
+  externalGroupId     String?
+  /// 外部账号补充信息
+  externalMeta        Json?
   /// 当前状态
   status             PlatformAccountStatus   @default(saved)
   /// 备注
@@ -700,7 +732,9 @@ model LeadPlatformAccount {
   /// 关联发布任务
   publishJobs        LeadPublishJob[]
 
-  @@unique([creatorId, platform, accountName])
+  @@unique([creatorId, platform, provider, accountName])
+  @@index([creatorId, platform, provider, externalAccountId])
+  @@index([provider, platform, updatedAt])
   @@index([platform, status, updatedAt])
   @@index([creatorId, createdAt])
 }
