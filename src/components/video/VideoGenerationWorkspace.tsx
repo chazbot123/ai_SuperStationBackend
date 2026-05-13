@@ -202,6 +202,19 @@ function extractSpeechContentFromProductPrompt(input: string) {
   return raw;
 }
 
+function stripProductAutoHints(input: string) {
+  const raw = String(input ?? "").replace(/\r\n/g, "\n");
+  const markers = ["\n\n时长要求：", "\n\n文案要求：", "\n\n节奏要求：", "\n\n平台风格：", "\n\n画面指引："];
+  let cutIndex = -1;
+  for (const marker of markers) {
+    const idx = raw.indexOf(marker);
+    if (idx === -1) continue;
+    cutIndex = cutIndex === -1 ? idx : Math.min(cutIndex, idx);
+  }
+  const sliced = (cutIndex === -1 ? raw : raw.slice(0, cutIndex)).trim();
+  return sliced || raw.trim();
+}
+
 function normalizeAvatarErrorMessage(message: string) {
   const normalized = message
     .replace(/\s*\(trace_id:[^)]+\)/gi, "")
@@ -676,10 +689,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     try {
       const polishedBase = await polishPromptText(raw);
       let nextPrompt = polishedBase;
-      if (isProductMode) {
-        const effectiveDurationSec = durationSec <= 16 ? durationSec : 16;
-        nextPrompt = appendPlatformHint(appendProductDurationHint(polishedBase, effectiveDurationSec), platformStyle);
-      } else if (isAvatarMode) {
+      if (isAvatarMode) {
         nextPrompt = appendAvatarVideoHint(appendPlatformHint(polishedBase, platformStyle), avatarTargetSeconds);
       }
       nextPrompt = nextPrompt.slice(0, 5000);
@@ -931,8 +941,10 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         return;
       }
 
-      appendAssetsToDraft(props.draftSource, nextImages);
-      setAssetHint(`已导入 ${nextImages.length} 张图片素材。`);
+      const nextPrimary = nextImages[nextImages.length - 1];
+      if (!nextPrimary) return;
+      setDraftField(props.draftSource, "assets", [nextPrimary]);
+      setAssetHint("已更换首帧图像。");
       return;
     }
 
@@ -999,6 +1011,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     const avatarFullScript = avatarCopyText.trim();
     const productSpeechText = isProductMode ? extractSpeechContentFromProductPrompt(prompt) : "";
     const productGeneratedScript = productCopyText.trim() || productSpeechText || rawQuestion;
+    const productSubtitleText = isProductMode ? stripProductAutoHints(productGeneratedScript) : "";
     const nextScript = isAvatarMode ? avatarFullScript : productGeneratedScript;
 
     setIsGenerating(true);
@@ -1105,7 +1118,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         : appendPlatformHint(prompt, platformStyle);
       const result = await generateAiVideo({
         prompt: promptForVideo,
-        ttsText: productSpeechText || undefined,
+        ttsText: isProductMode ? (productSubtitleText || undefined) : productSpeechText || undefined,
         referenceImages: assets
           .filter((item) => item.kind === "image" && item.previewUrl)
           .map((item) => item.previewUrl as string)
@@ -1270,7 +1283,9 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
   const currentProductCopyResult = useMemo(() => {
     if (!isProductMode) return "";
-    return (productCopyText.trim() || currentProductTask?.generatedScript?.trim() || "").trim();
+    const raw = (productCopyText.trim() || currentProductTask?.generatedScript?.trim() || "").trim();
+    if (!raw) return "";
+    return stripProductAutoHints(raw);
   }, [currentProductTask?.generatedScript, isProductMode, productCopyText]);
 
   const currentProductCopyResultLength = useMemo(() => currentProductCopyResult.length, [currentProductCopyResult]);
@@ -1854,7 +1869,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                                 </Button>
                               </div>
                             </div>
-                            <div className="mt-2 h-[10.5rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm leading-7 text-zinc-200">
+                            <div className="mt-2 min-h-[10.5rem] max-h-[16rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm leading-6 text-zinc-200">
                               {currentProductCopyResult || "-"}
                             </div>
                           </div>
@@ -1919,7 +1934,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                               </Button>
                             </div>
                           </div>
-                          <div className="mt-2 h-[10.5rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm leading-7 text-zinc-200">
+                          <div className="mt-2 min-h-[10.5rem] max-h-[16rem] overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm leading-6 text-zinc-200">
                             {currentProductCopyResult || "-"}
                           </div>
                         </div>

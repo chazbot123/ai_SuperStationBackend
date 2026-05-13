@@ -48,6 +48,7 @@ type VideoDraftState = {
   replaceItems: (items: VideoDraftItem[]) => void;
   prependItem: (item: VideoDraftItem) => void;
   updateItem: (id: string, patch: Partial<VideoDraftItem>) => void;
+  removeItem: (id: string) => void;
 };
 
 export const useVideoDraftStore = create<VideoDraftState>()(
@@ -65,6 +66,10 @@ export const useVideoDraftStore = create<VideoDraftState>()(
       updateItem: (id, patch) =>
         set((state) => ({
           items: state.items.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
+        })),
+      removeItem: (id) =>
+        set((state) => ({
+          items: state.items.filter((entry) => entry.id !== id),
         })),
     }),
     {

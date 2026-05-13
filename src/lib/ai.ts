@@ -695,6 +695,15 @@ export async function updateVideoDraft(input: {
   });
 }
 
+export async function removeVideoDraft(accessToken: string, id: string) {
+  return requestJson<{ success: true }>(`/api/ai/video-drafts/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
 export async function removeProductImageDraft(accessToken: string, id: string) {
   return requestJson<{ success: true }>(`/api/ai/product-image-drafts/${id}`, {
     method: "DELETE",

@@ -13,6 +13,7 @@ import {
   getVideoTaskStatus,
   listVideoDrafts,
   markVideoDraftSynced,
+  removeVideoDraft,
   retryAvatarVideoTask,
   submitVideoDraft,
   updateVideoDraft,
@@ -114,6 +115,7 @@ export default function VideoDrafts() {
   const items = useVideoDraftStore((s) => s.items);
   const replaceItems = useVideoDraftStore((s) => s.replaceItems);
   const updateItem = useVideoDraftStore((s) => s.updateItem);
+  const removeItem = useVideoDraftStore((s) => s.removeItem);
   const isAgent = user?.roleKey === "level1_agent";
 
   const [keyword, setKeyword] = useState("");
@@ -386,6 +388,28 @@ export default function VideoDrafts() {
     }
   }
 
+  async function handleRemoveDraft(item: VideoDraftItem) {
+    if (!accessToken) {
+      setHint("请先登录");
+      return;
+    }
+    const confirmed = window.confirm("确定要删除这条视频草稿吗？删除后无法恢复。");
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await removeVideoDraft(accessToken, item.id);
+      removeItem(item.id);
+      if (previewItem?.id === item.id) {
+        setPreviewItem(null);
+      }
+      setHint("已删除草稿。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "删除失败");
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Card>
@@ -512,6 +536,17 @@ export default function VideoDrafts() {
         footer={
           previewItem ? (
             <div className="flex w-full items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  if (previewItem) {
+                    void handleRemoveDraft(previewItem);
+                  }
+                }}
+              >
+                删除
+              </Button>
               <Button
                 type="button"
                 variant="secondary"

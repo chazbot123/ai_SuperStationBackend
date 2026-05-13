@@ -1418,17 +1418,20 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const bgmRequested = !!bgmUrl;
 
     if (resolvedConfig.protocol === 'vidu_video') {
-      const textForTts = (ttsText || prompt)
-        .replace(/\n{3,}/g, '\n\n')
-        .replace(/^平台风格：.*$/gim, '')
-        .trim()
-        .slice(0, 2000);
+      const sanitizeSubtitleText = (input: string) =>
+        input
+          .replace(/\n{3,}/g, '\n\n')
+          .replace(/^(平台风格|时长要求|文案要求|节奏要求|画面指引|视频生成要求|成片要求)\s*[:：].*$/gim, '')
+          .trim();
+      const cleanedText = sanitizeSubtitleText(ttsText || prompt);
+      const textForTts = cleanedText.slice(0, 2000);
+      const subtitleText = cleanedText.slice(0, 4000);
       await this.videoTtsCache.set(
         taskId,
         {
           voiceId: audioRequested ? voiceId : null,
           text: audioRequested ? textForTts : '',
-          subtitleText: (ttsText || prompt).replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000),
+          subtitleText,
           subtitleEnabled: true,
           ttsTaskId: '',
           audioUrl: null,
@@ -1725,7 +1728,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       return [] as Array<{ startSeconds: number; endSeconds: number; text: string }>;
     }
 
-    const chunks = this.splitSubtitleText(normalizedText);
+    const chunks = this.splitSubtitleText(
+      normalizedText,
+      this.resolveSubtitleChunkMaxChars(durationSeconds, normalizedText),
+    );
     if (chunks.length === 0) {
       return [] as Array<{ startSeconds: number; endSeconds: number; text: string }>;
     }
@@ -1734,13 +1740,23 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const totalWeight = weights.reduce((sum, value) => sum + value, 0) || chunks.length;
     const cues: Array<{ startSeconds: number; endSeconds: number; text: string }> = [];
     let cursor = startOffset;
+    const totalEnd = startOffset + durationSeconds;
 
     for (let index = 0; index < chunks.length; index += 1) {
-      const remainingDuration = startOffset + durationSeconds - cursor;
+      const remainingDuration = totalEnd - cursor;
+      if (remainingDuration <= 0.02) {
+        break;
+      }
       const remainingCount = chunks.length - index;
       const rawSlice = (durationSeconds * weights[index]) / totalWeight;
-      const slice = index === chunks.length - 1 ? remainingDuration : Math.max(0.9, Math.min(rawSlice, remainingDuration - 0.3 * (remainingCount - 1)));
-      const endSeconds = index === chunks.length - 1 ? startOffset + durationSeconds : Math.max(cursor + 0.8, cursor + slice);
+      const minSlice = Math.min(0.8, Math.max(0.28, durationSeconds / Math.max(chunks.length * 1.5, 1)));
+      const reserveForRest = Math.max(0, remainingCount - 1) * 0.02;
+      const maxSlice = Math.max(minSlice, remainingDuration - reserveForRest);
+      const slice = index === chunks.length - 1 ? remainingDuration : Math.max(minSlice, Math.min(rawSlice, maxSlice));
+      const endSeconds = index === chunks.length - 1 ? totalEnd : Math.min(totalEnd, cursor + slice);
+      if (endSeconds <= cursor + 0.02) {
+        break;
+      }
       cues.push({
         startSeconds: cursor,
         endSeconds,
@@ -1779,6 +1795,23 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       .trim();
   }
 
+  private resolveSubtitleChunkMaxChars(durationSeconds: number, text: string) {
+    const totalChars = this.countSubtitleChars(text);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || totalChars <= 0) {
+      return 20;
+    }
+
+    if (durationSeconds <= 6) {
+      return 30;
+    }
+    if (durationSeconds <= 10) {
+      return 26;
+    }
+
+    const targetChunkCount = Math.max(2, Math.round(durationSeconds / 1.8));
+    return Math.max(20, Math.min(32, Math.ceil(totalChars / targetChunkCount)));
+  }
+
   private splitSubtitleText(text: string, maxChars = 20) {
     const blocks = text
       .split(/\n+/)
@@ -1810,7 +1843,42 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         }
       }
     }
-    return parts.filter(Boolean);
+    return this.mergeSubtitleParts(parts.filter(Boolean), maxChars);
+  }
+
+  private mergeSubtitleParts(parts: string[], maxChars: number) {
+    if (parts.length <= 1) {
+      return parts;
+    }
+
+    const merged: string[] = [];
+    for (const part of parts) {
+      const current = part.trim();
+      if (!current) {
+        continue;
+      }
+      const previous = merged[merged.length - 1];
+      if (!previous) {
+        merged.push(current);
+        continue;
+      }
+
+      const combined = `${previous}${current}`;
+      const previousChars = this.countSubtitleChars(previous);
+      const currentChars = this.countSubtitleChars(current);
+      const combinedChars = this.countSubtitleChars(combined);
+      const shouldMerge =
+        combinedChars <= maxChars &&
+        (previousChars <= Math.ceil(maxChars * 0.45) || currentChars <= Math.ceil(maxChars * 0.45));
+
+      if (shouldMerge) {
+        merged[merged.length - 1] = combined;
+        continue;
+      }
+      merged.push(current);
+    }
+
+    return merged;
   }
 
   private countSubtitleChars(text: string) {
@@ -3556,6 +3624,17 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     override?: Partial<TextModelConfigInput & ImageModelConfigInput & VideoModelConfigInput & TestModelConfigDto>,
     userId?: string | null,
   ) {
+    const hasExplicitOverride = !!override && Object.values(override).some((value) => {
+      if (typeof value === 'string') {
+        return value.trim().length > 0;
+      }
+      return value !== undefined && value !== null;
+    });
+
+    if (hasExplicitOverride) {
+      return this.resolveModelConfig(type, override);
+    }
+
     const normalizedUserId = userId?.trim();
     if (normalizedUserId) {
       const cached = await this.modelConfigCache.get(normalizedUserId, type);
@@ -3837,6 +3916,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     });
 
     return this.serializeVideoDraft(updated);
+  }
+
+  async removeVideoDraft(user: SessionUser, id: string) {
+    await this.findAccessibleVideoDraft(user, id);
+    await this.prisma.videoDraft.delete({
+      where: { id },
+    });
+    return { success: true };
   }
 
   async submitVideoDraft(user: SessionUser, id: string) {

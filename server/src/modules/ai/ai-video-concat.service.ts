@@ -164,6 +164,25 @@ export class AiVideoConcatService {
     });
   }
 
+  async getVideoFrameSize(filePath: string) {
+    return new Promise<{ width: number; height: number }>((resolve, reject) => {
+      ffmpeg.ffprobe(filePath, (error, metadata) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        const videoStream = metadata?.streams?.find((stream) => stream.codec_type === 'video');
+        const width = Number(videoStream?.width ?? 0);
+        const height = Number(videoStream?.height ?? 0);
+        if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+          resolve({ width, height });
+          return;
+        }
+        reject(new Error('无法读取视频分辨率'));
+      });
+    });
+  }
+
   async burnSubtitles(opts: { videoBuffer: Buffer; cues: SubtitleCue[] }) {
     const validCues = opts.cues.filter(
       (cue) =>
@@ -188,7 +207,8 @@ export class AiVideoConcatService {
     await writeFile(srtPath, this.buildSrt(validCues), 'utf-8');
 
     try {
-      await this.runBurnSubtitles(videoPath, srtPath, outputPath);
+      const frameSize = await this.getVideoFrameSize(videoPath);
+      await this.runBurnSubtitles(videoPath, srtPath, outputPath, frameSize);
       return Buffer.from(await readFile(outputPath));
     } catch (error) {
       throw error instanceof Error
@@ -315,10 +335,35 @@ export class AiVideoConcatService {
     });
   }
 
-  private runBurnSubtitles(videoPath: string, subtitlePath: string, outputPath: string) {
+  private runBurnSubtitles(
+    videoPath: string,
+    subtitlePath: string,
+    outputPath: string,
+    frameSize: { width: number; height: number },
+  ) {
     return new Promise<void>((resolve, reject) => {
       const escapedSubtitlePath = subtitlePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
-      const filter = `subtitles='${escapedSubtitlePath}'`;
+      const fontName =
+        process.platform === 'win32'
+          ? 'SimHei'
+          : process.platform === 'darwin'
+            ? 'PingFangSC'
+            : 'NotoSansCJKsc-Regular';
+      const marginV = this.getSubtitleMarginV(frameSize);
+      const marginH = this.getSubtitleMarginH(frameSize);
+      const forceStyle = [
+        `FontName=${fontName}`,
+        'Alignment=2',
+        `MarginV=${marginV}`,
+        `MarginL=${marginH}`,
+        `MarginR=${marginH}`,
+        'FontSize=18',
+        'Outline=2',
+        'Shadow=0',
+        'BorderStyle=1',
+        'WrapStyle=2',
+      ].join(',');
+      const filter = `subtitles='${escapedSubtitlePath}':charenc=UTF-8:force_style='${forceStyle}'`;
 
       ffmpeg()
         .input(videoPath)
@@ -334,6 +379,18 @@ export class AiVideoConcatService {
         .on('end', () => resolve())
         .save(outputPath);
     });
+  }
+
+  private getSubtitleMarginV(frameSize: { width: number; height: number }) {
+    const shorterSide = Math.min(frameSize.width, frameSize.height);
+    const aspectRatio = frameSize.height / frameSize.width;
+    const marginPercent = aspectRatio >= 1.6 ? 0.06 : aspectRatio >= 0.9 ? 0.055 : 0.05;
+    return Math.max(24, Math.round(shorterSide * marginPercent));
+  }
+
+  private getSubtitleMarginH(frameSize: { width: number; height: number }) {
+    const horizontalMargin = Math.round(frameSize.width * 0.07);
+    return Math.max(20, horizontalMargin);
   }
 
   private resolveBinaryPath(envKey: 'FFMPEG_PATH' | 'FFPROBE_PATH', candidates: string[]) {
@@ -355,10 +412,61 @@ export class AiVideoConcatService {
   private buildSrt(cues: SubtitleCue[]) {
     return cues
       .map((cue, index) => {
-        const text = cue.text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const text = this.wrapSubtitleTextForSrt(cue.text);
         return `${index + 1}\n${this.formatSrtTime(cue.startSeconds)} --> ${this.formatSrtTime(cue.endSeconds)}\n${text}\n`;
       })
       .join('\n');
+  }
+
+  private wrapSubtitleTextForSrt(text: string) {
+    const normalized = text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    if (!normalized) {
+      return '';
+    }
+
+    const paragraphs = normalized
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const wrapped: string[] = [];
+    for (const paragraph of paragraphs) {
+      wrapped.push(...this.wrapSubtitleLine(paragraph, 10));
+    }
+    return wrapped.join('\n');
+  }
+
+  private wrapSubtitleLine(line: string, maxCharsPerLine: number) {
+    if (!line) {
+      return [];
+    }
+    const compact = line.replace(/\s+/g, ' ').trim();
+    if (this.countSubtitleChars(compact) <= maxCharsPerLine) {
+      return [compact];
+    }
+
+    const result: string[] = [];
+    let cursor = '';
+    let cursorChars = 0;
+    for (const char of compact) {
+      cursor += char;
+      if (!/\s/.test(char)) {
+        cursorChars += 1;
+      }
+      if (cursorChars >= maxCharsPerLine) {
+        result.push(cursor.trim());
+        cursor = '';
+        cursorChars = 0;
+      }
+    }
+
+    if (cursor.trim()) {
+      result.push(cursor.trim());
+    }
+    return result;
+  }
+
+  private countSubtitleChars(text: string) {
+    return text.replace(/\s+/g, '').length;
   }
 
   private formatSrtTime(seconds: number) {
