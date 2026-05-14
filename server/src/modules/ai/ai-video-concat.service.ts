@@ -15,6 +15,55 @@ export type SubtitleCue = {
   text: string;
 };
 
+export type ConcatCrossfadeStep = {
+  leftIndex: number;
+  rightIndex: number;
+  durationSeconds: number;
+  offsetSeconds: number;
+};
+
+export function buildConcatCrossfadePlan(durations: number[], desiredTransitionSeconds: number): ConcatCrossfadeStep[] {
+  const normalizedDurations = durations
+    .map((value) => (Number.isFinite(value) ? Number(value) : 0))
+    .map((value) => Math.max(0, value));
+  if (normalizedDurations.length < 2) {
+    return [];
+  }
+
+  const baseTransition = Number.isFinite(desiredTransitionSeconds) ? Math.max(0, desiredTransitionSeconds) : 0;
+  if (baseTransition <= 0) {
+    return [];
+  }
+
+  const steps: ConcatCrossfadeStep[] = [];
+  let composedDuration = normalizedDurations[0];
+
+  for (let index = 0; index < normalizedDurations.length - 1; index += 1) {
+    const current = normalizedDurations[index];
+    const next = normalizedDurations[index + 1];
+    const maxSafeTransition = Math.min(baseTransition, current * 0.2, next * 0.2, current - 0.12, next - 0.12);
+    const transition = Number(maxSafeTransition.toFixed(3));
+    if (!Number.isFinite(transition) || transition <= 0.05) {
+      return [];
+    }
+
+    const offsetSeconds = Number((composedDuration - transition).toFixed(3));
+    if (!Number.isFinite(offsetSeconds) || offsetSeconds <= 0) {
+      return [];
+    }
+
+    steps.push({
+      leftIndex: index,
+      rightIndex: index + 1,
+      durationSeconds: transition,
+      offsetSeconds,
+    });
+    composedDuration = offsetSeconds + next;
+  }
+
+  return steps;
+}
+
 @Injectable()
 export class AiVideoConcatService {
   constructor(private readonly configService: ConfigService) {
@@ -38,19 +87,35 @@ export class AiVideoConcatService {
     }
   }
 
-  async concatMp4Files(inputFiles: string[]) {
+  async concatMp4Files(inputFiles: string[], opts?: { transitionSeconds?: number }) {
     if (inputFiles.length === 0) {
       throw new InternalServerErrorException('没有可拼接的视频片段');
     }
 
     const outputDir = join(tmpdir(), 'ai-superweb-video');
     await mkdir(outputDir, { recursive: true });
-    const listPath = join(outputDir, `concat-${Date.now()}.txt`);
     const outputPath = join(outputDir, `final-${Date.now()}.mp4`);
+    const transitionSeconds =
+      Number.isFinite(opts?.transitionSeconds) && Number(opts?.transitionSeconds) > 0 ? Number(opts?.transitionSeconds) : 0;
 
-    const listBody = inputFiles
-      .map((file) => `file '${file.replace(/'/g, "'\\''")}'`)
-      .join('\n');
+    if (inputFiles.length > 1 && transitionSeconds > 0) {
+      const media = await Promise.all(inputFiles.map((filePath) => this.getMediaSummary(filePath)));
+      const hasAllAudio = media.every((item) => item.hasAudio);
+      const hasNoAudio = media.every((item) => !item.hasAudio);
+      const canCrossfade = hasAllAudio || hasNoAudio;
+      const plan = canCrossfade ? buildConcatCrossfadePlan(media.map((item) => item.durationSeconds), transitionSeconds) : [];
+      if (plan.length > 0) {
+        try {
+          await this.runCrossfade(inputFiles, outputPath, plan, hasAllAudio);
+          return Buffer.from(await readFile(outputPath));
+        } catch {
+          // Fall back to standard concat below to preserve compatibility.
+        }
+      }
+    }
+
+    const listPath = join(outputDir, `concat-${Date.now()}.txt`);
+    const listBody = inputFiles.map((file) => `file '${file.replace(/'/g, "'\\''")}'`).join('\n');
     await writeFile(listPath, listBody, 'utf-8');
 
     try {
@@ -164,6 +229,24 @@ export class AiVideoConcatService {
     });
   }
 
+  async getMediaSummary(filePath: string) {
+    return new Promise<{ durationSeconds: number; hasAudio: boolean }>((resolve, reject) => {
+      ffmpeg.ffprobe(filePath, (error, metadata) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        const durationSeconds = Number(metadata?.format?.duration ?? 0);
+        const hasAudio = Boolean(metadata?.streams?.some((stream) => stream.codec_type === 'audio'));
+        if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+          resolve({ durationSeconds, hasAudio });
+          return;
+        }
+        reject(new Error('无法读取视频时长'));
+      });
+    });
+  }
+
   async getVideoFrameSize(filePath: string) {
     return new Promise<{ width: number; height: number }>((resolve, reject) => {
       ffmpeg.ffprobe(filePath, (error, metadata) => {
@@ -235,6 +318,57 @@ export class AiVideoConcatService {
         .input(listPath)
         .inputOptions(['-f concat', '-safe 0'])
         .outputOptions(['-c:v libx264', '-preset veryfast', '-pix_fmt yuv420p', '-c:a aac'])
+        .on('error', reject)
+        .on('end', () => resolve())
+        .save(outputPath);
+    });
+  }
+
+  private runCrossfade(
+    inputFiles: string[],
+    outputPath: string,
+    plan: ConcatCrossfadeStep[],
+    withAudio: boolean,
+  ) {
+    return new Promise<void>((resolve, reject) => {
+      let command = ffmpeg();
+      for (const filePath of inputFiles) {
+        command = command.input(filePath);
+      }
+
+      const filters: string[] = [];
+      let currentVideoLabel = '0:v';
+      let currentAudioLabel = withAudio ? '0:a' : '';
+
+      for (let index = 0; index < plan.length; index += 1) {
+        const step = plan[index];
+        const nextVideoInput = `${step.rightIndex}:v`;
+        const nextVideoLabel = `vxf${index + 1}`;
+        filters.push(
+          `[${currentVideoLabel}][${nextVideoInput}]xfade=transition=fade:duration=${step.durationSeconds}:offset=${step.offsetSeconds}[${nextVideoLabel}]`,
+        );
+        currentVideoLabel = nextVideoLabel;
+
+        if (withAudio) {
+          const nextAudioInput = `${step.rightIndex}:a`;
+          const nextAudioLabel = `axf${index + 1}`;
+          filters.push(
+            `[${currentAudioLabel}][${nextAudioInput}]acrossfade=d=${step.durationSeconds}:c1=tri:c2=tri[${nextAudioLabel}]`,
+          );
+          currentAudioLabel = nextAudioLabel;
+        }
+      }
+
+      const outputOptions = ['-map', `[${currentVideoLabel}]`, '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p'];
+      if (withAudio) {
+        outputOptions.push('-map', `[${currentAudioLabel}]`, '-c:a', 'aac', '-b:a', '128k');
+      } else {
+        outputOptions.push('-an');
+      }
+
+      command
+        .complexFilter(filters)
+        .outputOptions(outputOptions)
         .on('error', reject)
         .on('end', () => resolve())
         .save(outputPath);

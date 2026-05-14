@@ -845,7 +845,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
       const inputFiles = await this.downloadSegmentsToTempFiles(latest.segments.map((s) => s.segmentVideoUrl as string));
       const segmentDurations = await Promise.all(inputFiles.map((filePath) => this.videoConcat.getVideoDuration(filePath)));
-      let merged = await this.videoConcat.concatMp4Files(inputFiles);
+      let merged = await this.videoConcat.concatMp4Files(inputFiles, { transitionSeconds: 0.2 });
       const subtitleCues = this.buildSubtitleCuesForSegments(latest.segments, segmentDurations);
       if (subtitleCues.length > 0) {
         merged = Buffer.from(await this.videoConcat.burnSubtitles({
@@ -2774,7 +2774,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     if (!latest.finalVideoUrl) {
       const inputFiles = await this.downloadSegmentsToTempFiles(latest.segments.map((s) => s.segmentVideoUrl as string));
-      const merged = await this.videoConcat.concatMp4Files(inputFiles);
+      const merged = await this.videoConcat.concatMp4Files(inputFiles, { transitionSeconds: 0.2 });
       const uploaded = await this.videoStorage.uploadVideoObject({
         userId: latest.userId,
         taskId: latest.id,
@@ -2947,6 +2947,8 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       lockBackground
         ? 'Keep the background fixed and consistent across the entire video. Do not change location, lighting, props, or camera angle between segments.'
         : '',
+      'Treat every segment as a continuation of the same take. Keep framing, subject size, pose baseline, wardrobe, lighting, and camera height consistent between segments.',
+      'Do not introduce hard scene cuts, sudden camera jumps, or noticeable composition changes at the start of a segment.',
       '',
       'Script (Chinese):',
       input.prompt.trim(),

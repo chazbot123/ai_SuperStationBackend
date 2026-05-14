@@ -34,6 +34,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useModelConfigStore } from "@/store/modelConfigStore";
 import { useVideoDraftStore, type VideoDraftItem, type VideoDraftSource } from "@/store/videoDraftStore";
 import { useVideoWorkspaceStore, type WorkspaceUploadAsset, type VideoWorkspaceDraft } from "@/store/videoWorkspaceStore";
+import { isAvatarVoiceEnabled, resolveAvatarVoiceIdForSubmit } from "@/components/video/avatarVoice";
 
 type UploadAsset = WorkspaceUploadAsset;
 
@@ -456,6 +457,14 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     if (!isProductMode) return null;
     return getProductDurationGuide(durationSec);
   }, [durationSec, isProductMode]);
+
+  const avatarVoiceEnabled = isAvatarMode
+    ? isAvatarVoiceEnabled({
+        enableViduVoiceSelection: props.enableViduVoiceSelection,
+        voiceId,
+        legacyTtsEnabled: ttsEnabled,
+      })
+    : false;
 
   async function persistDraftPatch(id: string, patch: Partial<VideoDraftItem>) {
     updateDraft(id, patch);
@@ -1082,8 +1091,11 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
           fullScript: avatarFullScript,
           referenceImageDataUrl: imageDataUrl,
           referenceImages,
-          voiceId:
-            props.enableViduVoiceSelection && ttsEnabled && voiceId.trim() ? voiceId.trim() : undefined,
+          voiceId: resolveAvatarVoiceIdForSubmit({
+            enableViduVoiceSelection: props.enableViduVoiceSelection,
+            voiceId,
+            legacyTtsEnabled: ttsEnabled,
+          }),
           backgroundLock,
           style:
             props.controlMode === "scene"
@@ -1718,7 +1730,13 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                         ) : null}
                       </>
                     ) : null}
-                    {isProductMode ? null : (
+                    {isProductMode ? null : props.enableViduVoiceSelection ? (
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-300">
+                        {avatarVoiceEnabled
+                          ? "已启用音频配音：本次会使用当前所选音色生成真人口播声音。"
+                          : "当前不会生成配音：请在上方“音色”选择具体音色或填写有效 voice_id，留空则只生成无声口播视频。"}
+                      </div>
+                    ) : (
                       <div className="flex items-center justify-between gap-3">
                         <label className="flex items-center gap-2 text-sm text-zinc-200">
                           <input
@@ -1729,54 +1747,14 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                           />
                           <span>添加音频配音</span>
                         </label>
-                        {props.enableViduVoiceSelection && props.viduVoiceOptions && ttsEnabled ? (
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <Select
-                                value={ttsVoiceMode}
-                                onChange={(e) => {
-                                  const mode = e.target.value as "preset" | "custom";
-                                  setTtsVoiceMode(mode);
-                                  setDraftField(props.draftSource, "voiceId", "");
-                                }}
-                                className="h-8 w-28"
-                              >
-                                <option value="preset">选择音色</option>
-                                <option value="custom">自定义</option>
-                              </Select>
-                              {ttsVoiceMode === "preset" ? (
-                                <Select
-                                  value={voiceId}
-                                  onChange={(e) => setDraftField(props.draftSource, "voiceId", e.target.value)}
-                                  className="flex-1"
-                                >
-                                  <option value="">不指定（兼容优先）</option>
-                                  {props.viduVoiceOptions.map((opt) => (
-                                    <option key={opt.value} value={opt.value}>
-                                      {opt.label}
-                                    </option>
-                                  ))}
-                                </Select>
-                              ) : (
-                                <Input
-                                  value={voiceId}
-                                  onChange={(e) => setDraftField(props.draftSource, "voiceId", e.target.value)}
-                                  placeholder="填写 voice_id"
-                                  className="flex-1"
-                                />
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="min-w-0 flex-1">
-                            <Input
-                              value={voiceId}
-                              onChange={(e) => setDraftField(props.draftSource, "voiceId", e.target.value)}
-                              placeholder="voice_id；留空则自动选择"
-                              disabled={!ttsEnabled}
-                            />
-                          </div>
-                        )}
+                        <div className="min-w-0 flex-1">
+                          <Input
+                            value={voiceId}
+                            onChange={(e) => setDraftField(props.draftSource, "voiceId", e.target.value)}
+                            placeholder="voice_id；留空则自动选择"
+                            disabled={!ttsEnabled}
+                          />
+                        </div>
                       </div>
                     )}
                     <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-300">
@@ -2068,7 +2046,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                           onChange={(e) => setDraftField(props.draftSource, "voiceId", e.target.value)}
                           className="flex-1"
                         >
-                          <option value="">不指定（兼容优先）</option>
+                          <option value="">不指定（不生成配音）</option>
                           {props.viduVoiceOptions.map((opt) => (
                             <option key={opt.value} value={opt.value}>
                               {opt.label}
