@@ -90,6 +90,52 @@ export type SpecialOfferItem = {
   enabled: boolean;
 };
 
+export type SiteMetricKey = "visits" | "consultations" | "signing_rate" | "purchases";
+
+export type SiteMetricItem = {
+  key: SiteMetricKey;
+  label: string;
+  enabled: boolean;
+  valueMode: "dynamic" | "fixed";
+  startValue: string;
+  tickInterval: string;
+  incrementMin: string;
+  incrementMax: string;
+  fixedValue: string;
+  suffix: string;
+  highlight: string;
+};
+
+export type IndustrySourceConfig = {
+  key: string;
+  label: string;
+  sourceType: "rss" | "html";
+  enabled: boolean;
+};
+
+export type IndustryRefreshConfig = {
+  enabled: boolean;
+  frequency: "daily";
+  dailyTime: string;
+};
+
+export type IndustryItem = {
+  id: string;
+  sourceType: "rss" | "html" | "manual";
+  sourceKey: string;
+  title: string;
+  summary: string;
+  coverImage: string;
+  sourceUrl: string;
+  publishedAt: string | null;
+  sortOrder: number;
+  isPinned: boolean;
+  enabled: boolean;
+  manualCreated: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ProductStatus = "draft" | "submitted" | "live" | "rejected" | "offline";
 
 export type ProductItem = {
@@ -120,9 +166,16 @@ export type Settings = {
   virtualAvatarCustomUrl: string | null;
   siteTemplate: SiteTemplateKey;
   siteModules: SiteModule[];
+  siteMetrics: SiteMetricItem[];
   specialOfferTitle: string;
   specialOfferSubtitle: string;
   specialOffers: SpecialOfferItem[];
+  industrySourceConfigs: IndustrySourceConfig[];
+  industryKeywords: string[];
+  industryRefreshConfig: IndustryRefreshConfig;
+  industryLastSyncAt: string | null;
+  industryLastSyncStatus: string | null;
+  industryLastSyncError: string | null;
 };
 
 type AppState = {
@@ -193,6 +246,9 @@ type AppState = {
   addSpecialOffer: () => void;
   updateSpecialOffer: (id: string, patch: Partial<SpecialOfferItem>) => void;
   removeSpecialOffer: (id: string) => void;
+  replaceSettings: (settings: Partial<Settings>) => void;
+  setSiteMetricEnabled: (key: SiteMetricKey, enabled: boolean) => void;
+  updateSiteMetric: (key: SiteMetricKey, patch: Partial<SiteMetricItem>) => void;
 
   seedIfEmpty: () => void;
 };
@@ -245,6 +301,84 @@ function defaultSpecialOffers(): SpecialOfferItem[] {
   ];
 }
 
+function defaultSiteMetrics(): SiteMetricItem[] {
+  return [
+    {
+      key: "visits",
+      label: "访问量",
+      enabled: true,
+      valueMode: "dynamic",
+      startValue: "2680",
+      tickInterval: "8",
+      incrementMin: "1",
+      incrementMax: "3",
+      fixedValue: "",
+      suffix: "",
+      highlight: "展示站点整体访问热度",
+    },
+    {
+      key: "consultations",
+      label: "咨询量",
+      enabled: true,
+      valueMode: "dynamic",
+      startValue: "126",
+      tickInterval: "15",
+      incrementMin: "1",
+      incrementMax: "2",
+      fixedValue: "",
+      suffix: "",
+      highlight: "突出线索承接效率",
+    },
+    {
+      key: "signing_rate",
+      label: "招商签约率",
+      enabled: true,
+      valueMode: "fixed",
+      startValue: "",
+      tickInterval: "",
+      incrementMin: "",
+      incrementMax: "",
+      fixedValue: "31",
+      suffix: "%",
+      highlight: "适合展示阶段性经营结果",
+    },
+    {
+      key: "purchases",
+      label: "购买量",
+      enabled: true,
+      valueMode: "dynamic",
+      startValue: "880",
+      tickInterval: "20",
+      incrementMin: "1",
+      incrementMax: "2",
+      fixedValue: "",
+      suffix: "",
+      highlight: "适合营造成交活跃感",
+    },
+  ];
+}
+
+function defaultIndustrySourceConfigs(): IndustrySourceConfig[] {
+  return [
+    { key: "huxiu_rss", label: "虎嗅", sourceType: "rss", enabled: true },
+    { key: "36kr_rss", label: "36氪", sourceType: "rss", enabled: true },
+    { key: "qbitai_html", label: "量子位", sourceType: "rss", enabled: true },
+    { key: "leiphone_html", label: "雷峰网", sourceType: "rss", enabled: true },
+    { key: "infoq_rss", label: "InfoQ", sourceType: "rss", enabled: true },
+    { key: "ifanr_rss", label: "爱范儿", sourceType: "rss", enabled: true },
+    { key: "sspai_rss", label: "少数派", sourceType: "rss", enabled: true },
+    { key: "geekpark_rss", label: "极客公园", sourceType: "rss", enabled: true },
+  ];
+}
+
+function defaultIndustryRefreshConfig(): IndustryRefreshConfig {
+  return {
+    enabled: true,
+    frequency: "daily",
+    dailyTime: "09:00",
+  };
+}
+
 function buildSpecialOffer(index: number, patch?: Partial<SpecialOfferItem>): SpecialOfferItem {
   return {
     id: patch?.id ?? newId("offer"),
@@ -267,16 +401,25 @@ function defaultSettings(): Settings {
     virtualAvatarCustomUrl: null,
     siteTemplate: "standard",
     siteModules: defaultSiteModules(),
+    siteMetrics: defaultSiteMetrics(),
     specialOfferTitle: "特价商品专区",
     specialOfferSubtitle: "支持首页插入限时优惠、秒杀引导与爆款推荐",
     specialOffers: defaultSpecialOffers(),
+    industrySourceConfigs: defaultIndustrySourceConfigs(),
+    industryKeywords: ["AI建站", "智能营销", "数字化招商"],
+    industryRefreshConfig: defaultIndustryRefreshConfig(),
+    industryLastSyncAt: null,
+    industryLastSyncStatus: null,
+    industryLastSyncError: null,
   };
 }
 
 function mergeSettings(settings?: Partial<Settings> | null): Settings {
   const defaults = defaultSettings();
   const savedModules = settings?.siteModules ?? [];
+  const savedMetrics = settings?.siteMetrics ?? [];
   const savedOffers = settings?.specialOffers ?? [];
+  const savedIndustrySourceConfigs = settings?.industrySourceConfigs ?? [];
   const hasSavedOffers = Array.isArray(settings?.specialOffers);
 
   const siteModules = [
@@ -292,7 +435,31 @@ function mergeSettings(settings?: Partial<Settings> | null): Settings {
     ...defaults,
     ...settings,
     siteModules,
+    siteMetrics: [
+      ...savedMetrics.map((metric) => ({
+        ...defaults.siteMetrics.find((item) => item.key === metric.key),
+        ...metric,
+      })),
+      ...defaults.siteMetrics.filter((metric) => !savedMetrics.some((saved) => saved.key === metric.key)),
+    ],
     specialOffers,
+    industrySourceConfigs: [
+      ...savedIndustrySourceConfigs.map((config) => ({
+        ...defaults.industrySourceConfigs.find((item) => item.key === config.key),
+        ...config,
+      })),
+      ...defaults.industrySourceConfigs.filter(
+        (config) => !savedIndustrySourceConfigs.some((saved) => saved.key === config.key)
+      ),
+    ],
+    industryKeywords: settings?.industryKeywords ?? defaults.industryKeywords,
+    industryRefreshConfig: {
+      ...defaults.industryRefreshConfig,
+      ...settings?.industryRefreshConfig,
+    },
+    industryLastSyncAt: settings?.industryLastSyncAt ?? defaults.industryLastSyncAt,
+    industryLastSyncStatus: settings?.industryLastSyncStatus ?? defaults.industryLastSyncStatus,
+    industryLastSyncError: settings?.industryLastSyncError ?? defaults.industryLastSyncError,
   };
 }
 
@@ -573,6 +740,29 @@ export const useAppStore = create<AppState>()(
           settings: {
             ...get().settings,
             specialOffers: get().settings.specialOffers.filter((offer) => offer.id !== id),
+          },
+        });
+      },
+      replaceSettings: (settings) => {
+        set({ settings: mergeSettings({ ...get().settings, ...settings }) });
+      },
+      setSiteMetricEnabled: (key, enabled) => {
+        set({
+          settings: {
+            ...get().settings,
+            siteMetrics: get().settings.siteMetrics.map((metric) =>
+              metric.key === key ? { ...metric, enabled } : metric
+            ),
+          },
+        });
+      },
+      updateSiteMetric: (key, patch) => {
+        set({
+          settings: {
+            ...get().settings,
+            siteMetrics: get().settings.siteMetrics.map((metric) =>
+              metric.key === key ? { ...metric, ...patch, key: metric.key } : metric
+            ),
           },
         });
       },

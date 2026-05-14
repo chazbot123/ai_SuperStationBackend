@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import Tabs from "@/components/ui/Tabs";
@@ -10,8 +11,13 @@ import { useAppStore } from "@/store/appStore";
 import { useAuthStore } from "@/store/authStore";
 import { useProductsStore } from "@/store/productsStore";
 
+export function resolveReviewTabFromPath(pathname: string) {
+  return pathname.startsWith("/reviews/products") ? "products" : "materials";
+}
+
 export default function Reviews() {
   usePageMeta("审核中心");
+  const location = useLocation();
   const accessToken = useAuthStore((s) => s.accessToken);
   const contents = useAppStore((s) => s.contents);
   const updateContent = useAppStore((s) => s.updateContent);
@@ -22,7 +28,7 @@ export default function Reviews() {
   const loadProducts = useProductsStore((s) => s.load);
   const approveProduct = useProductsStore((s) => s.approveProduct);
   const rejectProduct = useProductsStore((s) => s.rejectProduct);
-  const [tab, setTab] = useState("materials");
+  const [tab, setTab] = useState(() => resolveReviewTabFromPath(location.pathname));
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +39,10 @@ export default function Reviews() {
       void loadProducts();
     }
   }, [accessToken, initializedProducts, loadProducts, productsError]);
+
+  useEffect(() => {
+    setTab(resolveReviewTabFromPath(location.pathname));
+  }, [location.pathname]);
 
   const materialItems = useMemo(
     () => contents.filter((item) => item.reviewStatus === "submitted"),

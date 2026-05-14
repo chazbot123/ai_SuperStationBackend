@@ -8,13 +8,15 @@ import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { useAppStore, type PlatformKey, type PublishStatus } from "@/store/appStore";
 
-const publishPlatformOptions: Array<{ key: PlatformKey; label: string }> = [
-  { key: "xiaohongshu", label: "小红书" },
-  { key: "douyin", label: "抖音" },
-  { key: "wechat_mp", label: "视频号" },
-  { key: "taobao", label: "淘宝" },
-  { key: "jd", label: "京东" },
-  { key: "pdd", label: "拼多多" },
+export const defaultPublishPlatforms: PlatformKey[] = ["xiaohongshu", "douyin"];
+
+export const publishPlatformOptions: Array<{ key: PlatformKey; label: string; enabled: boolean }> = [
+  { key: "xiaohongshu", label: "小红书", enabled: true },
+  { key: "douyin", label: "抖音", enabled: true },
+  { key: "wechat_mp", label: "视频号", enabled: true },
+  { key: "taobao", label: "淘宝", enabled: true },
+  { key: "jd", label: "京东", enabled: true },
+  { key: "pdd", label: "拼多多", enabled: true },
 ];
 
 function platformLabel(platform: PlatformKey) {
@@ -35,7 +37,7 @@ export default function Publishing() {
 
   const [status, setStatus] = useState<"all" | PublishStatus>("all");
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformKey[]>(["xiaohongshu", "douyin"]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformKey[]>(defaultPublishPlatforms);
 
   const approved = useMemo(() => contents.filter((item) => item.reviewStatus === "approved"), [contents]);
   const jobList = useMemo(
@@ -55,7 +57,7 @@ export default function Publishing() {
 
   function openPublishModal(contentId: string) {
     setPublishTarget(contentId);
-    setSelectedPlatforms(["xiaohongshu", "douyin"]);
+    setSelectedPlatforms(defaultPublishPlatforms);
   }
 
   function confirmPublish() {

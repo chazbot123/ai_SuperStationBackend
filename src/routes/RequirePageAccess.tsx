@@ -10,6 +10,7 @@ const pageToPath: Record<PageKey, string> = {
   publishing: "/publishing",
   products: "/products",
   assets: "/assets",
+  customerManagement: "/customer-management",
   videos: "/videos",
   support: "/support",
   personalization: "/personalization",
@@ -20,7 +21,21 @@ const pageToPath: Record<PageKey, string> = {
 };
 
 function pickFirstAllowedPath(matrix: PermissionMatrix, roleKey: RoleKey) {
-  const order: PageKey[] = ["studio", "videos", "products", "dashboard", "assets", "publishing", "support", "agents", "reviews", "rules", "personalization", "rbac"];
+  const order: PageKey[] = [
+    "studio",
+    "videos",
+    "products",
+    "customerManagement",
+    "dashboard",
+    "assets",
+    "publishing",
+    "support",
+    "agents",
+    "reviews",
+    "rules",
+    "personalization",
+    "rbac",
+  ];
   const first = order.find((k) => hasPageAccess(matrix, roleKey, k));
   return first ? pageToPath[first] : "/";
 }
