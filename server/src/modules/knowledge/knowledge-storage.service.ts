@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import { Client } from 'minio';
+import { encodeObjectKeyForPublicUrl, resolvePublicBucketBaseUrl } from '../shared/public-asset-url.util';
 import { normalizeUploadFileName } from './knowledge-file-name.util';
 import type { KnowledgeUploadFile } from './knowledge-file.types';
 
@@ -50,7 +51,15 @@ export class KnowledgeStorageService {
       secretKey,
     });
     this.bucketName = bucketName;
-    this.publicBaseUrl = this.buildPublicBaseUrl(endpoint, port, useSSL);
+    this.publicBaseUrl =
+      resolvePublicBucketBaseUrl({
+        bucketName,
+        fileBaseUrl: this.configService.get<string>('FILE_BASE_URL'),
+        minioPublicBaseUrl: this.configService.get<string>('MINIO_PUBLIC_BASE_URL'),
+        endpoint,
+        port,
+        useSSL,
+      }) ?? '';
   }
 
   async uploadKnowledgeFile(userId: string, file?: KnowledgeUploadFile) {
@@ -73,7 +82,7 @@ export class KnowledgeStorageService {
       bucket: this.bucketName,
       objectKey,
       fileExt: extension,
-      url: `${this.publicBaseUrl}/${this.bucketName}/${this.encodeObjectKey(objectKey)}`,
+      url: `${this.publicBaseUrl}/${encodeObjectKeyForPublicUrl(objectKey)}`,
     };
   }
 
@@ -157,16 +166,4 @@ export class KnowledgeStorageService {
     return extname(normalizeUploadFileName(file.originalname)).replace('.', '').toLowerCase() || 'bin';
   }
 
-  private buildPublicBaseUrl(endpoint: string, port: number, useSSL: boolean) {
-    const protocol = useSSL ? 'https' : 'http';
-    const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
-    return `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}`;
-  }
-
-  private encodeObjectKey(objectKey: string) {
-    return objectKey
-      .split('/')
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
-  }
 }

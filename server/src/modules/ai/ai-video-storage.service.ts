@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { Client } from 'minio';
+import { encodeObjectKeyForPublicUrl, resolvePublicBucketBaseUrl } from '../shared/public-asset-url.util';
 
 @Injectable()
 export class AiVideoStorageService {
@@ -30,7 +31,15 @@ export class AiVideoStorageService {
       secretKey,
     });
     this.bucketName = bucketName;
-    this.publicBaseUrl = this.buildPublicBaseUrl(endpoint, port, useSSL);
+    this.publicBaseUrl =
+      resolvePublicBucketBaseUrl({
+        bucketName,
+        fileBaseUrl: this.configService.get<string>('FILE_BASE_URL'),
+        minioPublicBaseUrl: this.configService.get<string>('MINIO_PUBLIC_BASE_URL'),
+        endpoint,
+        port,
+        useSSL,
+      }) ?? '';
   }
 
   async uploadReferenceImage(userId: string, dataUrl: string) {
@@ -57,7 +66,7 @@ export class AiVideoStorageService {
     return {
       bucket: this.bucketName,
       objectKey,
-      url: `${this.publicBaseUrl}/${this.bucketName}/${this.encodeObjectKey(objectKey)}`,
+      url: `${this.publicBaseUrl}/${encodeObjectKeyForPublicUrl(objectKey)}`,
     };
   }
 
@@ -77,7 +86,7 @@ export class AiVideoStorageService {
     return {
       bucket: this.bucketName,
       objectKey,
-      url: `${this.publicBaseUrl}/${this.bucketName}/${this.encodeObjectKey(objectKey)}`,
+      url: `${this.publicBaseUrl}/${encodeObjectKeyForPublicUrl(objectKey)}`,
     };
   }
 
@@ -99,23 +108,6 @@ export class AiVideoStorageService {
       this.ensureBucketPromise = null;
       throw new InternalServerErrorException('初始化 MinIO Bucket 失败');
     }
-  }
-
-  private buildPublicBaseUrl(endpoint: string, port: number, useSSL: boolean) {
-    const explicit = this.configService.get<string>('MINIO_PUBLIC_BASE_URL')?.trim();
-    if (explicit) {
-      return explicit.replace(/\/+$/, '');
-    }
-    const protocol = useSSL ? 'https' : 'http';
-    const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
-    return `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}`.replace(/\/+$/, '');
-  }
-
-  private encodeObjectKey(objectKey: string) {
-    return objectKey
-      .split('/')
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
   }
 
   private buildPublicReadPolicy() {

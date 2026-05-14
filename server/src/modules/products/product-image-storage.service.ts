@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import { Client } from 'minio';
+import { encodeObjectKeyForPublicUrl, resolvePublicBucketBaseUrl } from '../shared/public-asset-url.util';
 import { ProductUploadFile } from './product-image.types';
 
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -46,7 +47,15 @@ export class ProductImageStorageService {
       secretKey,
     });
     this.bucketName = bucketName;
-    this.publicBaseUrl = this.buildPublicBaseUrl(endpoint, port, useSSL);
+    this.publicBaseUrl =
+      resolvePublicBucketBaseUrl({
+        bucketName,
+        fileBaseUrl: this.configService.get<string>('FILE_BASE_URL'),
+        minioPublicBaseUrl: this.configService.get<string>('MINIO_PUBLIC_BASE_URL'),
+        endpoint,
+        port,
+        useSSL,
+      }) ?? '';
   }
 
   async uploadProductImage(userId: string, file?: ProductUploadFile) {
@@ -181,7 +190,7 @@ export class ProductImageStorageService {
     return {
       bucket: this.bucketName,
       objectKey,
-      url: `${this.publicBaseUrl}/${this.bucketName}/${this.encodeObjectKey(objectKey)}`,
+      url: `${this.publicBaseUrl}/${encodeObjectKeyForPublicUrl(objectKey)}`,
     };
   }
 
@@ -228,24 +237,6 @@ export class ProductImageStorageService {
     }
 
     return this.resolveExtensionFromMimeType(file.mimetype);
-  }
-
-  private buildPublicBaseUrl(endpoint: string, port: number, useSSL: boolean) {
-    const explicit = this.configService.get<string>('MINIO_PUBLIC_BASE_URL')?.trim();
-    if (explicit) {
-      return explicit.replace(/\/+$/, '');
-    }
-    const protocol = useSSL ? 'https' : 'http';
-    const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
-
-    return `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}`.replace(/\/+$/, '');
-  }
-
-  private encodeObjectKey(objectKey: string) {
-    return objectKey
-      .split('/')
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
   }
 
   private resolveExtensionFromMimeType(mimeType: string) {

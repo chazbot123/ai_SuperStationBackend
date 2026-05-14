@@ -28,6 +28,7 @@ import { SessionUser } from '../auth/auth.types';
 import { ProductImageStorageService } from '../products/product-image-storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAIN_COMPANY_ROLE_KEY } from '../rbac/rbac.constants';
+import { resolvePublicBucketBaseUrl, rewriteManagedPublicObjectUrl } from '../shared/public-asset-url.util';
 import {
   AiModelConfigCacheService,
   type StoredModelConfig,
@@ -1505,7 +1506,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
           provider: resolvedConfig.providerName,
           model: resolvedConfig.modelName,
           status,
-          videoUrl: ttsEntry.finalVideoUrl,
+          videoUrl: this.rewriteManagedAssetUrl(ttsEntry.finalVideoUrl),
         };
       }
 
@@ -1548,7 +1549,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         provider: resolvedConfig.providerName,
         model: resolvedConfig.modelName,
         status,
-        videoUrl: status === 'success' ? (videoUrl ?? null) : null,
+        videoUrl: status === 'success' ? this.rewriteManagedAssetUrl(videoUrl ?? null) : null,
       };
     } catch (error) {
       this.rethrowModelError(error, '视频任务查询失败');
@@ -2100,22 +2101,29 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   private getBgmPublicBaseUrl() {
     const explicit = this.configService.get<string>('AI_BGM_PUBLIC_BASE_URL')?.trim();
     if (explicit) return explicit;
-
-    const minioPublicBaseUrl = this.configService.get<string>('MINIO_PUBLIC_BASE_URL')?.trim();
-    if (minioPublicBaseUrl) {
-      const bucket = this.configService.get<string>('MINIO_BUCKET') ?? 'ai-superweb';
-      return `${minioPublicBaseUrl.replace(/\/+$/, '')}/${bucket}`;
-    }
-
-    const endpoint = this.configService.get<string>('MINIO_ENDPOINT') ?? '';
-    const port = Number(this.configService.get<string>('MINIO_PORT') ?? '9000');
-    const useSSL = String(this.configService.get<string>('MINIO_USE_SSL') ?? 'false') === 'true';
     const bucket = this.configService.get<string>('MINIO_BUCKET') ?? 'ai-superweb';
-    if (!endpoint) return null;
-    const protocol = useSSL ? 'https' : 'http';
-    const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
-    const base = `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}/${bucket}`;
-    return base;
+    return resolvePublicBucketBaseUrl({
+      bucketName: bucket,
+      fileBaseUrl: this.configService.get<string>('FILE_BASE_URL'),
+      minioPublicBaseUrl: this.configService.get<string>('MINIO_PUBLIC_BASE_URL'),
+      endpoint: this.configService.get<string>('MINIO_ENDPOINT'),
+      port: Number(this.configService.get<string>('MINIO_PORT') ?? '9000'),
+      useSSL: String(this.configService.get<string>('MINIO_USE_SSL') ?? 'false') === 'true',
+    });
+  }
+
+  private rewriteManagedAssetUrl(url?: string | null) {
+    return rewriteManagedPublicObjectUrl(
+      {
+        bucketName: this.configService.get<string>('MINIO_BUCKET') ?? 'ai-superweb',
+        fileBaseUrl: this.configService.get<string>('FILE_BASE_URL'),
+        minioPublicBaseUrl: this.configService.get<string>('MINIO_PUBLIC_BASE_URL'),
+        endpoint: this.configService.get<string>('MINIO_ENDPOINT'),
+        port: Number(this.configService.get<string>('MINIO_PORT') ?? '9000'),
+        useSSL: String(this.configService.get<string>('MINIO_USE_SSL') ?? 'false') === 'true',
+      },
+      url,
+    );
   }
 
   private fallbackPickBgm(input: {
@@ -2308,9 +2316,9 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       segmentCount: task.segments.length,
       finishedCount,
       failedCount,
-      characterImageUrl: task.characterImageUrl,
+      characterImageUrl: this.rewriteManagedAssetUrl(task.characterImageUrl),
       fullScript: task.fullScript,
-      finalVideoUrl: task.finalVideoUrl ?? null,
+      finalVideoUrl: this.rewriteManagedAssetUrl(task.finalVideoUrl),
       errorMessage: task.errorMessage ?? null,
       segments: task.segments.map((segment) => ({
         id: segment.id,
@@ -2320,7 +2328,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         attempts: segment.attempts,
         maxAttempts: segment.maxAttempts,
         retryAt: segment.retryAt ? segment.retryAt.toISOString() : null,
-        segmentVideoUrl: segment.segmentVideoUrl ?? null,
+        segmentVideoUrl: this.rewriteManagedAssetUrl(segment.segmentVideoUrl),
         errorMessage: segment.errorMessage ?? null,
       })),
     };
@@ -4106,7 +4114,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       completedAt: item.completedAt,
       durationText: item.durationText,
       generatedScript: item.generatedScript,
-      videoUrl: item.videoUrl,
+      videoUrl: this.rewriteManagedAssetUrl(item.videoUrl),
       taskId: item.taskId,
       provider: item.provider,
       model: item.model,
@@ -4226,7 +4234,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       tags: video.publishTags,
       images: [] as string[],
       downloadableImages: [] as boolean[],
-      videoUrl: video.videoUrl,
+      videoUrl: this.rewriteManagedAssetUrl(video.videoUrl),
       reviewStage: video.reviewStage,
       submittedByName: video.creator.displayName || video.creator.username,
       submittedAt: video.updatedAt.toISOString(),
