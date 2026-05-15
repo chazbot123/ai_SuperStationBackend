@@ -8,8 +8,8 @@ import { useRbacStore } from "@/store/rbacStore";
 export default function AppShell() {
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
-  const roles = useRbacStore((s) => s.roles);
-  const permissionMatrix = useRbacStore((s) => s.permissionMatrix);
+  const roles = useRbacStore((s) => s.roles ?? []);
+  const permissionMatrix = useRbacStore((s) => s.permissionMatrix ?? {});
   const initialized = useRbacStore((s) => s.initialized);
   const loading = useRbacStore((s) => s.loading);
   const error = useRbacStore((s) => s.error);

@@ -3,7 +3,7 @@ export type LangKey = "zh-CN" | "en-US";
 export type MessageKey = string;
 
 export const messages: Record<string, Record<LangKey, string>> = {
-  "app.name": { "zh-CN": "AI后台", "en-US": "AI Admin" },
+  "app.name": { "zh-CN": "AI 超级站后台", "en-US": "AI Admin" },
   "common.close": { "zh-CN": "关闭", "en-US": "Close" },
   "common.cancel": { "zh-CN": "取消", "en-US": "Cancel" },
   "common.save": { "zh-CN": "保存", "en-US": "Save" },

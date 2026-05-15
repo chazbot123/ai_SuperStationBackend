@@ -32,7 +32,7 @@ export default function Topbar() {
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
   const logout = useAuthStore((s) => s.logout);
-  const roles = useRbacStore((s) => s.roles);
+  const roles = useRbacStore((s) => s.roles ?? []);
   const resetRbac = useRbacStore((s) => s.reset);
   const lang = useI18nStore((s) => s.lang);
   const toggleLang = useI18nStore((s) => s.toggle);
