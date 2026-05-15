@@ -12,6 +12,8 @@ function createAccount(overrides: Partial<PlatformAccountItem> = {}): PlatformAc
     authType: "cookie",
     accountName: "demo_account",
     displayName: "Demo Account",
+    avatarUrl: null,
+    followerCount: null,
     authPayloadPreview: "demo***",
     loginStatus: "authenticated",
     loginUrl: "https://creator.douyin.com/creator-micro/content/publish",

@@ -118,6 +118,8 @@ export type PlatformAccountItem = {
   authType: PlatformAccountAuthType;
   accountName: string;
   displayName: string | null;
+  avatarUrl: string | null;
+  followerCount: number | null;
   authPayloadPreview: string;
   loginStatus: PlatformAccountLoginStatus;
   loginUrl: string | null;
@@ -246,6 +248,9 @@ export async function publishLeadContent(input: {
   targets: Array<{
     platform: LeadPlatformStyle;
     platformAccountId: string;
+    draftTitle?: string;
+    draftBody?: string;
+    draftTags?: string[];
   }>;
   executionMode?: PublishExecutionMode;
 }) {

@@ -50,7 +50,6 @@ export default function Login() {
           <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-amber-300 to-amber-600" />
           <div>
             <div className="text-lg font-semibold text-zinc-100">AI 超级站后台</div>
-            <div className="text-xs text-zinc-400">真实后端认证 · 主公司 / 1级代理</div>
           </div>
         </div>
 

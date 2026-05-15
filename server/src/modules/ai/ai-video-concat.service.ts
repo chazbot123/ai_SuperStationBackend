@@ -1,4 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,79 +15,107 @@ export type SubtitleCue = {
   text: string;
 };
 
+export type ConcatCrossfadeStep = {
+  leftIndex: number;
+  rightIndex: number;
+  durationSeconds: number;
+  offsetSeconds: number;
+};
+
+export function buildConcatCrossfadePlan(durations: number[], desiredTransitionSeconds: number): ConcatCrossfadeStep[] {
+  const normalizedDurations = durations
+    .map((value) => (Number.isFinite(value) ? Number(value) : 0))
+    .map((value) => Math.max(0, value));
+  if (normalizedDurations.length < 2) {
+    return [];
+  }
+
+  const baseTransition = Number.isFinite(desiredTransitionSeconds) ? Math.max(0, desiredTransitionSeconds) : 0;
+  if (baseTransition <= 0) {
+    return [];
+  }
+
+  const steps: ConcatCrossfadeStep[] = [];
+  let composedDuration = normalizedDurations[0];
+
+  for (let index = 0; index < normalizedDurations.length - 1; index += 1) {
+    const current = normalizedDurations[index];
+    const next = normalizedDurations[index + 1];
+    const maxSafeTransition = Math.min(baseTransition, current * 0.2, next * 0.2, current - 0.12, next - 0.12);
+    const transition = Number(maxSafeTransition.toFixed(3));
+    if (!Number.isFinite(transition) || transition <= 0.05) {
+      return [];
+    }
+
+    const offsetSeconds = Number((composedDuration - transition).toFixed(3));
+    if (!Number.isFinite(offsetSeconds) || offsetSeconds <= 0) {
+      return [];
+    }
+
+    steps.push({
+      leftIndex: index,
+      rightIndex: index + 1,
+      durationSeconds: transition,
+      offsetSeconds,
+    });
+    composedDuration = offsetSeconds + next;
+  }
+
+  return steps;
+}
+
 @Injectable()
 export class AiVideoConcatService {
-  constructor() {
-    const resolvedFfmpegPath = this.resolveFfmpegPath();
+  constructor(private readonly configService: ConfigService) {
+    const resolvedFfmpegPath = this.resolveBinaryPath('FFMPEG_PATH', [
+      '/usr/bin/ffmpeg',
+      '/usr/local/bin/ffmpeg',
+      typeof ffmpegInstaller?.path === 'string' ? ffmpegInstaller.path : '',
+      typeof ffmpegStaticPath === 'string' ? ffmpegStaticPath : '',
+    ]);
+    const resolvedFfprobePath = this.resolveBinaryPath('FFPROBE_PATH', [
+      '/usr/bin/ffprobe',
+      '/usr/local/bin/ffprobe',
+      typeof ffprobeInstaller?.path === 'string' ? ffprobeInstaller.path : '',
+    ]);
+
     if (resolvedFfmpegPath) {
       ffmpeg.setFfmpegPath(resolvedFfmpegPath);
     }
-
-    const resolvedFfprobePath = this.resolveFfprobePath();
     if (resolvedFfprobePath) {
       ffmpeg.setFfprobePath(resolvedFfprobePath);
     }
   }
 
-  private resolveFfmpegPath() {
-    const envPath = process.env.FFMPEG_PATH?.trim();
-    if (envPath) {
-      return envPath;
-    }
-
-    const systemCandidates =
-      process.platform === 'linux'
-        ? ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']
-        : process.platform === 'darwin'
-          ? ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']
-          : [];
-    const systemPath = systemCandidates.find((candidate) => existsSync(candidate));
-    if (systemPath) {
-      return systemPath;
-    }
-
-    if (typeof ffmpegInstaller?.path === 'string' && ffmpegInstaller.path) {
-      return ffmpegInstaller.path;
-    }
-
-    return typeof ffmpegStaticPath === 'string' && ffmpegStaticPath ? ffmpegStaticPath : '';
-  }
-
-  private resolveFfprobePath() {
-    const envPath = process.env.FFPROBE_PATH?.trim();
-    if (envPath) {
-      return envPath;
-    }
-
-    const systemCandidates =
-      process.platform === 'linux'
-        ? ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe']
-        : process.platform === 'darwin'
-          ? ['/opt/homebrew/bin/ffprobe', '/usr/local/bin/ffprobe']
-          : [];
-    const systemPath = systemCandidates.find((candidate) => existsSync(candidate));
-    if (systemPath) {
-      return systemPath;
-    }
-
-    return typeof ffprobeInstaller?.path === 'string' && ffprobeInstaller.path
-      ? ffprobeInstaller.path
-      : '';
-  }
-
-  async concatMp4Files(inputFiles: string[]) {
+  async concatMp4Files(inputFiles: string[], opts?: { transitionSeconds?: number }) {
     if (inputFiles.length === 0) {
       throw new InternalServerErrorException('没有可拼接的视频片段');
     }
 
     const outputDir = join(tmpdir(), 'ai-superweb-video');
     await mkdir(outputDir, { recursive: true });
-    const listPath = join(outputDir, `concat-${Date.now()}.txt`);
     const outputPath = join(outputDir, `final-${Date.now()}.mp4`);
+    const transitionSeconds =
+      Number.isFinite(opts?.transitionSeconds) && Number(opts?.transitionSeconds) > 0 ? Number(opts?.transitionSeconds) : 0;
 
-    const listBody = inputFiles
-      .map((file) => `file '${file.replace(/'/g, "'\\''")}'`)
-      .join('\n');
+    if (inputFiles.length > 1 && transitionSeconds > 0) {
+      const media = await Promise.all(inputFiles.map((filePath) => this.getMediaSummary(filePath)));
+      const hasAllAudio = media.every((item) => item.hasAudio);
+      const hasNoAudio = media.every((item) => !item.hasAudio);
+      const canCrossfade = hasAllAudio || hasNoAudio;
+      const plan = canCrossfade ? buildConcatCrossfadePlan(media.map((item) => item.durationSeconds), transitionSeconds) : [];
+      if (plan.length > 0) {
+        try {
+          await this.runCrossfade(inputFiles, outputPath, plan, hasAllAudio);
+          return Buffer.from(await readFile(outputPath));
+        } catch {
+          // Fall back to standard concat below to preserve compatibility.
+        }
+      }
+    }
+
+    const listPath = join(outputDir, `concat-${Date.now()}.txt`);
+    const listBody = inputFiles.map((file) => `file '${file.replace(/'/g, "'\\''")}'`).join('\n');
     await writeFile(listPath, listBody, 'utf-8');
 
     try {
@@ -200,6 +229,43 @@ export class AiVideoConcatService {
     });
   }
 
+  async getMediaSummary(filePath: string) {
+    return new Promise<{ durationSeconds: number; hasAudio: boolean }>((resolve, reject) => {
+      ffmpeg.ffprobe(filePath, (error, metadata) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        const durationSeconds = Number(metadata?.format?.duration ?? 0);
+        const hasAudio = Boolean(metadata?.streams?.some((stream) => stream.codec_type === 'audio'));
+        if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+          resolve({ durationSeconds, hasAudio });
+          return;
+        }
+        reject(new Error('无法读取视频时长'));
+      });
+    });
+  }
+
+  async getVideoFrameSize(filePath: string) {
+    return new Promise<{ width: number; height: number }>((resolve, reject) => {
+      ffmpeg.ffprobe(filePath, (error, metadata) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        const videoStream = metadata?.streams?.find((stream) => stream.codec_type === 'video');
+        const width = Number(videoStream?.width ?? 0);
+        const height = Number(videoStream?.height ?? 0);
+        if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+          resolve({ width, height });
+          return;
+        }
+        reject(new Error('无法读取视频分辨率'));
+      });
+    });
+  }
+
   async burnSubtitles(opts: { videoBuffer: Buffer; cues: SubtitleCue[] }) {
     const validCues = opts.cues.filter(
       (cue) =>
@@ -224,7 +290,8 @@ export class AiVideoConcatService {
     await writeFile(srtPath, this.buildSrt(validCues), 'utf-8');
 
     try {
-      await this.runBurnSubtitles(videoPath, srtPath, outputPath);
+      const frameSize = await this.getVideoFrameSize(videoPath);
+      await this.runBurnSubtitles(videoPath, srtPath, outputPath, frameSize);
       return Buffer.from(await readFile(outputPath));
     } catch (error) {
       throw error instanceof Error
@@ -251,6 +318,57 @@ export class AiVideoConcatService {
         .input(listPath)
         .inputOptions(['-f concat', '-safe 0'])
         .outputOptions(['-c:v libx264', '-preset veryfast', '-pix_fmt yuv420p', '-c:a aac'])
+        .on('error', reject)
+        .on('end', () => resolve())
+        .save(outputPath);
+    });
+  }
+
+  private runCrossfade(
+    inputFiles: string[],
+    outputPath: string,
+    plan: ConcatCrossfadeStep[],
+    withAudio: boolean,
+  ) {
+    return new Promise<void>((resolve, reject) => {
+      let command = ffmpeg();
+      for (const filePath of inputFiles) {
+        command = command.input(filePath);
+      }
+
+      const filters: string[] = [];
+      let currentVideoLabel = '0:v';
+      let currentAudioLabel = withAudio ? '0:a' : '';
+
+      for (let index = 0; index < plan.length; index += 1) {
+        const step = plan[index];
+        const nextVideoInput = `${step.rightIndex}:v`;
+        const nextVideoLabel = `vxf${index + 1}`;
+        filters.push(
+          `[${currentVideoLabel}][${nextVideoInput}]xfade=transition=fade:duration=${step.durationSeconds}:offset=${step.offsetSeconds}[${nextVideoLabel}]`,
+        );
+        currentVideoLabel = nextVideoLabel;
+
+        if (withAudio) {
+          const nextAudioInput = `${step.rightIndex}:a`;
+          const nextAudioLabel = `axf${index + 1}`;
+          filters.push(
+            `[${currentAudioLabel}][${nextAudioInput}]acrossfade=d=${step.durationSeconds}:c1=tri:c2=tri[${nextAudioLabel}]`,
+          );
+          currentAudioLabel = nextAudioLabel;
+        }
+      }
+
+      const outputOptions = ['-map', `[${currentVideoLabel}]`, '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p'];
+      if (withAudio) {
+        outputOptions.push('-map', `[${currentAudioLabel}]`, '-c:a', 'aac', '-b:a', '128k');
+      } else {
+        outputOptions.push('-an');
+      }
+
+      command
+        .complexFilter(filters)
+        .outputOptions(outputOptions)
         .on('error', reject)
         .on('end', () => resolve())
         .save(outputPath);
@@ -351,10 +469,35 @@ export class AiVideoConcatService {
     });
   }
 
-  private runBurnSubtitles(videoPath: string, subtitlePath: string, outputPath: string) {
+  private runBurnSubtitles(
+    videoPath: string,
+    subtitlePath: string,
+    outputPath: string,
+    frameSize: { width: number; height: number },
+  ) {
     return new Promise<void>((resolve, reject) => {
       const escapedSubtitlePath = subtitlePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
-      const filter = `subtitles='${escapedSubtitlePath}'`;
+      const fontName =
+        process.platform === 'win32'
+          ? 'SimHei'
+          : process.platform === 'darwin'
+            ? 'PingFangSC'
+            : 'NotoSansCJKsc-Regular';
+      const marginV = this.getSubtitleMarginV(frameSize);
+      const marginH = this.getSubtitleMarginH(frameSize);
+      const forceStyle = [
+        `FontName=${fontName}`,
+        'Alignment=2',
+        `MarginV=${marginV}`,
+        `MarginL=${marginH}`,
+        `MarginR=${marginH}`,
+        'FontSize=18',
+        'Outline=2',
+        'Shadow=0',
+        'BorderStyle=1',
+        'WrapStyle=2',
+      ].join(',');
+      const filter = `subtitles='${escapedSubtitlePath}':charenc=UTF-8:force_style='${forceStyle}'`;
 
       ffmpeg()
         .input(videoPath)
@@ -372,13 +515,92 @@ export class AiVideoConcatService {
     });
   }
 
+  private getSubtitleMarginV(frameSize: { width: number; height: number }) {
+    const shorterSide = Math.min(frameSize.width, frameSize.height);
+    const aspectRatio = frameSize.height / frameSize.width;
+    const marginPercent = aspectRatio >= 1.6 ? 0.06 : aspectRatio >= 0.9 ? 0.055 : 0.05;
+    return Math.max(24, Math.round(shorterSide * marginPercent));
+  }
+
+  private getSubtitleMarginH(frameSize: { width: number; height: number }) {
+    const horizontalMargin = Math.round(frameSize.width * 0.07);
+    return Math.max(20, horizontalMargin);
+  }
+
+  private resolveBinaryPath(envKey: 'FFMPEG_PATH' | 'FFPROBE_PATH', candidates: string[]) {
+    const explicit = this.configService.get<string>(envKey)?.trim();
+    if (explicit && existsSync(explicit)) {
+      return explicit;
+    }
+
+    for (const candidate of candidates) {
+      const normalized = candidate?.trim();
+      if (normalized && existsSync(normalized)) {
+        return normalized;
+      }
+    }
+
+    return '';
+  }
+
   private buildSrt(cues: SubtitleCue[]) {
     return cues
       .map((cue, index) => {
-        const text = cue.text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const text = this.wrapSubtitleTextForSrt(cue.text);
         return `${index + 1}\n${this.formatSrtTime(cue.startSeconds)} --> ${this.formatSrtTime(cue.endSeconds)}\n${text}\n`;
       })
       .join('\n');
+  }
+
+  private wrapSubtitleTextForSrt(text: string) {
+    const normalized = text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    if (!normalized) {
+      return '';
+    }
+
+    const paragraphs = normalized
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const wrapped: string[] = [];
+    for (const paragraph of paragraphs) {
+      wrapped.push(...this.wrapSubtitleLine(paragraph, 10));
+    }
+    return wrapped.join('\n');
+  }
+
+  private wrapSubtitleLine(line: string, maxCharsPerLine: number) {
+    if (!line) {
+      return [];
+    }
+    const compact = line.replace(/\s+/g, ' ').trim();
+    if (this.countSubtitleChars(compact) <= maxCharsPerLine) {
+      return [compact];
+    }
+
+    const result: string[] = [];
+    let cursor = '';
+    let cursorChars = 0;
+    for (const char of compact) {
+      cursor += char;
+      if (!/\s/.test(char)) {
+        cursorChars += 1;
+      }
+      if (cursorChars >= maxCharsPerLine) {
+        result.push(cursor.trim());
+        cursor = '';
+        cursorChars = 0;
+      }
+    }
+
+    if (cursor.trim()) {
+      result.push(cursor.trim());
+    }
+    return result;
+  }
+
+  private countSubtitleChars(text: string) {
+    return text.replace(/\s+/g, '').length;
   }
 
   private formatSrtTime(seconds: number) {

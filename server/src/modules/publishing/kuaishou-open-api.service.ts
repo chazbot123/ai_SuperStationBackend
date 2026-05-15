@@ -1,0 +1,313 @@
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
+
+type KuaishouStartUploadResponse = {
+  result?: number;
+  upload_token?: string;
+  endpoint?: string;
+  error_msg?: string;
+};
+
+type KuaishouPublishResponse = {
+  result?: number;
+  video_info?: {
+    photo_id?: string;
+    caption?: string;
+    cover?: string;
+    play_url?: string;
+    pending?: boolean;
+  };
+  error_msg?: string;
+};
+
+type KuaishouRefreshTokenResponse = {
+  result?: number;
+  access_token?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  refresh_token_expires_in?: number;
+  scopes?: string[];
+  error_msg?: string;
+};
+
+@Injectable()
+export class KuaishouOpenApiService {
+  private readonly logger = new Logger(KuaishouOpenApiService.name);
+
+  async publishVideoFromUrl(input: {
+    appId: string;
+    appSecret: string;
+    accessToken: string;
+    refreshToken?: string | null;
+    videoUrl: string;
+    coverUrl: string;
+    caption: string;
+  }) {
+    const initial = {
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken ?? null,
+    };
+
+    try {
+      const result = await this.publishVideoFromUrlWithToken({
+        ...input,
+        accessToken: initial.accessToken,
+      });
+      return {
+        ...result,
+        token: initial,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const shouldRefresh =
+        Boolean(initial.refreshToken) &&
+        (message.includes('access_token') || message.toLowerCase().includes('token'));
+
+      if (!shouldRefresh) {
+        throw error;
+      }
+
+      const refreshed = await this.refreshToken({
+        appId: input.appId,
+        appSecret: input.appSecret,
+        refreshToken: initial.refreshToken ?? '',
+      });
+
+      const result = await this.publishVideoFromUrlWithToken({
+        ...input,
+        accessToken: refreshed.accessToken,
+      });
+      return {
+        ...result,
+        token: {
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken,
+        },
+      };
+    }
+  }
+
+  private async publishVideoFromUrlWithToken(input: {
+    appId: string;
+    accessToken: string;
+    videoUrl: string;
+    coverUrl: string;
+    caption: string;
+  }) {
+    const start = await this.startUpload({
+      appId: input.appId,
+      accessToken: input.accessToken,
+    });
+
+    const videoResponse = await fetch(input.videoUrl, {
+      headers: { Accept: '*/*' },
+      redirect: 'follow',
+    });
+    if (!videoResponse.ok || !videoResponse.body) {
+      throw new ConflictException(`快手视频素材下载失败：${videoResponse.status}`);
+    }
+
+    const videoContentType = videoResponse.headers.get('content-type')?.trim() || 'video/mp4';
+    await this.uploadVideo({
+      endpoint: start.endpoint,
+      uploadToken: start.uploadToken,
+      appId: input.appId,
+      accessToken: input.accessToken,
+      body: videoResponse.body,
+      contentType: videoContentType,
+    });
+
+    const coverResponse = await fetch(input.coverUrl, {
+      headers: { Accept: '*/*' },
+      redirect: 'follow',
+    });
+    if (!coverResponse.ok) {
+      throw new ConflictException(`快手封面素材下载失败：${coverResponse.status}`);
+    }
+    const coverBytes = Buffer.from(await coverResponse.arrayBuffer());
+    if (coverBytes.length <= 0) {
+      throw new ConflictException('快手封面素材为空');
+    }
+    if (coverBytes.length > 10 * 1024 * 1024) {
+      throw new ConflictException('快手封面图不能超过 10MB');
+    }
+
+    const coverType = coverResponse.headers.get('content-type')?.trim() || 'image/jpeg';
+    const publish = await this.publishVideo({
+      appId: input.appId,
+      accessToken: input.accessToken,
+      uploadToken: start.uploadToken,
+      cover: {
+        bytes: coverBytes,
+        mimeType: coverType,
+      },
+      caption: input.caption,
+    });
+
+    return publish;
+  }
+
+  private async startUpload(input: { appId: string; accessToken: string }) {
+    const url = new URL('https://open.kuaishou.com/openapi/photo/start_upload');
+    url.searchParams.set('app_id', input.appId);
+    url.searchParams.set('access_token', input.accessToken);
+
+    const text = await this.requestText(url.toString(), {
+      method: 'POST',
+    });
+    const payload = this.parseJson(text);
+    const data = payload as KuaishouStartUploadResponse;
+
+    if (data.result !== 1) {
+      throw new ConflictException(data.error_msg || '快手发起上传失败');
+    }
+    const uploadToken = (data.upload_token || '').trim();
+    const endpoint = (data.endpoint || '').trim();
+    if (!uploadToken || !endpoint) {
+      throw new ConflictException('快手发起上传返回缺少 upload_token 或 endpoint');
+    }
+    return { uploadToken, endpoint };
+  }
+
+  private async uploadVideo(input: {
+    endpoint: string;
+    uploadToken: string;
+    appId: string;
+    accessToken: string;
+    body: ReadableStream<Uint8Array>;
+    contentType: string;
+  }) {
+    const query = new URLSearchParams({
+      upload_token: input.uploadToken,
+      app_id: input.appId,
+      access_token: input.accessToken,
+    });
+    const httpsUrl = `https://${input.endpoint}/api/upload?${query.toString()}`;
+    const httpUrl = `http://${input.endpoint}/api/upload?${query.toString()}`;
+
+    const tryUpload = async (url: string) => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': input.contentType,
+        },
+        body: input.body,
+        duplex: 'half',
+      } as RequestInit);
+      const text = await response.text();
+      if (!response.ok) {
+        this.logger.warn(`[kuaishou-upload] http=${response.status} body=${text.slice(0, 200)}`);
+        throw new ConflictException(`快手上传视频失败：HTTP ${response.status}`);
+      }
+      const payload = this.parseJson(text);
+      const result = Number((payload as { result?: unknown }).result ?? 0);
+      if (result !== 1) {
+        throw new ConflictException('快手上传视频失败');
+      }
+    };
+
+    try {
+      await tryUpload(httpsUrl);
+    } catch {
+      await tryUpload(httpUrl);
+    }
+  }
+
+  private async publishVideo(input: {
+    appId: string;
+    accessToken: string;
+    uploadToken: string;
+    cover: { bytes: Buffer; mimeType: string };
+    caption: string;
+  }) {
+    const url = new URL('https://open.kuaishou.com/openapi/photo/publish');
+    url.searchParams.set('access_token', input.accessToken);
+    url.searchParams.set('app_id', input.appId);
+    url.searchParams.set('upload_token', input.uploadToken);
+
+    const form = new FormData();
+    form.append(
+      'cover',
+      new Blob([new Uint8Array(input.cover.bytes)], { type: input.cover.mimeType }),
+      'cover',
+    );
+    form.append('caption', input.caption);
+
+    const response = await fetch(url.toString(), {
+      method: 'POST',
+      body: form,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      this.logger.warn(`[kuaishou-publish] http=${response.status} body=${text.slice(0, 200)}`);
+      throw new ConflictException(`快手发布失败：HTTP ${response.status}`);
+    }
+
+    const payload = this.parseJson(text) as KuaishouPublishResponse;
+    if (payload.result !== 1) {
+      throw new ConflictException(payload.error_msg || '快手发布失败');
+    }
+
+    const photoId = payload.video_info?.photo_id?.trim() || '';
+    const playUrl = payload.video_info?.play_url?.trim() || '';
+    if (!photoId) {
+      throw new ConflictException('快手发布返回缺少 photo_id');
+    }
+
+    return {
+      photoId,
+      playUrl: playUrl || null,
+      pending: Boolean(payload.video_info?.pending),
+      raw: payload,
+    };
+  }
+
+  private async refreshToken(input: { appId: string; appSecret: string; refreshToken: string }) {
+    const url = new URL('https://open.kuaishou.com/oauth2/refresh_token');
+    url.searchParams.set('app_id', input.appId);
+    url.searchParams.set('app_secret', input.appSecret);
+    url.searchParams.set('refresh_token', input.refreshToken);
+    url.searchParams.set('grant_type', 'refresh_token');
+
+    const text = await this.requestText(url.toString(), { method: 'GET' });
+    const payload = this.parseJson(text) as KuaishouRefreshTokenResponse;
+    if (payload.result !== 1) {
+      throw new ConflictException(payload.error_msg || '快手 refresh_token 失败');
+    }
+    const accessToken = (payload.access_token || '').trim();
+    const refreshToken = (payload.refresh_token || '').trim();
+    if (!accessToken || !refreshToken) {
+      throw new ConflictException('快手 refresh_token 返回缺少 token 字段');
+    }
+    return {
+      accessToken,
+      refreshToken,
+      raw: payload,
+    };
+  }
+
+  private async requestText(url: string, init: RequestInit) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+    try {
+      const response = await fetch(url, {
+        ...init,
+        headers: {
+          accept: 'application/json',
+          ...(init.headers ?? {}),
+        },
+        signal: controller.signal,
+      });
+      return await response.text();
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private parseJson(text: string) {
+    try {
+      return text ? (JSON.parse(text) as unknown) : {};
+    } catch {
+      throw new ConflictException(`快手接口返回非 JSON：${text || 'empty response'}`);
+    }
+  }
+}

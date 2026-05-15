@@ -9,7 +9,7 @@ export class ExpandAvatarVideoScriptDto {
 
   @Type(() => Number)
   @IsNumber()
-  @Min(30)
+  @Min(10)
   @Max(300)
   targetSeconds!: number;
 

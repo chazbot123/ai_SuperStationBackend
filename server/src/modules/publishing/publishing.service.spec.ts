@@ -18,6 +18,8 @@ describe('PublishingService draft payloads', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
   });
 
@@ -39,36 +41,6 @@ describe('PublishingService draft payloads', () => {
     ).toBe(true);
   });
 
-  it('builds AiToEarn MCP login url with platform query', async () => {
-    service = new PublishingService(
-      {} as never,
-      {
-        get: jest.fn((key: string) => {
-          if (key === 'AITOEARN_CONNECT_CHANNEL_URL') {
-            return 'https://aitoearn.cn/zh-CN/accounts?role=creator';
-          }
-          return undefined;
-        }),
-      } as unknown as ConfigService,
-      {} as never,
-      {} as never,
-      {} as never,
-    );
-
-    const result = await service.startMcpPlatformLogin({ userId: 'u1' } as never, {
-      platform: 'douyin',
-    });
-
-    expect(result).toMatchObject({
-      provider: 'mcp',
-      platform: LeadPublishPlatform.douyin,
-    });
-    expect(result.loginUrl).toContain('aitoearn.cn/zh-CN/accounts');
-    expect(result.loginUrl).toContain('role=creator');
-    expect(result.loginUrl).toContain('from=ai-superweb');
-    expect(result.syncHint).toContain('AiToEarn 官方当前会先进入频道管理');
-  });
-
   it('builds Bilibili official OAuth url with gourl callback', () => {
     service = new PublishingService(
       {} as never,
@@ -83,6 +55,8 @@ describe('PublishingService draft payloads', () => {
           return values[key];
         }),
       } as unknown as ConfigService,
+      {} as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -116,6 +90,8 @@ describe('PublishingService draft payloads', () => {
           return values[key];
         }),
       } as unknown as ConfigService,
+      {} as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -253,6 +229,8 @@ describe('PublishingService draft payloads', () => {
         publish,
         getSessionPath: jest.fn().mockReturnValue('D:/tmp/session'),
       } as never,
+      {} as never,
+      {} as never,
     );
 
     jest.spyOn(service as never, 'decryptAuthPayload').mockReturnValue('sid=expired_cookie');
@@ -323,6 +301,8 @@ describe('PublishingService draft payloads', () => {
         publish,
         getSessionPath: jest.fn().mockReturnValue('D:/tmp/session'),
       } as never,
+      {} as never,
+      {} as never,
     );
 
     jest.spyOn(service as never, 'decryptAuthPayload').mockReturnValue('sid=old_cookie');
@@ -374,6 +354,8 @@ describe('PublishingService draft payloads', () => {
         },
       } as never,
       { get: jest.fn() } as unknown as ConfigService,
+      {} as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -461,6 +443,8 @@ describe('PublishingService draft payloads', () => {
         collectLoginResult,
         getSessionPath: jest.fn().mockReturnValue('D:/tmp/session'),
       } as never,
+      {} as never,
+      {} as never,
     );
 
     jest.spyOn(service as never, 'decryptAuthPayload').mockReturnValue('did=1234567890; token=abcdef');
@@ -527,6 +511,8 @@ describe('PublishingService draft payloads', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     const result = await service.listJobs({ userId: 'user-1', role: 'employee' } as never, {
@@ -580,6 +566,8 @@ describe('PublishingService draft payloads', () => {
         },
       } as never,
       { get: jest.fn() } as unknown as ConfigService,
+      {} as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

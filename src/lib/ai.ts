@@ -3,7 +3,6 @@ import type { ModelConfig } from "@/store/modelConfigStore";
 
 type GenerateCopyRequest = {
   prompt?: string;
-  scene?: "social_post" | "product_image";
   productName?: string;
   sellingPoints?: string;
   audience?: string;
@@ -22,7 +21,6 @@ type PromptPolishRequest = {
 
 type GenerateImagesRequest = {
   prompt?: string;
-  scene?: "social_post" | "product_image";
   sizePreset?: "1_1" | "3_4" | "4_5" | "9_16" | "16_9";
   resolution?: "1k" | "2k" | "4k";
   referenceImages?: string[];
@@ -298,7 +296,6 @@ export async function generateAiCopy(input: GenerateCopyRequest) {
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({
       prompt: input.prompt,
-      scene: input.scene,
       productName: input.productName,
       sellingPoints: input.sellingPoints,
       audience: input.audience,
@@ -358,7 +355,6 @@ export async function generateAiImages(input: GenerateImagesRequest) {
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({
       prompt: input.prompt,
-      scene: input.scene,
       sizePreset: input.sizePreset,
       resolution: input.resolution,
       referenceImages: input.referenceImages,
@@ -696,6 +692,15 @@ export async function updateVideoDraft(input: {
       syncedToLeads: input.syncedToLeads,
       completedAt: input.completedAt,
     }),
+  });
+}
+
+export async function removeVideoDraft(accessToken: string, id: string) {
+  return requestJson<{ success: true }>(`/api/ai/video-drafts/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
   });
 }
 

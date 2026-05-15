@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { VideoDraftRecord } from "@/lib/ai";
 import type { PlatformKey } from "@/store/appStore";
 
 export type VideoDraftReviewStage = "draft" | "submitted" | "approved";
@@ -44,43 +43,21 @@ export type VideoDraftItem = {
   syncedToLeads: boolean;
 };
 
-export function toVideoDraftItem(item: VideoDraftRecord): VideoDraftItem {
-  return {
-    id: item.id,
-    source: item.source,
-    title: item.title,
-    platformStyle: item.platformStyle ? (item.platformStyle as PlatformKey) : undefined,
-    publishTitle: item.publishTitle ?? undefined,
-    publishTags: item.publishTags ?? [],
-    createdAt: item.createdAt,
-    completedAt: item.completedAt ?? undefined,
-    durationText: item.durationText,
-    generatedScript: item.generatedScript,
-    videoUrl: item.videoUrl,
-    taskId: item.taskId ?? undefined,
-    provider: item.provider ?? undefined,
-    model: item.model ?? undefined,
-    errorMessage: item.errorMessage ?? undefined,
-    reviewStage: item.reviewStage,
-    status: item.status,
-    syncedToLeads: item.syncedToLeads,
-  };
-}
-
 type VideoDraftState = {
   items: VideoDraftItem[];
-  setItems: (items: VideoDraftItem[]) => void;
+  replaceItems: (items: VideoDraftItem[]) => void;
   prependItem: (item: VideoDraftItem) => void;
   updateItem: (id: string, patch: Partial<VideoDraftItem>) => void;
+  removeItem: (id: string) => void;
 };
 
 export const useVideoDraftStore = create<VideoDraftState>()(
   persist(
     (set) => ({
       items: [],
-      setItems: (items) =>
+      replaceItems: (items) =>
         set(() => ({
-          items: [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+          items,
         })),
       prependItem: (item) =>
         set((state) => ({
@@ -89,6 +66,10 @@ export const useVideoDraftStore = create<VideoDraftState>()(
       updateItem: (id, patch) =>
         set((state) => ({
           items: state.items.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
+        })),
+      removeItem: (id) =>
+        set((state) => ({
+          items: state.items.filter((entry) => entry.id !== id),
         })),
     }),
     {

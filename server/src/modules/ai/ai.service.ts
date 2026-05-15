@@ -28,6 +28,7 @@ import { SessionUser } from '../auth/auth.types';
 import { ProductImageStorageService } from '../products/product-image-storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAIN_COMPANY_ROLE_KEY } from '../rbac/rbac.constants';
+import { resolvePublicBucketBaseUrl, rewriteManagedPublicObjectUrl } from '../shared/public-asset-url.util';
 import {
   AiModelConfigCacheService,
   type StoredModelConfig,
@@ -844,7 +845,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
       const inputFiles = await this.downloadSegmentsToTempFiles(latest.segments.map((s) => s.segmentVideoUrl as string));
       const segmentDurations = await Promise.all(inputFiles.map((filePath) => this.videoConcat.getVideoDuration(filePath)));
-      let merged = await this.videoConcat.concatMp4Files(inputFiles);
+      let merged = await this.videoConcat.concatMp4Files(inputFiles, { transitionSeconds: 0.2 });
       const subtitleCues = this.buildSubtitleCuesForSegments(latest.segments, segmentDurations);
       if (subtitleCues.length > 0) {
         merged = Buffer.from(await this.videoConcat.burnSubtitles({
@@ -871,7 +872,6 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateCopy(user: SessionUser, dto: GenerateCopyDto) {
-    const scene = dto.scene ?? 'social_post';
     const style = dto.style ?? 'xhs';
     const productName = dto.productName?.trim() || '产品';
     const sellingPoints = dto.sellingPoints?.trim() || '更智能/更高效';
@@ -885,9 +885,8 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     this.ensureBaseUrl(resolvedConfig.baseUrl);
 
     try {
-      const system = this.buildGenerateCopySystemPrompt(scene);
+      const system = this.buildGenerateCopySystemPrompt();
       const user = this.buildGenerateCopyUserPrompt({
-        scene,
         styleLabel,
         prompt,
         productName,
@@ -1159,9 +1158,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateImages(user: SessionUser, dto: GenerateImagesDto) {
-    const scene = dto.scene ?? 'product_image';
-    const rawPrompt = dto.prompt?.trim() || '请生成一组商品营销图片';
-    const prompt = this.buildGenerateImagesPrompt(scene, rawPrompt);
+    const prompt = dto.prompt?.trim() || '请生成一组商品营销图片';
     const sizePreset = dto.sizePreset ?? '3_4';
     const resolution = dto.resolution ?? '1k';
     const referenceImages = (dto.referenceImages ?? []).filter(Boolean).slice(0, 3);
@@ -1422,17 +1419,20 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const bgmRequested = !!bgmUrl;
 
     if (resolvedConfig.protocol === 'vidu_video') {
-      const textForTts = (ttsText || prompt)
-        .replace(/\n{3,}/g, '\n\n')
-        .replace(/^平台风格：.*$/gim, '')
-        .trim()
-        .slice(0, 2000);
+      const sanitizeSubtitleText = (input: string) =>
+        input
+          .replace(/\n{3,}/g, '\n\n')
+          .replace(/^(平台风格|时长要求|文案要求|节奏要求|画面指引|视频生成要求|成片要求)\s*[:：].*$/gim, '')
+          .trim();
+      const cleanedText = sanitizeSubtitleText(ttsText || prompt);
+      const textForTts = cleanedText.slice(0, 2000);
+      const subtitleText = cleanedText.slice(0, 4000);
       await this.videoTtsCache.set(
         taskId,
         {
           voiceId: audioRequested ? voiceId : null,
           text: audioRequested ? textForTts : '',
-          subtitleText: (ttsText || prompt).replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000),
+          subtitleText,
           subtitleEnabled: true,
           ttsTaskId: '',
           audioUrl: null,
@@ -1506,7 +1506,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
           provider: resolvedConfig.providerName,
           model: resolvedConfig.modelName,
           status,
-          videoUrl: ttsEntry.finalVideoUrl,
+          videoUrl: this.rewriteManagedAssetUrl(ttsEntry.finalVideoUrl),
         };
       }
 
@@ -1549,7 +1549,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         provider: resolvedConfig.providerName,
         model: resolvedConfig.modelName,
         status,
-        videoUrl: status === 'success' ? (videoUrl ?? null) : null,
+        videoUrl: status === 'success' ? this.rewriteManagedAssetUrl(videoUrl ?? null) : null,
       };
     } catch (error) {
       this.rethrowModelError(error, '视频任务查询失败');
@@ -1729,7 +1729,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       return [] as Array<{ startSeconds: number; endSeconds: number; text: string }>;
     }
 
-    const chunks = this.splitSubtitleText(normalizedText);
+    const chunks = this.splitSubtitleText(
+      normalizedText,
+      this.resolveSubtitleChunkMaxChars(durationSeconds, normalizedText),
+    );
     if (chunks.length === 0) {
       return [] as Array<{ startSeconds: number; endSeconds: number; text: string }>;
     }
@@ -1738,13 +1741,23 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const totalWeight = weights.reduce((sum, value) => sum + value, 0) || chunks.length;
     const cues: Array<{ startSeconds: number; endSeconds: number; text: string }> = [];
     let cursor = startOffset;
+    const totalEnd = startOffset + durationSeconds;
 
     for (let index = 0; index < chunks.length; index += 1) {
-      const remainingDuration = startOffset + durationSeconds - cursor;
+      const remainingDuration = totalEnd - cursor;
+      if (remainingDuration <= 0.02) {
+        break;
+      }
       const remainingCount = chunks.length - index;
       const rawSlice = (durationSeconds * weights[index]) / totalWeight;
-      const slice = index === chunks.length - 1 ? remainingDuration : Math.max(0.9, Math.min(rawSlice, remainingDuration - 0.3 * (remainingCount - 1)));
-      const endSeconds = index === chunks.length - 1 ? startOffset + durationSeconds : Math.max(cursor + 0.8, cursor + slice);
+      const minSlice = Math.min(0.8, Math.max(0.28, durationSeconds / Math.max(chunks.length * 1.5, 1)));
+      const reserveForRest = Math.max(0, remainingCount - 1) * 0.02;
+      const maxSlice = Math.max(minSlice, remainingDuration - reserveForRest);
+      const slice = index === chunks.length - 1 ? remainingDuration : Math.max(minSlice, Math.min(rawSlice, maxSlice));
+      const endSeconds = index === chunks.length - 1 ? totalEnd : Math.min(totalEnd, cursor + slice);
+      if (endSeconds <= cursor + 0.02) {
+        break;
+      }
       cues.push({
         startSeconds: cursor,
         endSeconds,
@@ -1783,6 +1796,23 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       .trim();
   }
 
+  private resolveSubtitleChunkMaxChars(durationSeconds: number, text: string) {
+    const totalChars = this.countSubtitleChars(text);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || totalChars <= 0) {
+      return 20;
+    }
+
+    if (durationSeconds <= 6) {
+      return 30;
+    }
+    if (durationSeconds <= 10) {
+      return 26;
+    }
+
+    const targetChunkCount = Math.max(2, Math.round(durationSeconds / 1.8));
+    return Math.max(20, Math.min(32, Math.ceil(totalChars / targetChunkCount)));
+  }
+
   private splitSubtitleText(text: string, maxChars = 20) {
     const blocks = text
       .split(/\n+/)
@@ -1814,7 +1844,42 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         }
       }
     }
-    return parts.filter(Boolean);
+    return this.mergeSubtitleParts(parts.filter(Boolean), maxChars);
+  }
+
+  private mergeSubtitleParts(parts: string[], maxChars: number) {
+    if (parts.length <= 1) {
+      return parts;
+    }
+
+    const merged: string[] = [];
+    for (const part of parts) {
+      const current = part.trim();
+      if (!current) {
+        continue;
+      }
+      const previous = merged[merged.length - 1];
+      if (!previous) {
+        merged.push(current);
+        continue;
+      }
+
+      const combined = `${previous}${current}`;
+      const previousChars = this.countSubtitleChars(previous);
+      const currentChars = this.countSubtitleChars(current);
+      const combinedChars = this.countSubtitleChars(combined);
+      const shouldMerge =
+        combinedChars <= maxChars &&
+        (previousChars <= Math.ceil(maxChars * 0.45) || currentChars <= Math.ceil(maxChars * 0.45));
+
+      if (shouldMerge) {
+        merged[merged.length - 1] = combined;
+        continue;
+      }
+      merged.push(current);
+    }
+
+    return merged;
   }
 
   private countSubtitleChars(text: string) {
@@ -2036,16 +2101,29 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   private getBgmPublicBaseUrl() {
     const explicit = this.configService.get<string>('AI_BGM_PUBLIC_BASE_URL')?.trim();
     if (explicit) return explicit;
-
-    const endpoint = this.configService.get<string>('MINIO_ENDPOINT') ?? '';
-    const port = Number(this.configService.get<string>('MINIO_PORT') ?? '9000');
-    const useSSL = String(this.configService.get<string>('MINIO_USE_SSL') ?? 'false') === 'true';
     const bucket = this.configService.get<string>('MINIO_BUCKET') ?? 'ai-superweb';
-    if (!endpoint) return null;
-    const protocol = useSSL ? 'https' : 'http';
-    const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
-    const base = `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}/${bucket}`;
-    return base;
+    return resolvePublicBucketBaseUrl({
+      bucketName: bucket,
+      fileBaseUrl: this.configService.get<string>('FILE_BASE_URL'),
+      minioPublicBaseUrl: this.configService.get<string>('MINIO_PUBLIC_BASE_URL'),
+      endpoint: this.configService.get<string>('MINIO_ENDPOINT'),
+      port: Number(this.configService.get<string>('MINIO_PORT') ?? '9000'),
+      useSSL: String(this.configService.get<string>('MINIO_USE_SSL') ?? 'false') === 'true',
+    });
+  }
+
+  private rewriteManagedAssetUrl(url?: string | null) {
+    return rewriteManagedPublicObjectUrl(
+      {
+        bucketName: this.configService.get<string>('MINIO_BUCKET') ?? 'ai-superweb',
+        fileBaseUrl: this.configService.get<string>('FILE_BASE_URL'),
+        minioPublicBaseUrl: this.configService.get<string>('MINIO_PUBLIC_BASE_URL'),
+        endpoint: this.configService.get<string>('MINIO_ENDPOINT'),
+        port: Number(this.configService.get<string>('MINIO_PORT') ?? '9000'),
+        useSSL: String(this.configService.get<string>('MINIO_USE_SSL') ?? 'false') === 'true',
+      },
+      url,
+    );
   }
 
   private fallbackPickBgm(input: {
@@ -2238,9 +2316,9 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       segmentCount: task.segments.length,
       finishedCount,
       failedCount,
-      characterImageUrl: task.characterImageUrl,
+      characterImageUrl: this.rewriteManagedAssetUrl(task.characterImageUrl),
       fullScript: task.fullScript,
-      finalVideoUrl: task.finalVideoUrl ?? null,
+      finalVideoUrl: this.rewriteManagedAssetUrl(task.finalVideoUrl),
       errorMessage: task.errorMessage ?? null,
       segments: task.segments.map((segment) => ({
         id: segment.id,
@@ -2250,7 +2328,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         attempts: segment.attempts,
         maxAttempts: segment.maxAttempts,
         retryAt: segment.retryAt ? segment.retryAt.toISOString() : null,
-        segmentVideoUrl: segment.segmentVideoUrl ?? null,
+        segmentVideoUrl: this.rewriteManagedAssetUrl(segment.segmentVideoUrl),
         errorMessage: segment.errorMessage ?? null,
       })),
     };
@@ -2696,7 +2774,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     if (!latest.finalVideoUrl) {
       const inputFiles = await this.downloadSegmentsToTempFiles(latest.segments.map((s) => s.segmentVideoUrl as string));
-      const merged = await this.videoConcat.concatMp4Files(inputFiles);
+      const merged = await this.videoConcat.concatMp4Files(inputFiles, { transitionSeconds: 0.2 });
       const uploaded = await this.videoStorage.uploadVideoObject({
         userId: latest.userId,
         taskId: latest.id,
@@ -2869,6 +2947,8 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       lockBackground
         ? 'Keep the background fixed and consistent across the entire video. Do not change location, lighting, props, or camera angle between segments.'
         : '',
+      'Treat every segment as a continuation of the same take. Keep framing, subject size, pose baseline, wardrobe, lighting, and camera height consistent between segments.',
+      'Do not introduce hard scene cuts, sudden camera jumps, or noticeable composition changes at the start of a segment.',
       '',
       'Script (Chinese):',
       input.prompt.trim(),
@@ -3422,14 +3502,12 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const [copyResult, imageResult] = await Promise.all([
       this.generateCopy(user, {
         prompt,
-        scene: 'social_post',
         style: style === 'xiaohongshu' ? 'xhs' : style,
         format: 'text',
         modelConfig: dto.textModelConfig,
       }),
       this.generateImages(user, {
         prompt,
-        scene: 'social_post',
         sizePreset,
         resolution,
         referenceImages,
@@ -3556,6 +3634,17 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     override?: Partial<TextModelConfigInput & ImageModelConfigInput & VideoModelConfigInput & TestModelConfigDto>,
     userId?: string | null,
   ) {
+    const hasExplicitOverride = !!override && Object.values(override).some((value) => {
+      if (typeof value === 'string') {
+        return value.trim().length > 0;
+      }
+      return value !== undefined && value !== null;
+    });
+
+    if (hasExplicitOverride) {
+      return this.resolveModelConfig(type, override);
+    }
+
     const normalizedUserId = userId?.trim();
     if (normalizedUserId) {
       const cached = await this.modelConfigCache.get(normalizedUserId, type);
@@ -3839,6 +3928,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return this.serializeVideoDraft(updated);
   }
 
+  async removeVideoDraft(user: SessionUser, id: string) {
+    await this.findAccessibleVideoDraft(user, id);
+    await this.prisma.videoDraft.delete({
+      where: { id },
+    });
+    return { success: true };
+  }
+
   async submitVideoDraft(user: SessionUser, id: string) {
     const existing = await this.findAccessibleVideoDraft(user, id);
 
@@ -3920,61 +4017,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return [`当前场景：${sceneLabel}`, '请直接润色下面这段提示词，并输出可直接继续用于生成的版本：', prompt].join('\n');
   }
 
-  private buildGenerateImagesPrompt(scene: 'social_post' | 'product_image', prompt: string) {
-    if (scene === 'social_post') {
-      return prompt;
-    }
-
-    const systemPrompt = [
-      '你是一名资深电商商品视觉生成助手，负责基于用户提供的商品原图，生成高清、真实、可直接用于电商详情页的商品详情长图。',
-      '你的任务目标：',
-      '根据商品原图，输出符合电商详情页使用场景的高质量商品视觉画面，重点展示商品整体外观、细节结构、材质纹理、真实颜色和品质感。',
-      '输出要求：',
-      '1. 画面必须围绕原商品主体展开，保持商品核心外观、颜色、结构、比例和材质特征真实一致，不得随意改款、变形、增删主体结构或偏离实物原色。',
-      '2. 整体风格需简约、高级、干净、有质感，画面统一配色，视觉协调，避免花哨、杂乱、廉价感设计。',
-      '3. 构图要整洁且有层次，适合电商详情页长图展示，排版舒适大气，留白合理，重点信息区域清晰，主体突出。',
-      '4. 要体现多角度展示能力，可合理呈现商品整体图、局部细节图、材质特写、结构展示图，但都必须服务于商品本身，不喧宾夺主。',
-      '5. 强调商品细节表现，包括但不限于材质纹理、边缘做工、表面质感、局部结构、真实光泽和层次细节，确保细节拉满。',
-      '6. 光影表现必须自然、真实、写实，质感明确，不要过曝、死黑、塑料感、伪3D感或明显AI合成痕迹。',
-      '7. 背景要简洁干净，无多余杂物、无干扰元素、无复杂噪点，避免抢占主体视觉，可使用高级简洁场景或纯净布景，但必须服务商品展示。',
-      '8. 画面不得出现畸变、比例异常、透视错误、边缘融化、重复结构、悬浮感、错位、穿模、模糊失焦等问题。',
-      '9. 输出结果必须适合电商详情页使用，具备专业商品展示效果，真实可信，有购买转化感。',
-      '10. 严禁出现水印、文字、乱码、Logo污染、无关装饰、虚假配件、错误道具或与商品无关的内容。',
-      '风格基调：',
-      '简约高级、干净通透、真实写实、质感明确、层次分明、统一色调、自然光影、电商专业感强。',
-      '生成原则：',
-      '- 第一优先级是还原商品真实感',
-      '- 第二优先级是提升商品高级感和展示力',
-      '- 第三优先级是保证电商详情页长图构图的整洁、耐看和可用性',
-      '请始终基于“商品原图真实还原 + 电商详情页高级展示”来完成生成。',
-    ].join('\n');
-
-    return [systemPrompt, `用户补充要求：${prompt}`].join('\n\n');
-  }
-
-  private buildGenerateCopySystemPrompt(scene: 'social_post' | 'product_image' = 'social_post') {
-    if (scene === 'product_image') {
-      return [
-        '你是一名专业电商商品文案助手。',
-        '请根据用户提供的商品信息生成适合电商详情页、商品介绍和种草展示使用的商品详情文案。',
-        '输出内容必须贴合现有输入，不得编造不存在的材质、功能、参数、功效、体验或承诺。',
-        '如果部分参数未提供，可根据现有文字信息做稳妥补全；无法明确判断时使用保守表达，不要强行下结论。',
-        '你必须只返回 JSON 对象，不要返回代码块，不要补充解释。',
-        'JSON 固定字段为：title、body、tags。',
-        'title：一个标题，限制 20 个字符以内；简洁自然，突出商品核心特点，不要夸张。',
-        'body：只生成正文文案，不要包含标题，不要包含任何标签，不要包含额外说明。',
-        'body 必须按以下固定结构输出，并保持分段清晰：',
-        '【产品整体介绍】',
-        '【核心卖点】',
-        '【材质优势】',
-        '【适用人群】',
-        '【使用场景】',
-        '【亮点优势】',
-        '文案风格要求：简洁易懂、接地气、逻辑清晰、重点突出、不浮夸、不虚假宣传，贴合商品真实特征。',
-        'tags：生成 3-6 个适合商品介绍或种草整理的 #标签，多个标签用单个空格分隔。',
-      ].join('');
-    }
-
+  private buildGenerateCopySystemPrompt() {
     return [
       '你是一个擅长写“小红书软种草”图文的中文内容创作助手。',
       '无论发布平台是什么，图文正文都统一采用小红书软种草风格，不写硬广，不写官方宣传腔，不写说明书口吻。',
@@ -3994,28 +4037,12 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   private buildGenerateCopyUserPrompt(input: {
-    scene: 'social_post' | 'product_image';
     styleLabel: string;
     prompt: string;
     productName: string;
     audience: string;
     sellingPoints: string;
   }) {
-    if (input.scene === 'product_image') {
-      return [
-        '请生成一份商品详情文案。',
-        '优先使用已提供的商品信息；若部分参数缺失，请根据现有输入做合理补全，无法确认时使用稳妥表达。',
-        input.prompt ? `补充提示词：${input.prompt}` : '',
-        `产品名称：${input.productName}`,
-        `目标人群：${input.audience}`,
-        `核心卖点：${input.sellingPoints}`,
-        '正文输出为纯文本，严格按固定结构分段。',
-        '请严格返回 JSON，例如：{"title":"示例标题","body":"【产品整体介绍】...","tags":"#标签1 #标签2 #标签3"}',
-      ]
-        .filter(Boolean)
-        .join('\n');
-    }
-
     return [
       `请生成一条图文种草内容，发布平台：${input.styleLabel}。`,
       '正文风格统一按“小红书软种草”输出；发布平台信息仅用于帮助你判断标签方向，不改变正文风格。',
@@ -4089,7 +4116,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       completedAt: item.completedAt,
       durationText: item.durationText,
       generatedScript: item.generatedScript,
-      videoUrl: item.videoUrl,
+      videoUrl: this.rewriteManagedAssetUrl(item.videoUrl),
       taskId: item.taskId,
       provider: item.provider,
       model: item.model,
@@ -4209,7 +4236,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       tags: video.publishTags,
       images: [] as string[],
       downloadableImages: [] as boolean[],
-      videoUrl: video.videoUrl,
+      videoUrl: this.rewriteManagedAssetUrl(video.videoUrl),
       reviewStage: video.reviewStage,
       submittedByName: video.creator.displayName || video.creator.username,
       submittedAt: video.updatedAt.toISOString(),

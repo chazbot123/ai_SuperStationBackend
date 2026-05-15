@@ -58,26 +58,6 @@ function reviewStageMeta(stage: DraftItem["reviewStage"]) {
   return { label: "当前状态：草稿", variant: "gray" as const };
 }
 
-function DraftSectionBlock({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="overflow-hidden rounded-2xl border border-white/10 bg-black/20">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <div className="text-sm font-medium text-zinc-100">{title}</div>
-        {action}
-      </div>
-      <div className="p-4">{children}</div>
-    </section>
-  );
-}
-
 function formatTagInput(tags?: string[]) {
   return (tags ?? [])
     .map((item) => item.trim().replace(/^#+/, ""))
@@ -164,7 +144,7 @@ function sourceMeta(source: DraftItem["source"]) {
 }
 
 export default function StudioDrafts() {
-  usePageMeta("草稿箱");
+  usePageMeta("图文草稿箱");
 
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -585,24 +565,18 @@ export default function StudioDrafts() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Layers3 className="h-4 w-4 text-amber-300" />
-                草稿箱
+                图文草稿箱
               </CardTitle>
               <div className="mt-2 text-sm text-zinc-400">
-                汇总社媒图文生成与商品图与详情图生成的结果，方便统一查看当前草稿。
+                统一聚合 `社媒图文生成` 和 `商品图与详情图生成` 的结果。
               </div>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex w-full flex-col gap-2 md:w-80">
+            <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
               <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题或正文" />
-            </div>
-            <div className="w-full md:w-56">
               <Select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as SourceFilter)}>
                 <option value="all">全部草稿</option>
                 <option value="social">社媒图文生成</option>
@@ -610,20 +584,20 @@ export default function StudioDrafts() {
               </Select>
             </div>
           </div>
-
           {hint ? <div className="text-xs text-zinc-400">{hint}</div> : null}
-
-          <div className="space-y-2">
-            <div className="text-sm font-medium text-zinc-100">正在执行的任务</div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <div className="mb-2 text-sm font-medium text-zinc-100">正在执行的任务</div>
             {runningTasks.length === 0 ? (
-              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-6 text-center text-sm text-zinc-500">
+              <div className="rounded-xl bg-white/[0.04] px-3 py-6 text-center text-sm text-zinc-500 ring-1 ring-white/6">
                 当前没有执行中的任务
               </div>
             ) : (
               runningTasks.map((task) => (
                 <div
                   key={task.id}
-                  className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-3"
+                  className="rounded-xl bg-amber-500/10 px-3 py-3 ring-1 ring-amber-400/20"
                 >
                   <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0">
@@ -652,24 +626,49 @@ export default function StudioDrafts() {
             )}
           </div>
 
-          <div className="space-y-2">
+          <div>
             {filteredItems.length === 0 ? (
-              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-10 text-center text-sm text-zinc-500">
+              <div className="rounded-xl bg-white/[0.04] px-3 py-10 text-center text-sm text-zinc-500 ring-1 ring-white/6">
                 暂无草稿结果
               </div>
             ) : (
               filteredItems.map((item) => {
                 const meta = sourceMeta(item.source);
                 const visibleImages = getVisibleImages(item.images);
+                const stageVariant =
+                  item.reviewStage === "approved" ? "green" : item.reviewStage === "submitted" ? "amber" : "gray";
+                const stageLabel =
+                  item.reviewStage === "approved"
+                    ? "审核通过"
+                    : item.reviewStage === "submitted"
+                      ? "待审核"
+                      : "草稿";
                 return (
-                  <div key={item.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                  <div key={item.id} className="rounded-xl bg-white/[0.04] px-3 py-3 ring-1 ring-white/6">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0 lg:max-w-[460px] xl:max-w-[520px]">
+                      <div className="min-w-0 lg:max-w-[520px]">
                         <div className="flex items-center gap-2 text-xs text-zinc-400">
                           {meta.icon}
                           <span>{meta.label}</span>
                         </div>
                         <div className="mt-1 truncate text-sm font-medium text-zinc-100">{item.title}</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {item.style ? (
+                            <Badge variant="blue">
+                              {item.style === "xiaohongshu"
+                                ? "小红书"
+                                : item.style === "douyin"
+                                  ? "抖音"
+                                  : "视频号"}
+                            </Badge>
+                          ) : null}
+                          <Badge variant="gray">{item.sizePreset}</Badge>
+                          {item.tags.filter(Boolean).map((tag) => (
+                            <Badge key={`${item.id}-${tag}`} variant="gray">
+                              #{tag}
+                            </Badge>
+                          ))}
+                        </div>
                         <div className="mt-1 line-clamp-2 text-sm text-zinc-400">{item.body}</div>
                         <div className="mt-2 text-xs text-zinc-500">
                           {new Date(item.createdAt).toLocaleString()} · 图片 {visibleImages.length} 张
@@ -711,8 +710,8 @@ export default function StudioDrafts() {
                             {item.syncedToProducts ? "已同步产品" : "同步到产品管理"}
                           </Button>
                         ) : null}
-                        {item.reviewStage === "submitted" ? <Badge variant="amber">待审核</Badge> : null}
-                        {item.reviewStage === "approved" ? <Badge variant="green">审核通过</Badge> : null}
+                        <Badge variant={stageVariant}>{stageLabel}</Badge>
+                        {item.syncedToLeads ? <Badge variant="blue">已同步获客</Badge> : null}
                         {item.syncedToProducts ? <Badge variant="blue">已同步产品</Badge> : null}
                       </div>
                     </div>
@@ -771,47 +770,46 @@ export default function StudioDrafts() {
               {editingItem.syncedToProducts ? <Badge variant="blue">已同步产品</Badge> : null}
             </div>
 
-            <DraftSectionBlock title="草稿信息">
+            <div className="rounded-2xl bg-black/20 px-4 py-3 ring-1 ring-white/10">
               <div className="text-xs text-zinc-400">
                 {new Date(editingItem.createdAt).toLocaleString()} · 来源 {sourceMeta(editingItem.source).label}
               </div>
-            </DraftSectionBlock>
+            </div>
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.95fr)]">
-              <div className="space-y-4">
+              <div className="space-y-4 rounded-2xl bg-black/20 p-4 ring-1 ring-white/10">
                 {editingItem.source === "social" ? (
-                  <DraftSectionBlock title="标签">
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {editTags
-                          .split(/\s+/)
-                          .map((item) => item.trim().replace(/^#+/, ""))
-                          .filter(Boolean)
-                          .map((tag) => (
-                            <Badge key={tag} variant="gray">
-                              #{tag}
-                            </Badge>
-                          ))}
-                      </div>
-                      <textarea
-                        value={editTags}
-                        onChange={(event) => setEditTags(event.target.value)}
-                        rows={3}
-                        className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
-                        placeholder="请输入标签，使用空格分隔，例如：#智能好物 #高效工具 #种草推荐"
-                      />
-                      <div className="text-xs text-zinc-500">支持直接输入 #标签，保存时会自动去重。</div>
+                  <div className="space-y-3">
+                    <div className="text-sm font-medium text-zinc-100">标签</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {editTags
+                        .split(/\s+/)
+                        .map((item) => item.trim().replace(/^#+/, ""))
+                        .filter(Boolean)
+                        .map((tag) => (
+                          <Badge key={tag} variant="gray">
+                            #{tag}
+                          </Badge>
+                        ))}
                     </div>
-                  </DraftSectionBlock>
+                    <textarea
+                      value={editTags}
+                      onChange={(event) => setEditTags(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
+                      placeholder="请输入标签，使用空格分隔，例如：#智能好物 #高效工具 #种草推荐"
+                    />
+                    <div className="text-xs text-zinc-500">支持直接输入 #标签，保存时会自动去重。</div>
+                  </div>
                 ) : null}
 
-                <DraftSectionBlock title="标题">
-                  <div className="space-y-2">
-                    <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} placeholder="请输入标题" />
-                  </div>
-                </DraftSectionBlock>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-zinc-100">标题</div>
+                  <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} placeholder="请输入标题" />
+                </div>
 
-                <DraftSectionBlock title="文案内容">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-zinc-100">文案内容</div>
                   <textarea
                     value={editBody}
                     onChange={(event) => setEditBody(event.target.value)}
@@ -819,29 +817,28 @@ export default function StudioDrafts() {
                     className="min-h-[260px] w-full resize-y rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
                     placeholder="请输入文案"
                   />
-                </DraftSectionBlock>
+                </div>
               </div>
 
-              <div className="space-y-4">
-                <DraftSectionBlock
-                  title="结果预览"
-                  action={
-                    <div className="flex items-center gap-2">
-                      <input
-                        ref={uploadInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="hidden"
-                        onChange={handleUploadImages}
-                      />
-                      <Button type="button" variant="secondary" size="sm" onClick={() => uploadInputRef.current?.click()}>
-                        <Upload className="h-4 w-4" />
-                        {uploadingImages ? "上传中..." : "上传图片"}
-                      </Button>
-                    </div>
-                  }
-                >
+              <div className="space-y-4 rounded-2xl bg-black/20 p-4 ring-1 ring-white/10">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium text-zinc-100">结果预览</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={handleUploadImages}
+                    />
+                    <Button type="button" variant="secondary" size="sm" onClick={() => uploadInputRef.current?.click()}>
+                      <Upload className="h-4 w-4" />
+                      {uploadingImages ? "上传中..." : "上传图片"}
+                    </Button>
+                  </div>
+                </div>
+                <div>
                   {getVisibleImages(editImages).length > 0 ? (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                       {getVisibleImages(editImages).map(({ index: originalIndex, image }, index) => (
@@ -882,7 +879,7 @@ export default function StudioDrafts() {
                       当前草稿还没有图片，你可以自己上传。
                     </div>
                   )}
-                </DraftSectionBlock>
+                </div>
               </div>
             </div>
 

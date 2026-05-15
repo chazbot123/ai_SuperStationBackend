@@ -47,11 +47,6 @@ export class GenerateCopyDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['social_post', 'product_image'])
-  scene?: 'social_post' | 'product_image';
-
-  @IsOptional()
-  @IsString()
   @MaxLength(120)
   productName?: string;
 

@@ -226,6 +226,11 @@ export class AiController {
     return this.aiService.updateVideoDraft(req.user, id, dto);
   }
 
+  @Delete('video-drafts/:id')
+  removeVideoDraft(@Req() req: { user: SessionUser }, @Param('id') id: string) {
+    return this.aiService.removeVideoDraft(req.user, id);
+  }
+
   @Delete('product-image-drafts/:id')
   removeProductImageDraft(@Req() req: { user: SessionUser }, @Param('id') id: string) {
     return this.aiService.removeProductImageDraft(req.user, id);

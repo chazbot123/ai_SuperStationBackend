@@ -5,7 +5,6 @@ import { AiService } from './ai.service';
 
 describe('AiService', () => {
   let service: AiService;
-  const user = { userId: 'test-user' } as never;
 
   const configService = {
     get: jest.fn(),
@@ -36,7 +35,7 @@ describe('AiService', () => {
       .spyOn(service as never, 'generateTextContent')
       .mockResolvedValue('请突出封面主体、场景氛围和种草语气。');
 
-    const result = await service.promptPolish(user, {
+    const result = await service.promptPolish({
       prompt: '给我写一个社媒图文提示词',
       scene: 'social_post',
       modelConfig,
@@ -60,7 +59,7 @@ describe('AiService', () => {
 
   it('throws when prompt is empty', async () => {
     await expect(
-      service.promptPolish(user, {
+      service.promptPolish({
         prompt: '   ',
         scene: 'social_post',
         modelConfig,
@@ -72,7 +71,7 @@ describe('AiService', () => {
     jest.spyOn(service as never, 'generateTextContent').mockResolvedValue('   ');
 
     await expect(
-      service.promptPolish(user, {
+      service.promptPolish({
         prompt: '给我写一个商品详情图提示词',
         scene: 'product_image',
         modelConfig,
@@ -87,7 +86,7 @@ describe('AiService', () => {
   });
 
   it('uses Xiaohongshu soft-seeding rules in generate-copy system prompt', () => {
-    const prompt = (service as never)['buildGenerateCopySystemPrompt']('social_post');
+    const prompt = (service as never)['buildGenerateCopySystemPrompt']();
 
     expect(prompt).toContain('小红书软种草');
     expect(prompt).toContain('热门种草节奏');
@@ -98,7 +97,6 @@ describe('AiService', () => {
 
   it('keeps body style unified as Xiaohongshu soft-seeding in generate-copy user prompt', () => {
     const prompt = (service as never)['buildGenerateCopyUserPrompt']({
-      scene: 'social_post',
       styleLabel: '抖音',
       prompt: '突出轻巧便携',
       productName: '随行杯',
@@ -109,45 +107,5 @@ describe('AiService', () => {
     expect(prompt).toContain('发布平台：抖音');
     expect(prompt).toContain('正文风格统一按“小红书软种草”输出');
     expect(prompt).toContain('发布平台信息仅用于帮助你判断标签方向');
-  });
-
-  it('uses dedicated product detail system prompt for product image copy scene', () => {
-    const prompt = (service as never)['buildGenerateCopySystemPrompt']('product_image');
-
-    expect(prompt).toContain('专业电商商品文案助手');
-    expect(prompt).toContain('电商详情页');
-    expect(prompt).toContain('【产品整体介绍】');
-    expect(prompt).toContain('如果部分参数未提供');
-  });
-
-  it('uses dedicated product detail user prompt for product image copy scene', () => {
-    const prompt = (service as never)['buildGenerateCopyUserPrompt']({
-      scene: 'product_image',
-      styleLabel: '小红书风',
-      prompt: '突出玻璃质感和桌面氛围',
-      productName: '香薰蜡烛',
-      audience: '居家女生',
-      sellingPoints: '颜值高 氛围感强',
-    });
-
-    expect(prompt).toContain('请生成一份商品详情文案');
-    expect(prompt).toContain('若部分参数缺失');
-    expect(prompt).toContain('产品名称：香薰蜡烛');
-    expect(prompt).toContain('严格返回 JSON');
-  });
-
-  it('uses dedicated product image system prompt only for product image scene', () => {
-    const prompt = (service as never)['buildGenerateImagesPrompt']('product_image', '突出玻璃质感和细节特写');
-
-    expect(prompt).toContain('资深电商商品视觉生成助手');
-    expect(prompt).toContain('电商详情页长图');
-    expect(prompt).toContain('商品原图真实还原 + 电商详情页高级展示');
-    expect(prompt).toContain('用户补充要求：突出玻璃质感和细节特写');
-  });
-
-  it('keeps social post image prompt unchanged', () => {
-    const prompt = (service as never)['buildGenerateImagesPrompt']('social_post', '保留原始社媒出图提示词');
-
-    expect(prompt).toBe('保留原始社媒出图提示词');
   });
 });

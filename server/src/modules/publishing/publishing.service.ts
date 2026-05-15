@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  GoneException,
   Injectable,
   Logger,
   NotFoundException,
@@ -39,8 +40,11 @@ import { SyncExtensionPublishJobDto } from './dto/sync-extension-publish-job.dto
 import { SyncPlatformExtensionLoginDto } from './dto/sync-platform-extension-login.dto';
 import { SyncPublishingContentDto } from './dto/sync-publishing-content.dto';
 import { UpdatePlatformAccountDto } from './dto/update-platform-account.dto';
-import { AitoearnUnifiedMcpService } from './aitoearn-unified-mcp.service';
+import { DouyinShareSchemaService } from './douyin-share-schema.service';
+import { KuaishouOpenApiService } from './kuaishou-open-api.service';
 import { PlatformLoginBrowserService } from './platform-login-browser.service';
+import { WechatOfficialPublishService } from './wechat-official-publish.service';
+import { BilibiliOpenApiService } from './bilibili-open-api.service';
 
 const leadContentInclude = {
   creator: {
@@ -71,6 +75,9 @@ const leadPublishJobInclude = {
     select: {
       id: true,
       title: true,
+      body: true,
+      images: true,
+      coverImage: true,
       creatorId: true,
     },
   },
@@ -123,6 +130,12 @@ const SUPPORTED_AUTO_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
   LeadPublishPlatform.xiaohongshu,
   LeadPublishPlatform.wechat_mp,
   LeadPublishPlatform.kuaishou,
+  LeadPublishPlatform.wechat_official,
+  LeadPublishPlatform.bilibili,
+]);
+const FORCE_EXTENSION_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
+  LeadPublishPlatform.xiaohongshu,
+  LeadPublishPlatform.wechat_mp,
 ]);
 const SUPPORTED_OFFICIAL_OAUTH_PLATFORMS = new Set<LeadPublishPlatform>([
   LeadPublishPlatform.douyin,
@@ -184,7 +197,10 @@ export class PublishingService {
     private readonly jwtService: JwtService,
     private readonly productImageStorageService: ProductImageStorageService,
     private readonly platformLoginBrowserService: PlatformLoginBrowserService,
-    private readonly aitoearnUnifiedMcpService: AitoearnUnifiedMcpService,
+    private readonly douyinShareSchemaService: DouyinShareSchemaService,
+    private readonly kuaishouOpenApiService: KuaishouOpenApiService,
+    private readonly wechatOfficialPublishService: WechatOfficialPublishService,
+    private readonly bilibiliOpenApiService: BilibiliOpenApiService,
   ) {}
 
   async listContents(user: SessionUser, query: ListPublishingContentsQueryDto) {
@@ -357,6 +373,13 @@ export class PublishingService {
       }
     }
 
+    if (
+      dto.executionMode !== 'extension' &&
+      dto.targets.some((item) => FORCE_EXTENSION_PUBLISH_PLATFORMS.has(item.platform as LeadPublishPlatform))
+    ) {
+      throw new ConflictException('小红书、视频号发布已切回浏览器扩展执行，请使用扩展发布模式');
+    }
+
     const createdJobs = await this.prisma.$transaction(
       dto.targets.map((target) => {
         const account = platformAccountMap.get(target.platformAccountId.trim());
@@ -366,6 +389,11 @@ export class PublishingService {
         const draftPayload = this.buildPublishDraftPayload(
           content,
           target.platform as LeadPublishPlatform,
+          {
+            draftTitle: target.draftTitle,
+            draftBody: target.draftBody,
+            draftTags: target.draftTags,
+          },
         );
         return this.prisma.leadPublishJob.create({
           data: {
@@ -743,12 +771,9 @@ export class PublishingService {
   async startMcpPlatformLogin(_user: SessionUser, dto: StartMcpPlatformLoginDto) {
     const platform = dto.platform as LeadPublishPlatform;
 
-    return {
-      provider: 'mcp' as const,
-      platform,
-      loginUrl: this.buildAitoearnMcpLoginUrl(platform),
-      syncHint: this.buildAitoearnMcpLoginHint(platform),
-    };
+    throw new GoneException(
+      `平台 ${platform} 的 MCP 登录已移除，请使用浏览器插件或官方 OAuth 登录`,
+    );
   }
 
   async startOfficialOauthLogin(user: SessionUser, dto: StartOfficialOauthLoginDto) {
@@ -1330,7 +1355,7 @@ export class PublishingService {
         where: { id: current.id },
         data: {
           status: LeadPublishStatus.failed,
-          lastError: '当前阶段仅支持小红书、抖音、视频号、快手自动发布',
+          lastError: '当前阶段仅支持小红书、抖音、视频号、快手、微信公众号、哔哩哔哩自动发布',
         },
         include: leadPublishJobInclude,
       });
@@ -1345,36 +1370,168 @@ export class PublishingService {
     });
 
     try {
-      const useMcp =
+      const useOfficialOauthShareSchema =
         current.platform === LeadPublishPlatform.douyin &&
-        current.platformAccount.provider === PlatformAccountProvider.mcp &&
-        this.aitoearnUnifiedMcpService.isEnabled();
+        current.platformAccount.provider === PlatformAccountProvider.official_oauth;
 
-      if (useMcp) {
-        const mcpResult = await this.aitoearnUnifiedMcpService.publishDouyinDraft({
-          accountId:
-            current.platformAccount.externalAccountId ||
-            current.platformAccount.accountName ||
-            current.platformAccount.id,
-          title: current.draftTitle,
-          body: current.draftBody,
+      const useKuaishouOfficialOauth =
+        current.platform === LeadPublishPlatform.kuaishou &&
+        current.platformAccount.provider === PlatformAccountProvider.official_oauth;
+
+      const useWechatOfficialOauth =
+        current.platform === LeadPublishPlatform.wechat_official &&
+        current.platformAccount.provider === PlatformAccountProvider.official_oauth;
+
+      const useBilibiliOfficialOauth =
+        current.platform === LeadPublishPlatform.bilibili &&
+        current.platformAccount.provider === PlatformAccountProvider.official_oauth;
+
+      if (current.platformAccount.provider === PlatformAccountProvider.mcp) {
+        throw new ConflictException('当前账号为 MCP 渠道账号，但后端已移除 MCP 发布能力');
+      }
+
+      if (FORCE_EXTENSION_PUBLISH_PLATFORMS.has(current.platform)) {
+        throw new ConflictException('小红书、视频号发布已切回浏览器扩展执行，请使用扩展发布模式');
+      }
+
+      if (useOfficialOauthShareSchema) {
+        const shareSchemaResult = await this.publishDouyinWithShareSchema(current);
+        return this.prisma.leadPublishJob.update({
+          where: { id: current.id },
+          data: {
+            status: LeadPublishStatus.success,
+            draftUrl: shareSchemaResult.draftUrl,
+            externalStatus: shareSchemaResult.externalStatus,
+            draftedAt: new Date(),
+            lastError: null,
+          },
+          include: leadPublishJobInclude,
+        });
+      }
+
+      if (useWechatOfficialOauth) {
+        if (current.platformAccount.authType !== PlatformAccountAuthType.token) {
+          throw new ConflictException('公众号官方发布需要官方 OAuth Token 登录态');
+        }
+
+        const componentAccessToken =
+          this.configService.get<string>('WECHAT_OPEN_COMPONENT_ACCESS_TOKEN')?.trim() || '';
+        const componentAppId =
+          this.configService.get<string>('WECHAT_OPEN_COMPONENT_APP_ID')?.trim() || '';
+        if (!componentAccessToken || !componentAppId) {
+          throw new ConflictException('未配置微信公众号第三方平台 component_access_token / component_app_id');
+        }
+
+        const result = await this.wechatOfficialPublishService.publishMpNewsFromJob({
+          job: {
+            draftTitle: current.draftTitle,
+            draftBody: current.draftBody,
+            draftImages: current.draftImages,
+            draftVideoUrl: current.draftVideoUrl,
+          },
+          leadContent: {
+            title: current.leadContent.title,
+            body: current.leadContent.body,
+            images: current.leadContent.images,
+            coverImage: current.leadContent.coverImage,
+          },
+          account: {
+            authPayloadEncrypted: current.platformAccount.authPayloadEncrypted,
+            authType: current.platformAccount.authType,
+          },
+          componentAccessToken,
+          componentAppId,
+        });
+
+        if (result.token) {
+          await this.updateOfficialOauthTokenPayload(current.platformAccount.id, {
+            accessToken: result.token.accessToken,
+            refreshToken: result.token.refreshToken,
+          });
+        }
+
+        return this.prisma.leadPublishJob.update({
+          where: { id: current.id },
+          data: {
+            status: LeadPublishStatus.success,
+            draftUrl: result.result.url,
+            externalDraftId: result.result.mediaId,
+            externalStatus: result.result.status,
+            draftedAt: new Date(),
+            lastError: null,
+          },
+          include: leadPublishJobInclude,
+        });
+      }
+
+      if (useBilibiliOfficialOauth) {
+        if (current.platformAccount.authType !== PlatformAccountAuthType.token) {
+          throw new ConflictException('B站官方发布需要官方 OAuth Token 登录态');
+        }
+        if (!current.draftVideoUrl?.trim()) {
+          throw new ConflictException('B站官方发布当前仅支持视频内容');
+        }
+
+        const coverUrl = await this.resolveBilibiliCoverUrl(current);
+        if (!coverUrl) {
+          throw new ConflictException('B站官方发布需要封面图');
+        }
+
+        const config = this.getOfficialOauthClientConfig(LeadPublishPlatform.bilibili);
+        const tokenPayload = this.readOfficialOauthTokenPayload(current.platformAccount);
+
+        const publish = await this.bilibiliOpenApiService.publishVideoFromUrl({
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          accessToken: tokenPayload.accessToken,
+          videoUrl: current.draftVideoUrl.trim(),
+          coverUrl,
+          title: current.draftTitle || current.leadContent.title || 'B站视频',
+          desc: this.truncateText(current.draftBody || current.leadContent.body || '', 250),
           tags: current.draftTags,
-          images: current.draftImages,
-          videoUrl: current.draftVideoUrl,
         });
 
         return this.prisma.leadPublishJob.update({
           where: { id: current.id },
           data: {
             status: LeadPublishStatus.success,
-            draftUrl: mcpResult.draftUrl || null,
-            externalDraftId: mcpResult.externalDraftId || null,
-            externalFlowId: mcpResult.externalFlowId || null,
+            draftUrl: publish.playUrl,
+            externalDraftId: publish.resourceId,
+            externalStatus: 'submitted',
             draftedAt: new Date(),
             lastError: null,
           },
           include: leadPublishJobInclude,
         });
+      }
+
+      if (useKuaishouOfficialOauth) {
+        const useKuaishouOpenApi =
+          current.platformAccount.authType === PlatformAccountAuthType.token &&
+          Boolean(current.draftVideoUrl?.trim());
+
+        if (useKuaishouOpenApi) {
+          const publishResult = await this.publishKuaishouWithOpenApi(current);
+
+          return this.prisma.leadPublishJob.update({
+            where: { id: current.id },
+            data: {
+              status: LeadPublishStatus.success,
+              draftUrl: publishResult.draftUrl,
+              externalDraftId: publishResult.externalDraftId,
+              externalStatus: publishResult.externalStatus,
+              draftedAt: new Date(),
+              lastError: null,
+            },
+            include: leadPublishJobInclude,
+          });
+        }
+
+        if (current.platformAccount.authType !== PlatformAccountAuthType.cookie) {
+          throw new ConflictException(
+            '快手图文发布需要 Cookie 登录态：请先用浏览器插件登录把 Cookie 同步到该账号，再重试发布',
+          );
+        }
       }
 
       const result = await this.platformLoginBrowserService.publish({
@@ -1437,6 +1594,187 @@ export class PublishingService {
     }
   }
 
+  private async publishKuaishouWithOpenApi(job: LeadPublishJobWithRelations) {
+    if (!job.platformAccount) {
+      throw new ConflictException('发布任务缺少平台账号');
+    }
+    if (!job.draftVideoUrl?.trim()) {
+      throw new ConflictException('快手官方 OAuth 发布当前仅支持视频内容');
+    }
+
+    const coverUrl = await this.resolveKuaishouCoverUrl(job);
+    if (!coverUrl) {
+      throw new ConflictException('快手官方 OAuth 发布需要封面图');
+    }
+
+    const config = this.getOfficialOauthClientConfig(LeadPublishPlatform.kuaishou);
+    const tokenPayload = this.readOfficialOauthTokenPayload(job.platformAccount);
+
+    const publish = await this.kuaishouOpenApiService.publishVideoFromUrl({
+      appId: config.clientId,
+      appSecret: config.clientSecret,
+      accessToken: tokenPayload.accessToken,
+      refreshToken: tokenPayload.refreshToken,
+      videoUrl: job.draftVideoUrl.trim(),
+      coverUrl,
+      caption: job.draftTitle || job.leadContent.title || '快手视频',
+    });
+
+    if (publish.token.accessToken !== tokenPayload.accessToken) {
+      await this.updateOfficialOauthTokenPayload(job.platformAccount.id, {
+        ...tokenPayload,
+        accessToken: publish.token.accessToken,
+        refreshToken: publish.token.refreshToken,
+      });
+    }
+
+    return {
+      externalDraftId: publish.photoId,
+      draftUrl: publish.playUrl,
+      externalStatus: publish.pending ? 'pending' : 'published',
+    };
+  }
+
+  private readOfficialOauthTokenPayload(account: {
+    authType: PlatformAccountAuthType;
+    authPayloadEncrypted: string;
+  }) {
+    if (account.authType !== PlatformAccountAuthType.token) {
+      throw new ConflictException('平台账号授权类型不匹配');
+    }
+    const raw = this.decryptAuthPayload(account.authPayloadEncrypted);
+    let payload: unknown = {};
+    try {
+      payload = raw ? (JSON.parse(raw) as unknown) : {};
+    } catch {
+      throw new ConflictException('平台账号 Token 数据格式异常');
+    }
+    if (!payload || typeof payload !== 'object') {
+      throw new ConflictException('平台账号 Token 数据格式异常');
+    }
+
+    const accessToken =
+      typeof (payload as { accessToken?: unknown }).accessToken === 'string'
+        ? ((payload as { accessToken: string }).accessToken || '').trim()
+        : '';
+    const refreshToken =
+      typeof (payload as { refreshToken?: unknown }).refreshToken === 'string'
+        ? ((payload as { refreshToken: string }).refreshToken || '').trim()
+        : null;
+
+    if (!accessToken) {
+      throw new ConflictException('平台账号缺少 accessToken');
+    }
+
+    return { accessToken, refreshToken };
+  }
+
+  private async updateOfficialOauthTokenPayload(
+    platformAccountId: string,
+    token: { accessToken: string; refreshToken: string | null },
+  ) {
+    const current = await this.prisma.leadPlatformAccount.findUnique({
+      where: { id: platformAccountId },
+      select: { authPayloadEncrypted: true },
+    });
+    const raw = current?.authPayloadEncrypted ? this.decryptAuthPayload(current.authPayloadEncrypted) : '';
+    let nextPayload: Record<string, unknown> = {};
+    try {
+      nextPayload = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    } catch {
+      nextPayload = {};
+    }
+    nextPayload.accessToken = token.accessToken;
+    nextPayload.refreshToken = token.refreshToken;
+    const authPayload = JSON.stringify(nextPayload);
+
+    await this.prisma.leadPlatformAccount.update({
+      where: { id: platformAccountId },
+      data: {
+        authPayloadEncrypted: this.encryptAuthPayload(authPayload),
+        authPayloadPreview: this.maskAuthPayload(token.accessToken),
+        lastValidatedAt: new Date(),
+        lastError: null,
+      },
+    });
+  }
+
+  private async resolveKuaishouCoverUrl(job: LeadPublishJobWithRelations) {
+    const draftCover = job.draftImages.find((item) => item?.trim());
+    if (draftCover) {
+      return draftCover.trim();
+    }
+
+    const content = await this.prisma.leadContent.findUnique({
+      where: { id: job.leadContentId },
+      select: {
+        coverImage: true,
+        images: true,
+      },
+    });
+    const candidates = [content?.coverImage, ...(content?.images ?? [])]
+      .map((item) => item?.trim())
+      .filter((item): item is string => Boolean(item));
+    return candidates[0] ?? '';
+  }
+
+  private async resolveBilibiliCoverUrl(job: LeadPublishJobWithRelations) {
+    const draftCover = job.draftImages.find((item) => item?.trim());
+    if (draftCover) {
+      return draftCover.trim();
+    }
+
+    const content = await this.prisma.leadContent.findUnique({
+      where: { id: job.leadContentId },
+      select: {
+        coverImage: true,
+        images: true,
+      },
+    });
+    const candidates = [content?.coverImage, ...(content?.images ?? [])]
+      .map((item) => item?.trim())
+      .filter((item): item is string => Boolean(item));
+    return candidates[0] ?? '';
+  }
+
+  private truncateText(input: string, maxLen: number) {
+    const trimmed = (input || '').trim();
+    if (trimmed.length <= maxLen) return trimmed;
+    return trimmed.slice(0, maxLen);
+  }
+
+  private async publishDouyinWithShareSchema(job: LeadPublishJobWithRelations) {
+    const userId = job.createdById;
+    const title = job.draftTitle?.trim() || job.draftBody?.trim() || '';
+    const topics = job.draftTags ?? [];
+
+    const resolvedVideoUrl = job.draftVideoUrl?.trim()
+      ? (await this.productImageStorageService.mirrorRemoteAsset(userId, job.draftVideoUrl.trim()))
+          .url
+      : null;
+
+    const resolvedImages = await Promise.all(
+      (job.draftImages ?? []).map(async (item) => {
+        const normalized = item?.trim();
+        if (!normalized) return null;
+        const stored = await this.productImageStorageService.mirrorRemoteAsset(userId, normalized);
+        return stored.url;
+      }),
+    ).then((items) => items.filter((item): item is string => Boolean(item)));
+
+    const draftUrl = await this.douyinShareSchemaService.generateShareSchema({
+      title,
+      topics,
+      videoUrl: resolvedVideoUrl,
+      imageUrls: resolvedImages,
+    });
+
+    return {
+      draftUrl,
+      externalStatus: '请用手机打开链接继续发布',
+    };
+  }
+
   private triggerPublishJobs(jobIds: string[]) {
     for (const jobId of jobIds) {
       if (!jobId || this.backgroundRunningJobIds.has(jobId)) {
@@ -1464,15 +1802,7 @@ export class PublishingService {
   }
 
   private async markPlatformAccountAuthExpiredIfNeeded(accountId: string, message: string) {
-    const normalized = message.toLowerCase();
-    const looksExpired =
-      this.isPlatformAuthExpiredMessage(message) ||
-      normalized.includes('鐧诲綍') ||
-      normalized.includes('cookie') ||
-      normalized.includes('login') ||
-      normalized.includes('auth');
-
-    if (!looksExpired) {
+    if (!this.isPlatformAuthExpiredMessage(message)) {
       return;
     }
 
@@ -1488,7 +1818,28 @@ export class PublishingService {
 
   private isPlatformAuthExpiredMessage(message: string) {
     const normalized = message.toLowerCase();
-    const hints = ['登录已失效', '仍在登录页', '请完成登录', 'cookie', '账号后台'];
+    const hints = [
+      '登录已失效',
+      '仍在登录页',
+      '请完成登录',
+      '未读取到登录 cookie',
+      'cookie 已失效',
+      'cookie失效',
+      '登录状态失效',
+      '登录状态已失效',
+      'session expired',
+      'login expired',
+      'not logged in',
+      'please login',
+      '账号后台',
+      'auth expired',
+      'invalid cookie',
+      'unauthorized',
+      'access denied',
+      'forbidden',
+      'expired',
+      '重新登录',
+    ];
     return hints.some((hint) => normalized.includes(hint.toLowerCase()));
   }
 
@@ -1577,11 +1928,26 @@ export class PublishingService {
   private buildPublishDraftPayload(
     content: LeadContentWithRelations,
     platform: LeadPublishPlatform,
+    overrides?: {
+      draftTitle?: string;
+      draftBody?: string;
+      draftTags?: string[];
+    },
   ) {
-    const tags = content.tags.length > 0 ? this.normalizeTags(content.tags) : this.extractTags(content.body);
+    const sourceBody = overrides?.draftBody?.trim() || content.body;
+    const tags =
+      overrides?.draftTags !== undefined
+        ? this.normalizeTags(overrides.draftTags)
+        : overrides?.draftBody !== undefined
+          ? this.extractTags(sourceBody).length > 0
+            ? this.extractTags(sourceBody)
+            : this.normalizeTags(content.tags)
+          : content.tags.length > 0
+            ? this.normalizeTags(content.tags)
+            : this.extractTags(content.body);
     return {
-      title: content.title.trim(),
-      body: this.normalizeDraftBody(content.body, tags, platform),
+      title: overrides?.draftTitle?.trim() || content.title.trim(),
+      body: this.normalizeDraftBody(sourceBody, tags, platform),
       tags: this.normalizeDraftTagsForPlatform(tags, platform),
       images: content.images,
       videoUrl: content.videoUrl,
@@ -2278,6 +2644,8 @@ export class PublishingService {
         : item.provider === 'official_oauth'
           ? '官方授权'
           : '本地扩展';
+    const avatarUrl = this.extractExternalAvatarUrl(item.externalMeta);
+    const followerCount = this.extractExternalFollowerCount(item.externalMeta);
     return {
       id: item.id,
       creatorId: item.creatorId,
@@ -2287,6 +2655,8 @@ export class PublishingService {
       authType: item.authType,
       accountName: item.accountName,
       displayName: item.displayName,
+      avatarUrl,
+      followerCount,
       authPayloadPreview: item.authPayloadPreview,
       loginStatus: item.loginStatus,
       loginUrl: item.loginUrl,
@@ -2304,63 +2674,78 @@ export class PublishingService {
     };
   }
 
-  private buildAitoearnMcpLoginUrl(platform: LeadPublishPlatform) {
-    const explicitUrl = this.configService.get<string>('AITOEARN_CONNECT_CHANNEL_URL')?.trim();
-    if (explicitUrl) {
-      return this.appendAitoearnLoginQuery(explicitUrl, platform);
-    }
+  private extractExternalAvatarUrl(value: unknown) {
+    return (
+      this.readFirstStringFromPaths(value, [
+        ['avatarUrl'],
+        ['avatar_url'],
+        ['avatar'],
+        ['headimgurl'],
+        ['headImgUrl'],
+        ['head_url'],
+        ['profile', 'avatarUrl'],
+        ['profile', 'avatar_url'],
+        ['profile', 'avatar'],
+        ['profile', 'face'],
+        ['profile', 'headimgurl'],
+        ['data', 'avatarUrl'],
+        ['data', 'avatar'],
+        ['user', 'avatarUrl'],
+        ['user', 'avatar'],
+      ]) || null
+    );
+  }
 
-    const webBaseUrl = this.configService.get<string>('AITOEARN_WEB_BASE_URL')?.trim();
-    if (webBaseUrl) {
-      return this.appendAitoearnLoginQuery(this.normalizeAitoearnAccountsUrl(webBaseUrl), platform);
-    }
+  private extractExternalFollowerCount(value: unknown) {
+    return this.readFirstNumberFromPaths(value, [
+      ['followerCount'],
+      ['followers'],
+      ['fans'],
+      ['fansCount'],
+      ['fans_count'],
+      ['follower_count'],
+      ['profile', 'followerCount'],
+      ['profile', 'followers'],
+      ['profile', 'fans'],
+      ['profile', 'fansCount'],
+    ]);
+  }
 
-    const mcpBaseUrl = this.configService.get<string>('AITOEARN_MCP_BASE_URL')?.trim();
-    if (mcpBaseUrl) {
-      try {
-        const next = new URL(mcpBaseUrl);
-        next.pathname = '/zh-CN/accounts';
-        next.search = '';
-        next.hash = '';
-        return this.appendAitoearnLoginQuery(next.toString(), platform);
-      } catch {
-        // Fall through to the explicit configuration error below.
+  private readFirstStringFromPaths(value: unknown, paths: string[][]) {
+    if (!value) return '';
+    for (const path of paths) {
+      const found = this.readUnknownPath(value, path);
+      if (typeof found === 'string' && found.trim()) {
+        return found.trim();
       }
     }
-
-    return this.appendAitoearnLoginQuery('https://aitoearn.cn/zh-CN/accounts?role=creator', platform);
+    return '';
   }
 
-  private appendAitoearnLoginQuery(urlLike: string, platform: LeadPublishPlatform) {
-    const url = new URL(urlLike);
-    if (!url.pathname || url.pathname === '/' || url.pathname === '/zh-CN') {
-      url.pathname = '/zh-CN/accounts';
+  private readFirstNumberFromPaths(value: unknown, paths: string[][]) {
+    if (!value) return null;
+    for (const path of paths) {
+      const found = this.readUnknownPath(value, path);
+      if (typeof found === 'number' && Number.isFinite(found)) {
+        return found;
+      }
+      if (typeof found === 'string' && found.trim()) {
+        const parsed = Number(found);
+        if (!Number.isNaN(parsed)) {
+          return parsed;
+        }
+      }
     }
-    if (!url.searchParams.has('role')) {
-      url.searchParams.set('role', 'creator');
-    }
-    url.searchParams.set('from', 'ai-superweb');
-    return url.toString();
+    return null;
   }
 
-  private normalizeAitoearnAccountsUrl(urlLike: string) {
-    const url = new URL(urlLike);
-    if (!url.pathname || url.pathname === '/' || url.pathname === '/zh-CN') {
-      url.pathname = '/zh-CN/accounts';
+  private readUnknownPath(value: unknown, path: string[]) {
+    let current: unknown = value;
+    for (const key of path) {
+      if (!current || typeof current !== 'object') return null;
+      current = (current as Record<string, unknown>)[key];
     }
-    return url.toString();
-  }
-
-  private buildAitoearnMcpLoginHint(platform: LeadPublishPlatform) {
-    if (platform === LeadPublishPlatform.xiaohongshu) {
-      return 'AiToEarn 官方当前该平台走插件授权。进入频道管理后需按它的小红书插件链路登录，再回到本页同步云账号。';
-    }
-
-    if (platform === LeadPublishPlatform.wechat_mp) {
-      return 'AiToEarn 官方当前该平台走插件授权。进入频道管理后需按它的视频号插件链路登录，再回到本页同步云账号。';
-    }
-
-    return 'AiToEarn 官方当前会先进入频道管理，再由站内接口拉起对应平台授权。完成连接后回到本页继续同步云账号。';
+    return current ?? null;
   }
 
   private encryptAuthPayload(value: string) {

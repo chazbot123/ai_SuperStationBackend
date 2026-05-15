@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, KeyRound, ShieldCheck, Smartphone } from "lucide-react";
+import { KeyRound, ShieldCheck, Smartphone } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Modal from "@/components/ui/Modal";
-import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import bilibiliIconUrl from "@/assets/哔哩哔哩.svg";
 import facebookIconUrl from "@/assets/Facebook.svg";
 import instagramIconUrl from "@/assets/githair-instagram.svg";
+import linkedinIconUrl from "@/assets/linkedin.svg";
+import threadsIconUrl from "@/assets/threads-fill.svg";
 import tiktokIconUrl from "@/assets/TIKTOK.svg";
+import douyinIconUrl from "@/assets/抖音.svg";
 import wechatOfficialIconUrl from "@/assets/公众号.svg";
 import xTwitterIconUrl from "@/assets/XTwitter.svg?url";
 import youtubeIconUrl from "@/assets/youtube.svg";
@@ -51,25 +53,7 @@ function XiaohongshuIcon({ className = "" }: { className?: string }) {
 }
 
 function DouyinIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
-      <rect width="64" height="64" rx="18" fill="#1F0E21" />
-      <path
-        d="M36 11c2 8 6 12 14 13v9c-5 0-9-1-13-4v12c0 8-6 14-15 14S8 49 8 41s6-14 14-14c2 0 4 0 6 1v10c-2-1-3-2-5-2-3 0-6 3-6 6s3 6 6 6 6-3 6-6V11h7Z"
-        fill="#30F2F2"
-        transform="translate(-2 1)"
-      />
-      <path
-        d="M36 11c2 8 6 12 14 13v9c-5 0-9-1-13-4v12c0 8-6 14-15 14S8 49 8 41s6-14 14-14c2 0 4 0 6 1v10c-2-1-3-2-5-2-3 0-6 3-6 6s3 6 6 6 6-3 6-6V11h7Z"
-        fill="#FE2C55"
-        transform="translate(2 0)"
-      />
-      <path
-        d="M36 11c2 8 6 12 14 13v9c-5 0-9-1-13-4v12c0 8-6 14-15 14S8 49 8 41s6-14 14-14c2 0 4 0 6 1v10c-2-1-3-2-5-2-3 0-6 3-6 6s3 6 6 6 6-3 6-6V11h7Z"
-        fill="#FFFFFF"
-      />
-    </svg>
-  );
+  return <AssetIcon src={douyinIconUrl} className={className} />;
 }
 
 function WechatVideoIcon({ className = "" }: { className?: string }) {
@@ -137,6 +121,27 @@ function CircleLetterIcon({
   );
 }
 
+function AccountAvatar({ avatarUrl, name }: { avatarUrl: string | null; name: string }) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt=""
+        className="h-11 w-11 rounded-full object-cover ring-1 ring-white/10"
+        loading="lazy"
+        aria-hidden="true"
+      />
+    );
+  }
+
+  const letter = (name || "?").trim().slice(0, 1).toUpperCase();
+  return (
+    <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/5 text-sm font-semibold text-zinc-200 ring-1 ring-white/10">
+      {letter}
+    </div>
+  );
+}
+
 const platformOptions: Array<{
   value: LeadPlatformStyle;
   label: string;
@@ -192,6 +197,7 @@ type ConnectChannelPlatform = {
   badge?: string;
   hint: string;
   actionLabel: string;
+  localLoginPlatform?: Extract<LeadPlatformStyle, "xiaohongshu" | "wechat_mp">;
   oauthPlatform?: Extract<LeadPlatformStyle, "douyin" | "kuaishou" | "bilibili" | "wechat_official">;
 };
 
@@ -201,10 +207,11 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
     label: "小红书",
     icon: <XiaohongshuIcon className={connectChannelIconClassName} />,
     iconWrapClassName: "rounded-[10px]",
-    enabled: false,
+    enabled: true,
     badge: "浏览器插件",
-    hint: "暂未开放官方授权，当前仍建议走本地扩展登录。",
-    actionLabel: "暂未开放",
+    hint: "点击后会拉起本地扩展，在用户本地浏览器完成 Cookie 登录并自动保存账号。",
+    actionLabel: "立即登录",
+    localLoginPlatform: "xiaohongshu",
   },
   {
     key: "kuaishou",
@@ -241,10 +248,11 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
     label: "微信视频号",
     icon: <WechatVideoIcon className={connectChannelIconClassName} />,
     iconWrapClassName: "rounded-[10px]",
-    enabled: false,
+    enabled: true,
     badge: "浏览器插件",
-    hint: "暂未确认可用官方第三方 OAuth，先做灰色占位。",
-    actionLabel: "暂未开放",
+    hint: "点击后会拉起本地扩展，在用户本地浏览器完成 Cookie 登录并自动保存账号。",
+    actionLabel: "立即登录",
+    localLoginPlatform: "wechat_mp",
   },
   {
     key: "wechat_official",
@@ -304,7 +312,7 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
   {
     key: "threads",
     label: "Threads",
-    icon: <CircleLetterIcon text="@" className="h-11 w-11 bg-zinc-500" />,
+    icon: <AssetIcon src={threadsIconUrl} className={connectChannelIconClassName} />,
     iconWrapClassName: "rounded-[10px]",
     enabled: false,
     hint: "当前项目暂未开放该平台接入，先做占位。",
@@ -322,7 +330,7 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
   {
     key: "linkedin",
     label: "LinkedIn",
-    icon: <CircleLetterIcon text="in" className="h-11 w-11 bg-zinc-500" />,
+    icon: <AssetIcon src={linkedinIconUrl} className={connectChannelIconClassName} />,
     iconWrapClassName: "rounded-[10px]",
     enabled: false,
     hint: "当前项目暂未开放该平台接入，先做占位。",
@@ -412,13 +420,14 @@ export default function PublishingPlatformLogin() {
   const [startingPlatform, setStartingPlatform] = useState<LeadPlatformStyle | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
   const [extensionReady, setExtensionReady] = useState<boolean | null>(null);
-  const [mcpConnectOpen, setMcpConnectOpen] = useState(false);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PlatformAccountItem | null>(null);
   const [accountName, setAccountName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [remark, setRemark] = useState("");
+  const [activePlatform, setActivePlatform] = useState<LeadPlatformStyle | "all">("all");
+  const [highlightedAccountId, setHighlightedAccountId] = useState<string | null>(null);
 
   const loadAccounts = useCallback(
     async (showLoading = false) => {
@@ -451,8 +460,15 @@ export default function PublishingPlatformLogin() {
     if (!oauthStatus) return;
 
     const oauthPlatform = searchParams.get("oauth_platform");
+    const oauthAccountId = searchParams.get("oauth_account_id");
     const oauthError = searchParams.get("oauth_error");
     if (oauthStatus === "success") {
+      if (oauthPlatform) {
+        setActivePlatform(oauthPlatform as LeadPlatformStyle);
+      }
+      if (oauthAccountId) {
+        setHighlightedAccountId(oauthAccountId);
+      }
       setHint(`${oauthPlatform ? `${platformLabel(oauthPlatform as LeadPlatformStyle)} ` : ""}官方授权已完成，账号已自动保存。`);
       void loadAccounts();
     } else {
@@ -467,6 +483,22 @@ export default function PublishingPlatformLogin() {
     const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
     window.history.replaceState(null, "", nextUrl);
   }, [loadAccounts]);
+
+  useEffect(() => {
+    if (!highlightedAccountId) return;
+    const target = document.querySelector<HTMLElement>(`[data-account-id="${highlightedAccountId}"]`);
+    if (!target) return;
+
+    window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    const timer = window.setTimeout(() => {
+      setHighlightedAccountId((current) => (current === highlightedAccountId ? null : current));
+    }, 4000);
+
+    return () => window.clearTimeout(timer);
+  }, [highlightedAccountId, items]);
 
   useEffect(() => {
     let cancelled = false;
@@ -513,19 +545,26 @@ export default function PublishingPlatformLogin() {
     return { total: items.length, validCount, pendingCount };
   }, [items]);
 
-  const groupedPlatforms = useMemo(
-    () =>
-      platformOptions.map((option) => {
-        const accounts = items.filter((item) => item.platform === option.value);
-        return {
-          ...option,
-          accounts,
-          totalCount: accounts.length,
-          validCount: accounts.filter((item) => item.status === "valid").length,
-        };
-      }),
-    [items],
-  );
+  const platformSidebar = useMemo(() => {
+    const counts = new Map<LeadPlatformStyle, number>();
+    for (const item of items) {
+      counts.set(item.platform, (counts.get(item.platform) ?? 0) + 1);
+    }
+    return platformOptions.map((option) => ({
+      ...option,
+      count: counts.get(option.value) ?? 0,
+    }));
+  }, [items]);
+
+  const visibleAccounts = useMemo(() => {
+    if (activePlatform === "all") return items;
+    return items.filter((item) => item.platform === activePlatform);
+  }, [activePlatform, items]);
+
+  const activePlatformLabel = useMemo(() => {
+    if (activePlatform === "all") return "全部平台";
+    return platformLabel(activePlatform);
+  }, [activePlatform]);
 
   function resetEditForm() {
     setRemark("");
@@ -605,13 +644,45 @@ export default function PublishingPlatformLogin() {
   }
 
   async function handleConnectChannel(platform: ConnectChannelPlatform) {
-    if (!platform.enabled || !platform.oauthPlatform) {
+    if (!platform.enabled) {
       setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
       return;
     }
 
     if (!accessToken) {
       setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    if (platform.localLoginPlatform) {
+      if (extensionReady === false) {
+        setHint("未检测到平台登录扩展，请先安装并启用扩展。");
+        return;
+      }
+
+      try {
+        setConnectingPlatform(platform.key);
+        const session = await startExtensionPlatformLogin({
+          accessToken,
+          platform: platform.localLoginPlatform,
+        });
+        await startPlatformLoginExtensionSession({
+          session,
+          platform: platform.localLoginPlatform,
+          apiBaseUrl: window.location.origin,
+        });
+        openLocalLoginPage(platform.localLoginPlatform, session.loginUrl);
+        setHint(`已打开${platform.label}登录页，完成本地 Cookie 登录后系统会自动保存账号。`);
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : `${platform.label} 本地登录发起失败`);
+      } finally {
+        setConnectingPlatform(null);
+      }
+      return;
+    }
+
+    if (!platform.oauthPlatform) {
+      setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
       return;
     }
 
@@ -766,7 +837,6 @@ export default function PublishingPlatformLogin() {
           <CardTitle>平台登录</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-zinc-300">
-          <div>这里统一管理发布任务使用的平台账号，当前支持本地扩展预登录，并预留官方授权接入入口。</div>
           <div className="flex flex-wrap gap-2 text-xs text-zinc-400">
             <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
               <KeyRound className="h-3.5 w-3.5" />
@@ -781,9 +851,6 @@ export default function PublishingPlatformLogin() {
               分平台逐步开放
             </span>
           </div>
-          <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-3 text-xs text-zinc-300">
-            本地扩展登录会在你的浏览器打开平台官方页并自动回传 Cookie。“连接新频道”当前先展示平台占位，已开放的平台会逐步切到官方 OAuth。
-          </div>
           <div className="text-xs text-zinc-500">
             扩展状态：
             {extensionReady === true ? " 已连接" : extensionReady === false ? " 未检测到扩展" : " 检测中..."}
@@ -793,10 +860,52 @@ export default function PublishingPlatformLogin() {
             <span>有效账号：{summary.validCount}</span>
             <span>登录中：{summary.pendingCount}</span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setMcpConnectOpen(true)}>
-              连接新频道
-            </Button>
+          <div className="space-y-3 rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+            <div className="text-sm font-semibold text-zinc-100">连接新频道</div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
+              {connectChannelPlatforms.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => void handleConnectChannel(item)}
+                  disabled={connectingPlatform !== null && connectingPlatform !== item.key}
+                  className={`relative flex min-h-28 flex-col items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-center transition-colors disabled:cursor-not-allowed ${
+                    item.enabled
+                      ? "border-white/10 bg-white/5 hover:border-orange-400/40 hover:bg-orange-500/10"
+                      : "border-white/8 bg-zinc-900/40 opacity-65"
+                  }`}
+                >
+                  {item.badge ? (
+                    <span
+                      className={`absolute right-2 top-2 inline-flex items-center rounded-full px-2 py-0.5 text-center text-[10px] ring-1 ${
+                        item.enabled
+                          ? "bg-orange-500/15 text-orange-200 ring-orange-400/20"
+                          : "bg-white/10 text-zinc-200 ring-white/15"
+                      }`}
+                    >
+                      插件运行
+                    </span>
+                  ) : null}
+                  <span
+                    className={`inline-flex h-11 w-11 items-center justify-center overflow-hidden ${item.iconWrapClassName}`}
+                    aria-hidden="true"
+                  >
+                    {item.icon}
+                  </span>
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium text-zinc-100">{item.label}</div>
+                    <div className={`text-xs ${item.enabled ? "text-zinc-400" : "text-zinc-500"}`}>
+                      {connectingPlatform === item.key ? "处理中..." : item.actionLabel}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/10 px-4 py-3 text-xs text-zinc-400">
+              {connectingPlatform
+                ? connectChannelPlatforms.find((item) => item.key === connectingPlatform)?.hint
+                : "当前小红书、微信视频号走本地扩展 Cookie 登录；抖音、快手、哔哩哔哩、微信公众号走官方 OAuth。"}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -809,234 +918,163 @@ export default function PublishingPlatformLogin() {
           {hint ? <div className="text-xs text-zinc-400">{hint}</div> : null}
           {loading ? <div className="py-10 text-center text-zinc-400">加载中...</div> : null}
 
-          {!loading
-            ? groupedPlatforms.map((platformGroup) => {
-                const meta = platformMeta(platformGroup.value);
+          {!loading ? (
+            <div className="flex flex-col gap-3 lg:flex-row">
+              <div className="rounded-xl border border-white/10 bg-black/10 p-2 lg:w-64">
+                <button
+                  type="button"
+                  onClick={() => setActivePlatform("all")}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+                    activePlatform === "all"
+                      ? "bg-white/5 text-zinc-100"
+                      : "text-zinc-300 hover:bg-white/5 hover:text-zinc-100"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] bg-white/5 ring-1 ring-white/10">
+                      全
+                    </span>
+                    全部
+                  </span>
+                  <Badge variant="gray">{items.length}</Badge>
+                </button>
 
-                return (
-                  <div key={platformGroup.value} className="rounded-xl border border-white/10 bg-black/10">
-                    <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`inline-flex h-8 w-8 items-center justify-center overflow-hidden ${meta.iconWrapClassName}`}
-                            aria-hidden="true"
-                          >
-                            {meta.icon}
-                          </span>
-                          <div className="text-sm font-semibold text-zinc-100">{platformGroup.label}</div>
-                          <Badge variant={platformGroup.validCount > 0 ? "green" : "gray"}>
-                            {platformGroup.validCount > 0
-                              ? `${platformGroup.validCount} 个有效账号`
-                              : "未配置账号"}
-                          </Badge>
-                        </div>
-                        <div className="text-xs text-zinc-400">
-                          已配置 {platformGroup.totalCount} 个账号，用于 {platformGroup.label} 发布任务登录。
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => void handleStartLogin(platformGroup.value)}
-                          disabled={startingPlatform === platformGroup.value}
+                <div className="mt-2 space-y-1">
+                  {platformSidebar.map((platformItem) => (
+                    <button
+                      key={platformItem.value}
+                      type="button"
+                      onClick={() => setActivePlatform(platformItem.value)}
+                      className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+                        activePlatform === platformItem.value
+                          ? "bg-white/5 text-zinc-100"
+                          : "text-zinc-300 hover:bg-white/5 hover:text-zinc-100"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span
+                          className={`inline-flex h-8 w-8 items-center justify-center overflow-hidden ${platformItem.iconWrapClassName}`}
+                          aria-hidden="true"
                         >
-                          {startingPlatform === platformGroup.value ? "发起中..." : `发起${platformGroup.label}登录`}
-                        </Button>
-                      </div>
-                    </div>
+                          {platformItem.icon}
+                        </span>
+                        {platformItem.label}
+                      </span>
+                      <Badge variant={platformItem.count > 0 ? "gray" : "blue"}>{platformItem.count}</Badge>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-                    {platformGroup.accounts.length === 0 ? (
-                      <div className="px-4 py-6 text-sm text-zinc-500">
-                        暂无账号，点击右侧按钮发起 {platformGroup.label} 浏览器登录。
-                      </div>
-                    ) : (
-                      <TableWrap className="rounded-none border-0 bg-transparent">
-                        <Table>
-                          <thead>
-                            <tr>
-                              <Th>类型</Th>
-                              <Th>登录流程</Th>
-                              <Th>账号状态</Th>
-                              <Th>账号</Th>
-                              <Th>登录信息</Th>
-                              <Th>最近登录</Th>
-                              <Th>最近校验</Th>
-                              <Th>备注</Th>
-                              <Th className="text-right">操作</Th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {platformGroup.accounts.map((item) => {
-                              const currentStatus = statusMeta(item.status);
-                              const currentLogin = loginStatusMeta(item.loginStatus);
-                              const actionBusy =
-                                validatingId === item.id || deletingId === item.id || restartingId === item.id;
+              <div className="flex-1 rounded-xl border border-white/10 bg-black/10">
+                <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                  <div className="text-sm font-semibold text-zinc-100">{activePlatformLabel}</div>
+                  <div className="text-xs text-zinc-500">{visibleAccounts.length} 个账号</div>
+                </div>
 
-                              return (
-                                <Tr key={item.id}>
-                                  <Td className="text-zinc-300">
-                                    <div>{item.loginSourceLabel}</div>
-                                    <div className="text-xs text-zinc-500">
-                                      {item.authType === "cookie" ? "Cookie" : "Token"}
-                                    </div>
-                                  </Td>
-                                  <Td>
-                                    <Badge variant={currentLogin.variant}>{currentLogin.label}</Badge>
-                                  </Td>
-                                  <Td>
-                                    <Badge variant={currentStatus.variant}>{currentStatus.label}</Badge>
-                                  </Td>
-                                  <Td className="text-zinc-300">
-                                    <div>{item.displayName || item.accountName}</div>
-                                    <div className="text-xs text-zinc-500">
-                                      {item.displayName ? `账号 ID：${item.accountName}` : item.accountName}
-                                    </div>
-                                  </Td>
-                                  <Td className="max-w-[220px] break-all font-mono text-xs text-zinc-400">
-                                    {item.authPayloadPreview}
-                                  </Td>
-                                  <Td className="text-zinc-400">
-                                    {item.lastLoginCompletedAt
-                                      ? formatTime(item.lastLoginCompletedAt)
-                                      : item.lastLoginStartedAt
-                                        ? formatTime(item.lastLoginStartedAt)
-                                        : "-"}
-                                  </Td>
-                                  <Td className="text-zinc-400">{formatTime(item.lastValidatedAt)}</Td>
-                                  <Td className="text-zinc-400">{item.remark || "-"}</Td>
-                                  <Td className="text-right">
-                                    <div className="flex flex-wrap justify-end gap-2">
-                                      <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        onClick={() => void handleOpenLoginUrl(item)}
-                                        disabled={restartingId === item.id}
-                                      >
-                                        {restartingId === item.id ? "打开中..." : "重新登录"}
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        onClick={() => void handleValidate(item)}
-                                        disabled={validatingId === item.id || actionBusy}
-                                      >
-                                        {validatingId === item.id ? "校验中..." : "校验"}
-                                      </Button>
+                {visibleAccounts.length === 0 ? (
+                  <div className="px-4 py-8 text-sm text-zinc-500">暂无平台账号。</div>
+                ) : (
+                  <div className="divide-y divide-white/10">
+                    {visibleAccounts.map((item) => {
+                      const meta = platformMeta(item.platform);
+                      const online = item.status === "valid" && item.loginStatus === "authenticated";
+                      const actionBusy =
+                        validatingId === item.id || deletingId === item.id || restartingId === item.id;
+                      const title = item.displayName || item.accountName;
+                      const externalId = item.externalAccountId || item.accountName;
 
-                                      <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        onClick={() => openEditModal(item)}
-                                        disabled={actionBusy}
-                                      >
-                                        编辑
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="danger"
-                                        onClick={() => void handleDelete(item)}
-                                        disabled={deletingId === item.id || actionBusy}
-                                      >
-                                        {deletingId === item.id ? "删除中..." : "删除"}
-                                      </Button>
-                                    </div>
+                      return (
+                        <div
+                          key={item.id}
+                          data-account-id={item.id}
+                          className={`flex flex-col gap-3 px-4 py-4 transition-colors lg:flex-row lg:items-center ${
+                            highlightedAccountId === item.id ? "bg-emerald-500/10" : ""
+                          }`}
+                        >
+                          <div className="flex flex-1 items-center gap-3">
+                            <AccountAvatar avatarUrl={item.avatarUrl} name={title} />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold text-zinc-100">{title}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                  ID {externalId}
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <span
+                                    className={`inline-flex h-5 w-5 items-center justify-center overflow-hidden ${meta.iconWrapClassName}`}
+                                    aria-hidden="true"
+                                  >
+                                    {meta.icon}
+                                  </span>
+                                  {meta.label}
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <span
+                                    className={`h-2 w-2 rounded-full ${online ? "bg-emerald-400" : "bg-zinc-500"}`}
+                                  />
+                                  {online ? "在线" : "离线"}
+                                </span>
+                                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                  {item.loginSourceLabel}
+                                </span>
+                                <span>粉丝：{item.followerCount ?? 0}</span>
+                              </div>
+                            </div>
+                          </div>
 
-                                    {item.loginUrl ? (
-                                      <div className="mt-2 text-xs text-zinc-500">
-                                        <a
-                                          href={item.loginUrl}
-                                          onClick={(event) => {
-                                            event.preventDefault();
-                                            void handleOpenLoginUrl(item);
-                                          }}
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 text-amber-300 hover:text-amber-200"
-                                        >
-                                          <ExternalLink className="h-3.5 w-3.5" />
-                                          打开登录页
-                                        </a>
-                                      </div>
-                                    ) : null}
-                                  </Td>
-                                </Tr>
-                              );
-                            })}
-                          </tbody>
-                        </Table>
-                      </TableWrap>
-                    )}
+                          <div className="flex flex-wrap gap-2 lg:justify-end">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => void handleStartLogin(item.platform)}
+                              disabled={startingPlatform === item.platform}
+                            >
+                              {startingPlatform === item.platform ? "发起中..." : "新增登录"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => void handleOpenLoginUrl(item)}
+                              disabled={restartingId === item.id || actionBusy}
+                            >
+                              {restartingId === item.id ? "打开中..." : "登录"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => void handleValidate(item)}
+                              disabled={validatingId === item.id || actionBusy}
+                            >
+                              {validatingId === item.id ? "校验中..." : "校验"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => openEditModal(item)}
+                              disabled={actionBusy}
+                            >
+                              编辑
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => void handleDelete(item)}
+                              disabled={deletingId === item.id || actionBusy}
+                            >
+                              {deletingId === item.id ? "删除中..." : "删除"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })
-            : null}
+                )}
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
-
-      <Modal
-        open={mcpConnectOpen}
-        title="连接新频道"
-        onClose={() => setMcpConnectOpen(false)}
-        panelClassName="max-w-5xl"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setMcpConnectOpen(false)}>
-              关闭
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-zinc-300">
-            先按截图把平台都展示出来。已开放的平台高亮可点，未开放的平台灰色占位。
-          </div>
-          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-            {connectChannelPlatforms.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => void handleConnectChannel(item)}
-                disabled={connectingPlatform !== null && connectingPlatform !== item.key}
-                className={`relative flex min-h-36 flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-4 text-center transition-colors disabled:cursor-not-allowed ${
-                  item.enabled
-                    ? "border-white/10 bg-white/5 hover:border-orange-400/40 hover:bg-orange-500/10"
-                    : "border-white/8 bg-zinc-900/40 opacity-65"
-                }`}
-              >
-                {item.badge ? (
-                  <span
-                    className={`absolute right-3 top-3 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ring-1 ${
-                      item.enabled
-                        ? "bg-orange-500/15 text-orange-200 ring-orange-400/20"
-                        : "bg-white/10 text-zinc-200 ring-white/15"
-                    }`}
-                  >
-                    {item.badge}
-                  </span>
-                ) : null}
-                <span
-                  className={`inline-flex h-14 w-14 items-center justify-center overflow-hidden ${item.iconWrapClassName}`}
-                  aria-hidden="true"
-                >
-                  {item.icon}
-                </span>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-zinc-100">{item.label}</div>
-                  <div className={`text-xs ${item.enabled ? "text-zinc-400" : "text-zinc-500"}`}>
-                    {connectingPlatform === item.key ? "处理中..." : item.actionLabel}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-          <div className="rounded-xl border border-white/10 bg-black/10 px-4 py-3 text-xs text-zinc-400">
-            {connectingPlatform
-              ? connectChannelPlatforms.find((item) => item.key === connectingPlatform)?.hint
-              : "当前优先接入抖音、快手官方 OAuth；其余平台先按占位展示。"}
-          </div>
-        </div>
-      </Modal>
 
       <Modal
         open={editorOpen}

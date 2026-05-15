@@ -6,23 +6,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
-import { syncPublishingContent } from "@/lib/publishing";
-import type { LeadPlatformStyle } from "@/lib/publishing";
 import { usePageMeta } from "@/hooks/usePageMeta";
+import { toVideoDraftItem } from "@/lib/videoDraftMapper";
 import {
   getAvatarVideoTaskStatus,
   getVideoTaskStatus,
   listVideoDrafts,
   markVideoDraftSynced,
+  removeVideoDraft,
   retryAvatarVideoTask,
   submitVideoDraft,
-  withdrawVideoDraftReview,
   updateVideoDraft,
   type AvatarVideoTaskStatusResponse,
 } from "@/lib/ai";
 import { estimateAvatarEta, estimateProductEta, formatClock, formatMmSs } from "@/lib/videoEta";
+import { useAppStore } from "@/store/appStore";
 import { useAuthStore } from "@/store/authStore";
-import { toVideoDraftItem, useVideoDraftStore, type VideoDraftItem } from "@/store/videoDraftStore";
+import { useVideoDraftStore, type VideoDraftItem } from "@/store/videoDraftStore";
 
 type SourceFilter = "all" | "product_video" | "avatar_video";
 
@@ -43,13 +43,6 @@ function platformLabel(value?: VideoDraftItem["platformStyle"]) {
   if (value === "douyin") return "抖音";
   if (!value) return "";
   return value;
-}
-
-function toLeadPlatformStyle(value?: VideoDraftItem["platformStyle"]): LeadPlatformStyle {
-  if (value === "xiaohongshu" || value === "douyin" || value === "wechat_mp" || value === "kuaishou") {
-    return value;
-  }
-  return "douyin";
 }
 
 function sourceMeta(source: VideoDraftItem["source"]) {
@@ -117,9 +110,12 @@ export default function VideoDrafts() {
 
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
+  const addContent = useAppStore((s) => s.addContent);
+  const markContentSynced = useAppStore((s) => s.markContentSynced);
   const items = useVideoDraftStore((s) => s.items);
-  const setItems = useVideoDraftStore((s) => s.setItems);
+  const replaceItems = useVideoDraftStore((s) => s.replaceItems);
   const updateItem = useVideoDraftStore((s) => s.updateItem);
+  const removeItem = useVideoDraftStore((s) => s.removeItem);
   const isAgent = user?.roleKey === "level1_agent";
 
   const [keyword, setKeyword] = useState("");
@@ -136,44 +132,48 @@ export default function VideoDrafts() {
 
   useEffect(() => {
     if (!accessToken) return;
-    let stopped = false;
+    let cancelled = false;
 
-    async function loadDrafts() {
+    async function hydrateDrafts() {
       try {
-        const result = await listVideoDrafts(accessToken);
-        if (stopped) return;
-        setItems(result.map(toVideoDraftItem));
-      } catch (error) {
-        if (stopped) return;
-        setHint(error instanceof Error ? error.message : "视频草稿加载失败");
+        const records = await listVideoDrafts(accessToken);
+        if (cancelled) return;
+        replaceItems(records.map(toVideoDraftItem));
+      } catch {
+        // Keep the local snapshot when the refresh fails.
       }
     }
 
-    void loadDrafts();
+    void hydrateDrafts();
     return () => {
-      stopped = true;
+      cancelled = true;
     };
-  }, [accessToken, setItems]);
+  }, [accessToken, replaceItems]);
 
-  async function persistDraftUpdate(
-    id: string,
-    patch: Omit<Parameters<typeof updateVideoDraft>[0], "accessToken" | "id">
-  ) {
+  async function persistItemPatch(id: string, patch: Partial<VideoDraftItem>) {
+    updateItem(id, patch);
     if (!accessToken) {
-      throw new Error("登录已失效，请重新登录。");
+      return;
     }
-
-    const updated = await updateVideoDraft({
+    const saved = await updateVideoDraft({
       accessToken,
       id,
-      ...patch,
+      title: patch.title,
+      platformStyle: patch.platformStyle,
+      publishTitle: patch.publishTitle,
+      publishTags: patch.publishTags,
+      durationText: patch.durationText,
+      generatedScript: patch.generatedScript,
+      videoUrl: patch.videoUrl,
+      taskId: patch.taskId,
+      provider: patch.provider,
+      model: patch.model,
+      errorMessage: patch.errorMessage,
+      status: patch.status,
+      syncedToLeads: patch.syncedToLeads,
+      completedAt: patch.completedAt,
     });
-    const nextItem = toVideoDraftItem(updated);
-    updateItem(id, nextItem);
-    if (previewItem?.id === id) {
-      setPreviewItem(nextItem);
-    }
-    return nextItem;
+    updateItem(id, toVideoDraftItem(saved));
   }
 
   useEffect(() => {
@@ -249,7 +249,7 @@ export default function VideoDrafts() {
               const result = await getAvatarVideoTaskStatus(accessToken, taskId);
               if (result.status === "completed" && result.finalVideoUrl) {
                 progressPatch[item.id] = null;
-                await persistDraftUpdate(item.id, {
+                await persistItemPatch(item.id, {
                   status: "ready",
                   videoUrl: result.finalVideoUrl,
                   completedAt: new Date().toISOString(),
@@ -258,7 +258,7 @@ export default function VideoDrafts() {
               }
               if (result.status === "failed") {
                 progressPatch[item.id] = null;
-                await persistDraftUpdate(item.id, {
+                await persistItemPatch(item.id, {
                   status: "failed",
                   errorMessage: result.errorMessage || "视频生成失败",
                   completedAt: new Date().toISOString(),
@@ -281,7 +281,7 @@ export default function VideoDrafts() {
             const result = await getVideoTaskStatus(accessToken, taskId);
             if (result.status === "success" && result.videoUrl) {
               progressPatch[item.id] = null;
-              await persistDraftUpdate(item.id, {
+              await persistItemPatch(item.id, {
                 status: "ready",
                 videoUrl: result.videoUrl,
                 completedAt: new Date().toISOString(),
@@ -290,7 +290,7 @@ export default function VideoDrafts() {
             }
             if (result.status === "failed") {
               progressPatch[item.id] = null;
-              await persistDraftUpdate(item.id, {
+              await persistItemPatch(item.id, {
                 status: "failed",
                 errorMessage: result.errorMessage || "视频生成失败",
                 completedAt: new Date().toISOString(),
@@ -301,11 +301,11 @@ export default function VideoDrafts() {
             progressPatch[item.id] = { kind: "indeterminate", label: `生成中... · ${buildEtaSuffix(eta)}` };
           } catch (error) {
             progressPatch[item.id] = null;
-            await persistDraftUpdate(item.id, {
+            await persistItemPatch(item.id, {
               status: "failed",
               errorMessage: error instanceof Error ? error.message : "视频任务查询失败",
               completedAt: new Date().toISOString(),
-            }).catch(() => undefined);
+            });
           }
         })
       );
@@ -324,7 +324,7 @@ export default function VideoDrafts() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [accessToken, items]);
+  }, [accessToken, items, updateItem]);
 
   const filteredItems = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
@@ -346,10 +346,9 @@ export default function VideoDrafts() {
 
   async function handleSubmitReview(item: VideoDraftItem) {
     if (!accessToken) {
-      setHint("登录已失效，请重新登录。");
+      setHint("请先登录");
       return;
     }
-
     try {
       const updated = await submitVideoDraft(accessToken, item.id);
       updateItem(item.id, toVideoDraftItem(updated));
@@ -359,51 +358,55 @@ export default function VideoDrafts() {
     }
   }
 
-  async function handleWithdrawReview(item: VideoDraftItem) {
-    if (!accessToken) {
-      setHint("登录已失效，请重新登录。");
-      return;
-    }
-
-    try {
-      const updated = await withdrawVideoDraftReview(accessToken, item.id);
-      const nextItem = toVideoDraftItem(updated);
-      updateItem(item.id, nextItem);
-      setPreviewItem((current) => (current?.id === item.id ? nextItem : current));
-      setHint("已撤销审核，草稿已退回。");
-    } catch (error) {
-      setHint(error instanceof Error ? error.message : "撤销审核失败");
-    }
-  }
-
   async function handleSyncToLeads(item: VideoDraftItem) {
     if (item.reviewStage !== "approved") {
       setHint("只有审核通过后才能同步到获客。");
       return;
     }
-
     if (!accessToken) {
-      setHint("登录已失效，请重新登录。");
+      setHint("请先登录");
       return;
     }
 
     try {
-      await syncPublishingContent({
-        accessToken,
-        sourceType: "video",
-        sourceId: item.id,
+      const updated = await markVideoDraftSynced(accessToken, item.id);
+      const content = addContent({
+        type: "video",
         title: item.publishTitle || item.title,
         body: item.generatedScript,
-        tags: item.publishTags,
-        contentType: "video",
-        platformStyle: toLeadPlatformStyle(item.platformStyle),
+        platformStyle: item.platformStyle || "douyin",
+        images: [],
         videoUrl: item.videoUrl,
+        syncedToLeads: true,
+        reviewStatus: "approved",
       });
-      const updated = await markVideoDraftSynced(accessToken, item.id);
+      markContentSynced(content.id);
       updateItem(item.id, toVideoDraftItem(updated));
       setHint("已同步到获客内容池。");
     } catch (error) {
-      setHint(error instanceof Error ? error.message : "同步获客失败");
+      setHint(error instanceof Error ? error.message : "同步到获客失败");
+    }
+  }
+
+  async function handleRemoveDraft(item: VideoDraftItem) {
+    if (!accessToken) {
+      setHint("请先登录");
+      return;
+    }
+    const confirmed = window.confirm("确定要删除这条视频草稿吗？删除后无法恢复。");
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await removeVideoDraft(accessToken, item.id);
+      removeItem(item.id);
+      if (previewItem?.id === item.id) {
+        setPreviewItem(null);
+      }
+      setHint("已删除草稿。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "删除失败");
     }
   }
 
@@ -491,20 +494,15 @@ export default function VideoDrafts() {
                           编辑
                         </Button>
                         {isAgent && item.reviewStage === "draft" ? (
-                          <Button type="button" variant="secondary" size="sm" onClick={() => void handleSubmitReview(item)}>
+                          <Button type="button" variant="secondary" size="sm" onClick={() => handleSubmitReview(item)}>
                             提交审核
-                          </Button>
-                        ) : null}
-                        {isAgent && item.reviewStage === "submitted" ? (
-                          <Button type="button" variant="secondary" size="sm" onClick={() => void handleWithdrawReview(item)}>
-                            撤销审核
                           </Button>
                         ) : null}
                         {item.reviewStage === "approved" ? (
                           <Button
                             type="button"
                             size="sm"
-                            onClick={() => void handleSyncToLeads(item)}
+                            onClick={() => handleSyncToLeads(item)}
                             disabled={item.syncedToLeads}
                             className={item.syncedToLeads ? "hidden" : undefined}
                           >
@@ -538,41 +536,48 @@ export default function VideoDrafts() {
         footer={
           previewItem ? (
             <div className="flex w-full items-center justify-end gap-2">
-              {isAgent && previewItem.reviewStage === "submitted" ? (
-                <Button type="button" variant="secondary" onClick={() => void handleWithdrawReview(previewItem)}>
-                  撤销审核
-                </Button>
-              ) : null}
-              {isAgent && previewItem.reviewStage === "draft" ? (
-                <Button type="button" variant="secondary" onClick={() => void handleSubmitReview(previewItem)}>
-                  提交审核
-                </Button>
-              ) : null}
               <Button
                 type="button"
                 variant="secondary"
-                onClick={async () => {
-                  if (!accessToken) {
-                    setHint("登录已失效，请重新登录。");
-                    return;
+                onClick={() => {
+                  if (previewItem) {
+                    void handleRemoveDraft(previewItem);
                   }
+                }}
+              >
+                删除
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
                   const title = editTitle.trim();
                   const tags = [editTag1.trim(), editTag2.trim()].filter(Boolean);
-                  try {
-                    const updated = await updateVideoDraft({
-                      accessToken,
-                      id: previewItem.id,
-                      publishTitle: title || undefined,
-                      publishTags: tags,
-                      generatedScript: editScript,
-                    });
-                    const nextItem = toVideoDraftItem(updated);
-                    updateItem(previewItem.id, nextItem);
-                    setPreviewItem(nextItem);
-                    setHint("已保存编辑内容。");
-                  } catch (error) {
-                    setHint(error instanceof Error ? error.message : "保存失败");
+                  const patch: Partial<VideoDraftItem> = {
+                    publishTitle: title ? title : undefined,
+                    publishTags: tags.length > 0 ? tags : undefined,
+                    generatedScript: editScript,
+                  };
+                  if (!accessToken) {
+                    setHint("请先登录");
+                    return;
                   }
+                  void updateVideoDraft({
+                    accessToken,
+                    id: previewItem.id,
+                    publishTitle: patch.publishTitle,
+                    publishTags: patch.publishTags,
+                    generatedScript: patch.generatedScript,
+                  })
+                    .then((saved) => {
+                      const mapped = toVideoDraftItem(saved);
+                      updateItem(previewItem.id, mapped);
+                      setPreviewItem(mapped);
+                      setHint("已保存编辑内容。");
+                    })
+                    .catch((error) => {
+                      setHint(error instanceof Error ? error.message : "保存失败");
+                    });
                 }}
               >
                 保存
@@ -583,11 +588,6 @@ export default function VideoDrafts() {
       >
         {previewItem ? (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              {previewItem.reviewStage === "submitted" ? <Badge variant="amber">当前状态：待审核</Badge> : null}
-              {previewItem.reviewStage === "approved" ? <Badge variant="green">当前状态：审核通过</Badge> : null}
-              {previewItem.reviewStage === "draft" ? <Badge variant="gray">当前状态：草稿</Badge> : null}
-            </div>
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -694,10 +694,8 @@ export default function VideoDrafts() {
                               setHint("没有失败片段可重试。");
                               return;
                             }
-                            await persistDraftUpdate(previewItem.id, {
-                              status: "processing",
-                              errorMessage: "",
-                            });
+                            await persistItemPatch(previewItem.id, { status: "processing", errorMessage: undefined });
+                            setPreviewItem({ ...previewItem, status: "processing", errorMessage: undefined });
                             setHint("已触发失败分片重试，任务继续推进中。");
                           } catch (error) {
                             setHint(error instanceof Error ? error.message : "重试失败");

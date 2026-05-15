@@ -10,7 +10,10 @@ import { PublishingExtensionController } from './publishing-extension.controller
 import { PublishingOauthController } from './publishing-oauth.controller';
 import { PublishingStoreSearchService } from './publishing-store-search.service';
 import { PlatformLoginBrowserService } from './platform-login-browser.service';
-import { AitoearnUnifiedMcpService } from './aitoearn-unified-mcp.service';
+import { DouyinShareSchemaService } from './douyin-share-schema.service';
+import { KuaishouOpenApiService } from './kuaishou-open-api.service';
+import { WechatOfficialPublishService } from './wechat-official-publish.service';
+import { BilibiliOpenApiService } from './bilibili-open-api.service';
 import { PublishingService } from './publishing.service';
 
 @Module({
@@ -23,7 +26,7 @@ import { PublishingService } from './publishing.service';
         secret: configService.get<string>('JWT_SECRET') ?? 'change_me_jwt_secret',
         signOptions: {
           expiresIn:
-            (configService.get<string>('JWT_EXPIRES_IN') ?? '7d') as SignOptions['expiresIn'],
+            (configService.get<string>('JWT_EXPIRES_IN') ?? '30d') as SignOptions['expiresIn'],
         },
       }),
     }),
@@ -34,7 +37,10 @@ import { PublishingService } from './publishing.service';
   providers: [
     PublishingService,
     PlatformLoginBrowserService,
-    AitoearnUnifiedMcpService,
+    DouyinShareSchemaService,
+    KuaishouOpenApiService,
+    WechatOfficialPublishService,
+    BilibiliOpenApiService,
     PublishingCleanupService,
     PublishingStoreSearchService,
   ],

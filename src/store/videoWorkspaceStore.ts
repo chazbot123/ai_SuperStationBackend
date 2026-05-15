@@ -11,6 +11,12 @@ export type WorkspaceUploadAsset = {
 
 export type VideoWorkspaceDraft = {
   question: string;
+  avatarCopyText?: string;
+  productTtsText?: string;
+  productCopyPrompt?: string;
+  productCopyText?: string;
+  publishTitle?: string;
+  publishTags?: string[];
   platformStyle: PlatformKey;
   avatarTargetSeconds: number;
   backgroundLock: boolean;

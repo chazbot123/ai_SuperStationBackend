@@ -42,11 +42,11 @@ export default function Sidebar() {
   const user = useAuthStore((s) => s.user);
   const draftUnreadCount = useStudioDraftInboxStore((s) => s.unreadKeys.length);
   const videoDraftCount = useVideoDraftStore((s) => s.items.length);
-  const matrix = useRbacStore((s) => s.permissionMatrix);
+  const matrix = useRbacStore((s) => s.permissionMatrix ?? {});
   const initialized = useRbacStore((s) => s.initialized);
   const loading = useRbacStore((s) => s.loading);
   const error = useRbacStore((s) => s.error);
-  const roles = useRbacStore((s) => s.roles);
+  const roles = useRbacStore((s) => s.roles ?? []);
   const roleKey = user?.roleKey ?? "level1_agent";
   const roleName = roles.find((role) => role.key === roleKey)?.name ?? roleKey;
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({

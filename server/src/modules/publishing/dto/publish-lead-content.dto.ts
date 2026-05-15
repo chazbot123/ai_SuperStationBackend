@@ -6,10 +6,18 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 
-const PUBLISH_PLATFORMS = ['xiaohongshu', 'douyin', 'wechat_mp', 'kuaishou'] as const;
+const PUBLISH_PLATFORMS = [
+  'xiaohongshu',
+  'douyin',
+  'wechat_mp',
+  'kuaishou',
+  'wechat_official',
+  'bilibili',
+] as const;
 const PUBLISH_EXECUTION_MODES = ['server', 'extension'] as const;
 
 export class PublishLeadContentTargetDto {
@@ -19,12 +27,28 @@ export class PublishLeadContentTargetDto {
 
   @IsString()
   platformAccountId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  draftTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10000)
+  draftBody?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  draftTags?: string[];
 }
 
 export class PublishLeadContentDto {
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(4)
+  @ArrayMaxSize(6)
   @ValidateNested({ each: true })
   @Type(() => PublishLeadContentTargetDto)
   targets!: PublishLeadContentTargetDto[];

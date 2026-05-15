@@ -42,10 +42,10 @@ function resolveErrorMessage(data: unknown, fallbackText?: string, status?: numb
   if (
     rawLower.includes("econnrefused") ||
     rawLower.includes("proxy error") ||
-    rawLower.includes("localhost:3001") ||
-    rawLower.includes("127.0.0.1:3001")
+    rawLower.includes("localhost:3000") ||
+    rawLower.includes("127.0.0.1:3000")
   ) {
-    return "网络错误：无法连接到后端接口（/api）。请确认后端服务已启动且可访问（默认 http://localhost:3001）。";
+    return "网络错误：无法连接到后端接口（/api）。请确认后端服务已启动且可访问（默认 http://localhost:3000）。";
   }
   if (raw) {
     return raw.length > 300 ? raw.slice(0, 300) + "…" : raw;
@@ -67,7 +67,7 @@ export async function requestJson<T>(input: RequestInfo | URL, init?: RequestIni
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message === "Failed to fetch") {
-      throw new Error("网络错误：无法连接到后端接口（/api）。请确认后端服务已启动且可访问（默认 http://localhost:3001）。");
+      throw new Error("网络错误：无法连接到后端接口（/api）。请确认后端服务已启动且可访问（默认 http://localhost:3000）。");
     }
     throw new Error(message || "网络错误：请求失败");
   }
