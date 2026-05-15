@@ -66,6 +66,21 @@ type WorkspaceProps = {
 
 const DEMO_VIDEO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
 
+const PRODUCT_VIDEO_TEMPLATES = [
+  {
+    key: "fashion_outfit_swap",
+    title: "服装行业-一键换装",
+    promptText: "服装行业-一键换装",
+    copyPromptText: "服装行业-一键换装",
+    copyResultText: "服装行业-一键换装",
+    videoUrl: DEMO_VIDEO_URL,
+    loadingMs: 10_000,
+    description: "选择后直接套用预设结果，10 秒后返回模板视频。",
+  },
+] as const;
+
+const ENABLE_PRODUCT_VIDEO_TEMPLATE = false;
+
 function makeId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -295,8 +310,10 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   useEffect(() => {
     const defaults: VideoWorkspaceDraft = {
       question: "",
+      productTemplateKey: "",
       avatarCopyText: "",
       productTtsText: "",
+      productSubtitleEnabled: false,
       productCopyPrompt: "",
       productCopyText: "",
       publishTitle: "",
@@ -330,8 +347,10 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   ]);
 
   const question = draft?.question ?? "";
+  const productTemplateKey = draft?.productTemplateKey ?? "";
   const avatarCopyText = draft?.avatarCopyText ?? "";
   const productTtsText = draft?.productTtsText ?? "";
+  const productSubtitleEnabled = draft?.productSubtitleEnabled ?? false;
   const productCopyPrompt = draft?.productCopyPrompt ?? "";
   const productCopyText = draft?.productCopyText ?? "";
   const workspacePublishTitle = draft?.publishTitle ?? "";
@@ -375,6 +394,11 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
   const [ttsVoiceMode, setTtsVoiceMode] = useState<"preset" | "custom">("preset");
   const [metaEditorTitle, setMetaEditorTitle] = useState("");
   const [metaEditorTags, setMetaEditorTags] = useState("");
+
+  const selectedProductTemplate = useMemo(() => {
+    if (!ENABLE_PRODUCT_VIDEO_TEMPLATE || !isProductMode) return null;
+    return PRODUCT_VIDEO_TEMPLATES.find((item) => item.key === productTemplateKey) ?? null;
+  }, [isProductMode, productTemplateKey]);
 
   const parseTagText = (raw: string) => {
     const normalized = String(raw ?? "")
@@ -1010,12 +1034,12 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
     const effectiveDurationSec = durationSec <= 16 ? durationSec : 16;
     const rawQuestion = question.trim();
-    if (isProductMode && !rawQuestion) {
+    if (isProductMode && !selectedProductTemplate && !rawQuestion) {
       setAssetHint("请先填写产品信息或口播文案（建议先点「润色」生成成稿），再生成视频。");
       return;
     }
 
-    const prompt = rawQuestion || props.defaultPrompt;
+    const prompt = selectedProductTemplate?.promptText || rawQuestion || props.defaultPrompt;
     const platformText = platformLabel(platformStyle);
     const avatarFullScript = avatarCopyText.trim();
     const productSpeechText = isProductMode ? extractSpeechContentFromProductPrompt(prompt) : "";
@@ -1062,7 +1086,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       setAssetHint(isProductMode ? "已提交生成任务，生成结果将显示在右侧。" : "已提交生成任务，结果将在视频草稿箱自动更新。");
 
       const metaBaseText = isAvatarMode ? avatarFullScript : productGeneratedScript;
-      if (metaBaseText) {
+      if (metaBaseText && !selectedProductTemplate) {
         try {
           const meta = await generateMeta(metaBaseText);
           if (meta) {
@@ -1123,6 +1147,21 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         return;
       }
 
+      if (isProductMode && selectedProductTemplate) {
+        setAssetHint(`已套用模板“${selectedProductTemplate.title}”，正在生成预设视频...`);
+        await new Promise((resolve) => window.setTimeout(resolve, selectedProductTemplate.loadingMs));
+        await persistDraftPatch(next.id, {
+          status: "ready",
+          videoUrl: selectedProductTemplate.videoUrl,
+          provider: "Template",
+          model: selectedProductTemplate.title,
+          errorMessage: undefined,
+          completedAt: new Date().toISOString(),
+        });
+        setAssetHint(`模板“${selectedProductTemplate.title}”已生成完成。`);
+        return;
+      }
+
       const promptForVideo = isProductMode
         ? prompt.includes("平台风格：") || prompt.includes("时长要求：")
           ? prompt
@@ -1131,6 +1170,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       const result = await generateAiVideo({
         prompt: promptForVideo,
         ttsText: isProductMode ? (productSubtitleText || undefined) : productSpeechText || undefined,
+        subtitleEnabled: isProductMode ? productSubtitleEnabled : undefined,
         referenceImages: assets
           .filter((item) => item.kind === "image" && item.previewUrl)
           .map((item) => item.previewUrl as string)
@@ -1535,6 +1575,55 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                     </div>
                   </div>
 
+                  {ENABLE_PRODUCT_VIDEO_TEMPLATE ? (
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-zinc-300">视频模板</div>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextSelected = productTemplateKey === "" ? PRODUCT_VIDEO_TEMPLATES[0] : null;
+                          setDraftField(props.draftSource, "productTemplateKey", nextSelected?.key ?? "");
+                          if (nextSelected) {
+                            setDraftField(props.draftSource, "question", nextSelected.promptText);
+                            setDraftField(props.draftSource, "productCopyPrompt", nextSelected.copyPromptText);
+                            setDraftField(props.draftSource, "productCopyText", nextSelected.copyResultText);
+                            setDraftField(props.draftSource, "publishTitle", nextSelected.title);
+                            setAssetHint(`已选中模板：${nextSelected.title}`);
+                          } else {
+                            setAssetHint("已切换为自定义模式，将按原逻辑生成视频。");
+                          }
+                        }}
+                        className={cn(
+                          "w-full rounded-2xl border p-3 text-left transition-colors",
+                          productTemplateKey === PRODUCT_VIDEO_TEMPLATES[0].key
+                            ? "border-amber-400/40 bg-amber-500/10"
+                            : "border-white/10 bg-white/5 hover:bg-white/10"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium text-zinc-100">{PRODUCT_VIDEO_TEMPLATES[0].title}</div>
+                            <div className="mt-1 text-xs text-zinc-400">{PRODUCT_VIDEO_TEMPLATES[0].description}</div>
+                          </div>
+                          <Badge variant={productTemplateKey === PRODUCT_VIDEO_TEMPLATES[0].key ? "amber" : "gray"}>
+                            {productTemplateKey === PRODUCT_VIDEO_TEMPLATES[0].key ? "已选中" : "点击使用"}
+                          </Badge>
+                        </div>
+                      </button>
+                      {productTemplateKey ? (
+                        <div className="text-[11px] leading-5 text-zinc-500">
+                          当前已启用模板模式：点击“开始生成”后会直接返回预设视频；取消模板后恢复原始 AI 生成链路。
+                        </div>
+                      ) : (
+                        <div className="text-[11px] leading-5 text-zinc-500">
+                          未使用模板时，仍按现有模型与提示词正常生成。
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  ) : null}
+
                   <div>
                     <div className="mb-1 flex items-center justify-between text-xs font-medium text-zinc-300">
                       <span>视频生成提示词</span>
@@ -1547,7 +1636,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                           variant="secondary"
                           size="sm"
                           onClick={handlePolishPrompt}
-                          disabled={isPolishing || !question.trim()}
+                          disabled={isPolishing || !question.trim() || !!selectedProductTemplate}
                         >
                           {isPolishing ? "润色中..." : "润色"}
                         </Button>
@@ -1559,6 +1648,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                             setPromptEditorHint(null);
                             setPromptEditorOpen(true);
                           }}
+                          disabled={!!selectedProductTemplate}
                         >
                           全屏编辑
                         </Button>
@@ -1570,7 +1660,13 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                       value={question}
                       maxLength={5000}
                       onChange={(e) => setDraftField(props.draftSource, "question", e.target.value)}
+                      disabled={!!selectedProductTemplate}
                     />
+                    {selectedProductTemplate ? (
+                      <div className="mt-2 text-xs text-zinc-500">
+                        模板模式下，提示词已锁定为“{selectedProductTemplate.promptText}”。取消模板后可继续手动编辑。
+                      </div>
+                    ) : null}
                     {productDurationGuide ? (
                       <div className="mt-2 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100/90">
                         当前时长 {productDurationGuide.seconds}s：{productDurationGuide.summary}
@@ -1757,9 +1853,24 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                         </div>
                       </div>
                     )}
-                    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-300">
-                      当前成片默认自动烧录中文字幕，适用于产品视频生成与真人口播视频生成。
-                    </div>
+                    {isProductMode ? (
+                      <label className="flex items-center gap-2 text-sm text-zinc-200">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-amber-400"
+                          checked={productSubtitleEnabled}
+                          onChange={(e) => setDraftField(props.draftSource, "productSubtitleEnabled", e.target.checked)}
+                        />
+                        <span>添加视频字幕</span>
+                        <span className="text-xs text-zinc-500">
+                          {productSubtitleEnabled ? "（将自动烧录中文字幕）" : "（不烧录字幕）"}
+                        </span>
+                      </label>
+                    ) : (
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-300">
+                        当前成片默认自动烧录中文字幕，适用于真人口播视频生成。
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex justify-end">

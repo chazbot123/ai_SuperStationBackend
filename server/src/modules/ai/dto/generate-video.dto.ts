@@ -64,6 +64,10 @@ export class GenerateVideoDto {
   ttsText?: string;
 
   @IsOptional()
+  @IsBoolean()
+  subtitleEnabled?: boolean;
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(6)
   @IsString({ each: true })

@@ -31,6 +31,7 @@ type GenerateImagesRequest = {
 type GenerateVideoRequest = {
   prompt?: string;
   ttsText?: string;
+  subtitleEnabled?: boolean;
   referenceImages?: string[];
   voiceId?: string;
   bgmUrl?: string;
@@ -370,6 +371,7 @@ export async function generateAiVideo(input: GenerateVideoRequest) {
     body: JSON.stringify({
       prompt: input.prompt,
       ttsText: input.ttsText,
+      subtitleEnabled: input.subtitleEnabled,
       referenceImages: input.referenceImages,
       voiceId: input.voiceId,
       bgmUrl: input.bgmUrl,
