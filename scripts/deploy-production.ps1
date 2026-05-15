@@ -1,5 +1,5 @@
 param(
-  [string]$Host = "8.166.114.238",
+  [string]$RemoteHost = "8.166.114.238",
   [string]$User = "root",
   [string]$AppRoot = "/data/ai-superweb",
   [string]$Pm2Process = "ai-superweb-server",
@@ -170,20 +170,20 @@ BASE='$AppRoot'
 PM2_PROCESS='$Pm2Process'
 SERVER_TAR='$remoteServerTar'
 WEB_TAR='$remoteWebTar'
-TS=\$(date +%F_%H%M%S)
+TS=`$(date +%F_%H%M%S)
 
-[ -f "\$SERVER_TAR" ] || { echo "missing \$SERVER_TAR" >&2; exit 1; }
-[ -f "\$WEB_TAR" ] || { echo "missing \$WEB_TAR" >&2; exit 1; }
+[ -f "`$SERVER_TAR" ] || { echo "missing `$SERVER_TAR" >&2; exit 1; }
+[ -f "`$WEB_TAR" ] || { echo "missing `$WEB_TAR" >&2; exit 1; }
 
-[ -d "\$BASE/server/dist" ] && mv "\$BASE/server/dist" "\$BASE/server/dist-backup-\$TS" || true
-mkdir -p "\$BASE/server"
-tar -xf "\$SERVER_TAR" -C "\$BASE/server"
+[ -d "`$BASE/server/dist" ] && mv "`$BASE/server/dist" "`$BASE/server/dist-backup-`$TS" || true
+mkdir -p "`$BASE/server"
+tar -xf "`$SERVER_TAR" -C "`$BASE/server"
 
-[ -d "\$BASE/dist" ] && mv "\$BASE/dist" "\$BASE/dist-backup-\$TS" || true
-mkdir -p "\$BASE"
-tar -xf "\$WEB_TAR" -C "\$BASE"
+[ -d "`$BASE/dist" ] && mv "`$BASE/dist" "`$BASE/dist-backup-`$TS" || true
+mkdir -p "`$BASE"
+tar -xf "`$WEB_TAR" -C "`$BASE"
 
-pm2 restart "\$PM2_PROCESS"
+pm2 restart "`$PM2_PROCESS"
 pm2 save || true
 "@
 
@@ -204,20 +204,20 @@ echo
     $serverTarPath,
     $webTarPath,
     $remoteScriptPath,
-    "$User@$Host:/tmp/"
+    "${User}@${RemoteHost}:/tmp/"
   )
 
   Write-Section "Apply On Server"
   Invoke-External -FilePath $sshExe -Arguments @(
     "-o", "StrictHostKeyChecking=accept-new",
-    "$User@$Host",
+    "${User}@${RemoteHost}",
     "bash $remoteScriptTarget"
   )
 
   Write-Section "Cleanup Remote Temp Files"
   Invoke-External -FilePath $sshExe -Arguments @(
     "-o", "StrictHostKeyChecking=accept-new",
-    "$User@$Host",
+    "${User}@${RemoteHost}",
     "rm -f $remoteServerTar $remoteWebTar $remoteScriptTarget"
   )
 
