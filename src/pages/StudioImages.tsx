@@ -35,6 +35,21 @@ import { useStudioDraftTaskStore } from "@/store/studioDraftTaskStore";
 type SizePreset = "1_1" | "3_4" | "4_5" | "9_16" | "16_9";
 type ResolutionPreset = "1k" | "2k" | "4k";
 
+function formatTags(tags: string[]) {
+  return tags.join(" ");
+}
+
+function parseTags(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 20);
+}
+
 type AssetItem = {
   id: string;
   name: string;
@@ -178,17 +193,22 @@ export default function StudioImages() {
   const [currentResult, setCurrentResult] = useState<ProductImageDraftItem | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editBody, setEditBody] = useState("");
+  const [editTags, setEditTags] = useState("");
   const [editImages, setEditImages] = useState<string[]>([]);
   const [isLoadingCurrent, setIsLoadingCurrent] = useState(false);
   const [isSavingCurrent, setIsSavingCurrent] = useState(false);
   const [isUploadingCurrentImages, setIsUploadingCurrentImages] = useState(false);
+  const [hasTriedGenerate, setHasTriedGenerate] = useState(false);
 
   const imageAssets = useMemo(() => assets.filter((asset) => asset.previewUrl), [assets]);
+  const isProductNameMissing = productName.trim().length === 0;
+  const showProductNameError = hasTriedGenerate && isProductNameMissing;
 
   function hydrateCurrentResult(item: ProductImageDraftItem | null) {
     setCurrentResult(item);
     setEditTitle(item?.title ?? "");
     setEditBody(item?.body ?? "");
+    setEditTags(formatTags(item?.tags ?? []));
     setEditImages(item?.images ?? []);
   }
 
@@ -309,8 +329,13 @@ export default function StudioImages() {
 
   async function generateImages() {
     if (isGenerating) return;
+    setHasTriedGenerate(true);
     if (!accessToken || !textModelConfig || !imageModelConfig) {
       setHint("模型配置或登录状态异常，暂时无法生成");
+      return;
+    }
+    if (isProductNameMissing) {
+      setHint("请先填写产品名称");
       return;
     }
 
@@ -383,8 +408,10 @@ export default function StudioImages() {
 
       const next = await createProductImageDraft({
         accessToken,
-        title: `${titleSeed.slice(0, 18)} · 商品图草稿`,
-        body: copyResult.text,
+        prompt: userPrompt.trim(),
+        title: copyResult.title.trim() || `${titleSeed.slice(0, 18)} · 商品图草稿`,
+        body: copyResult.body.trim() || copyResult.text,
+        tags: copyResult.tags,
         images: imageResult.urls,
         sizePreset,
         resolution,
@@ -443,6 +470,7 @@ export default function StudioImages() {
     if (!currentResult || !accessToken) return;
     const title = editTitle.trim();
     const body = editBody.trim();
+    const tags = parseTags(editTags);
     if (!title) {
       setHint("标题不能为空");
       return;
@@ -458,6 +486,7 @@ export default function StudioImages() {
         id: currentResult.id,
         title,
         body,
+        tags,
         images: editImages,
       });
       hydrateCurrentResult(next);
@@ -587,8 +616,23 @@ export default function StudioImages() {
               <SectionBlock title="参数">
                 <div className="space-y-3">
                   <div>
-                    <div className="mb-1 text-xs font-medium text-zinc-400">产品名称</div>
-                    <Input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder="如：轻奢香薰蜡烛礼盒" />
+                    <div className="mb-1 flex items-center gap-2 text-xs font-medium text-zinc-400">
+                      <span>产品名称</span>
+                      <span className="text-rose-400">*</span>
+                      <span className="text-rose-400">必填</span>
+                    </div>
+                    <Input
+                      value={productName}
+                      onChange={(event) => {
+                        setProductName(event.target.value);
+                        if (event.target.value.trim()) {
+                          setHasTriedGenerate(false);
+                        }
+                      }}
+                      placeholder="如：轻奢香薰蜡烛礼盒"
+                      aria-invalid={showProductNameError}
+                      className={showProductNameError ? "border-rose-400/70 focus:ring-rose-400/30" : undefined}
+                    />
                   </div>
                   <div>
                     <div className="mb-1 text-xs font-medium text-zinc-400">核心卖点</div>
@@ -679,6 +723,15 @@ export default function StudioImages() {
                         rows={12}
                         className="min-h-[300px] w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-500 focus:ring-2 focus:ring-cyan-300/20"
                         placeholder="输入详情文案"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-sm text-zinc-200">标签</div>
+                      <Input
+                        value={editTags}
+                        onChange={(event) => setEditTags(event.target.value)}
+                        placeholder="输入 #标签，多个标签用空格分隔"
                       />
                     </div>
 

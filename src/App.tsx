@@ -29,17 +29,42 @@ import { useEffect } from "react";
 import { useAppStore } from "@/store/appStore";
 import { useAuthStore } from "@/store/authStore";
 import { useModelConfigStore } from "@/store/modelConfigStore";
+import { listActiveModelConfigs } from "@/lib/ai";
 
 export default function App() {
   const seedIfEmpty = useAppStore((s) => s.seedIfEmpty);
   const user = useAuthStore((s) => s.user);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const bindModelConfigOwner = useModelConfigStore((s) => s.bindOwner);
+  const replaceModelConfig = useModelConfigStore((s) => s.replaceConfig);
   useEffect(() => {
     seedIfEmpty();
   }, [seedIfEmpty]);
   useEffect(() => {
     bindModelConfigOwner(user?.id);
   }, [bindModelConfigOwner, user?.id]);
+  useEffect(() => {
+    if (!accessToken || !user?.id) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const activeItems = await listActiveModelConfigs(accessToken);
+        if (cancelled) return;
+        for (const item of activeItems) {
+          replaceModelConfig(item.type, item);
+        }
+      } catch {
+        // Keep local defaults or cached config when backend active config is temporarily unavailable.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, replaceModelConfig, user?.id]);
   return (
     <Router>
       <Routes>

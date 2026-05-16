@@ -1,6 +1,11 @@
 import { ArrayMaxSize, IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateSocialPostDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  prompt?: string;
+
   @IsString()
   @MaxLength(120)
   title!: string;

@@ -55,6 +55,15 @@
     visited.add(root);
     results.push(root);
 
+    const hostElements =
+      "querySelectorAll" in root ? Array.from(root.querySelectorAll("*")) : [];
+    for (const element of hostElements) {
+      const shadowRoot = element && "shadowRoot" in element ? element.shadowRoot : null;
+      if (shadowRoot) {
+        collectSearchRoots(shadowRoot, results, visited);
+      }
+    }
+
     const frameElements = Array.from(root.querySelectorAll("iframe"));
     for (const frame of frameElements) {
       try {
@@ -204,7 +213,42 @@
     node.dispatchEvent(new Event("blur", { bubbles: true }));
   }
 
-  async function fillFirst(selectors, value, timeoutMs = 30000, root = document) {
+  function setNativeInputValue(node, value) {
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    const prototype =
+      node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    descriptor?.set?.call(node, value);
+  }
+
+  function clearFormControl(node) {
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    node.focus();
+    setNativeInputValue(node, "");
+    dispatchInputEvents(node);
+  }
+
+  async function typeFormControlHuman(node, text, minDelay = 95, maxDelay = 180) {
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    const normalized = String(text || "");
+    if (!normalized) {
+      return;
+    }
+    node.focus();
+    for (const char of normalized) {
+      setNativeInputValue(node, `${node.value || ""}${char}`);
+      dispatchInputEvents(node);
+      await sleep(randomBetween(minDelay, maxDelay));
+    }
+  }
+
+  async function fillFirst(selectors, value, timeoutMs = 30000, root = document, options = {}) {
     const normalized = String(value || "").trim();
     if (!normalized) {
       return null;
@@ -212,23 +256,35 @@
 
     const node = await waitForVisible(selectors, timeoutMs, root, true);
     if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
-      node.focus();
-      node.value = normalized;
-      dispatchInputEvents(node);
+      if (options.preferHumanType) {
+        clearFormControl(node);
+        await sleep(randomBetween(180, 320));
+        await typeFormControlHuman(node, normalized, options.perCharMin ?? 95, options.perCharMax ?? 180);
+      } else {
+        node.focus();
+        setNativeInputValue(node, normalized);
+        dispatchInputEvents(node);
+      }
       return node;
     }
 
     if (node instanceof HTMLElement) {
-      node.focus();
-      node.textContent = normalized;
-      dispatchInputEvents(node);
+      if (options.preferHumanType) {
+        clearEditable(node);
+        await sleep(randomBetween(180, 320));
+        await typeEditableTextHuman(node, normalized, options.perCharMin ?? 95, options.perCharMax ?? 165);
+      } else {
+        node.focus();
+        node.textContent = normalized;
+        dispatchInputEvents(node);
+      }
       return node;
     }
 
     return null;
   }
 
-  async function appendText(selectors, value, timeoutMs = 30000, root = document) {
+  async function appendText(selectors, value, timeoutMs = 30000, root = document, options = {}) {
     const normalized = String(value || "").trim();
     if (!normalized) {
       return null;
@@ -236,17 +292,30 @@
 
     const node = await waitForVisible(selectors, timeoutMs, root, true);
     if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
-      node.focus();
-      node.value = `${node.value || ""}${normalized}`;
-      dispatchInputEvents(node);
+      if (options.preferHumanType) {
+        node.focus();
+        await sleep(randomBetween(140, 260));
+        await typeFormControlHuman(node, normalized, options.perCharMin ?? 95, options.perCharMax ?? 180);
+      } else {
+        node.focus();
+        setNativeInputValue(node, `${node.value || ""}${normalized}`);
+        dispatchInputEvents(node);
+      }
       return node;
     }
 
     if (node instanceof HTMLElement) {
-      node.focus();
-      const nextValue = `${node.textContent || ""}${normalized}`;
-      node.textContent = nextValue;
-      dispatchInputEvents(node);
+      if (options.preferHumanType) {
+        node.focus();
+        placeCaretAtEnd(node);
+        await sleep(randomBetween(140, 260));
+        await typeEditableTextHuman(node, normalized, options.perCharMin ?? 95, options.perCharMax ?? 165);
+      } else {
+        node.focus();
+        const nextValue = `${node.textContent || ""}${normalized}`;
+        node.textContent = nextValue;
+        dispatchInputEvents(node);
+      }
       return node;
     }
 
@@ -584,8 +653,19 @@
         'text=创建笔记',
       ],
       5000,
+      document,
+      {
+        beforeMoveMin: 260,
+        beforeMoveMax: 520,
+        movePauseMin: 160,
+        movePauseMax: 320,
+        holdPauseMin: 140,
+        holdPauseMax: 260,
+        afterClickMin: 420,
+        afterClickMax: 760,
+      },
     ).catch(() => null);
-    await sleep(1200);
+    await sleep(1800);
 
     if (!isVideo) {
       await clickFirst(
@@ -598,8 +678,19 @@
           'text=图文',
         ],
         5000,
+        document,
+        {
+          beforeMoveMin: 240,
+          beforeMoveMax: 500,
+          movePauseMin: 150,
+          movePauseMax: 300,
+          holdPauseMin: 130,
+          holdPauseMax: 240,
+          afterClickMin: 360,
+          afterClickMax: 680,
+        },
       ).catch(() => null);
-      await sleep(600);
+      await sleep(900);
     }
   }
 
@@ -656,51 +747,116 @@
     await sleep(600);
   }
 
-  async function ensureWechatMpPublishReady(isVideo) {
-    await sleep(1200);
-    if (!isVideo) {
-      await clickFirst(
-        [
-          'button:has-text("发表图文")',
-          'div:has-text("发表图文")',
-          'text=发表图文',
-          'button:has-text("图片和文字")',
-          'div:has-text("图片和文字")',
-          'text=图片和文字',
-          'button:has-text("图文")',
-          'text=图文',
-        ],
-        6000,
-      ).catch(() => null);
-      await sleep(1200);
+  async function openWechatMpRecentEntry(recentEntryText, publishButtonText, readySelectors, publishTimeoutMs) {
+    const publishButtonSelectors = [
+      `button[type="button"].weui-desktop-btn.weui-desktop-btn_primary:has-text("${publishButtonText}")`,
+      `button.weui-desktop-btn.weui-desktop-btn_primary:has-text("${publishButtonText}")`,
+      `button:has-text("${publishButtonText}")`,
+      `div:has-text("${publishButtonText}")`,
+      `text=${publishButtonText}`,
+    ];
+    const readyPage = queryFirst(readySelectors, document, true);
+    if (readyPage) {
+      await sleep(900);
+      return;
+    }
 
-      await clickFirst(
-        [
-          'button:has-text("上传图片")',
-          '[role="button"]:has-text("上传图片")',
-          'div:has-text("上传图片")',
-          'text=上传图片',
-          'div:has-text("发布图片动态")',
-          'text=发布图片动态',
-        ],
-        5000,
-      ).catch(() => null);
-      await sleep(500);
+    const visiblePublishButton = queryFirst(publishButtonSelectors, document, true);
+    if (visiblePublishButton) {
+      await humanClickElement(visiblePublishButton, {
+        beforeMoveMin: 280,
+        beforeMoveMax: 560,
+        movePauseMin: 180,
+        movePauseMax: 360,
+        holdPauseMin: 150,
+        holdPauseMax: 280,
+        afterClickMin: 460,
+        afterClickMax: 820,
+      });
+      await sleep(1800);
       return;
     }
 
     await clickFirst(
       [
-        'button:has-text("上传视频")',
-        '[role="button"]:has-text("上传视频")',
-        'div:has-text("上传视频")',
-        'text=上传视频',
-        'button:has-text("重新上传")',
-        'text=重新上传',
+        `button:has-text("${recentEntryText}")`,
+        `a:has-text("${recentEntryText}")`,
+        `[role="button"]:has-text("${recentEntryText}")`,
+        `div:has-text("${recentEntryText}")`,
+        `span:has-text("${recentEntryText}")`,
+        `text=${recentEntryText}`,
       ],
-      6000,
-    ).catch(() => null);
-    await sleep(500);
+      9000,
+      document,
+      {
+        beforeMoveMin: 280,
+        beforeMoveMax: 560,
+        movePauseMin: 180,
+        movePauseMax: 360,
+        holdPauseMin: 150,
+        holdPauseMax: 280,
+        afterClickMin: 460,
+        afterClickMax: 820,
+      },
+    );
+    await sleep(1600);
+
+    const readyAfterRecentClick = queryFirst(readySelectors, document, true);
+    if (readyAfterRecentClick) {
+      await sleep(900);
+      return;
+    }
+
+    await clickFirst(
+      publishButtonSelectors,
+      publishTimeoutMs,
+      document,
+      {
+        beforeMoveMin: 280,
+        beforeMoveMax: 560,
+        movePauseMin: 180,
+        movePauseMax: 360,
+        holdPauseMin: 150,
+        holdPauseMax: 280,
+        afterClickMin: 460,
+        afterClickMax: 820,
+      },
+    );
+    await sleep(1800);
+  }
+
+  async function ensureWechatMpPublishReady(isVideo) {
+    await sleep(1600);
+    if (!isVideo) {
+      await openWechatMpRecentEntry(
+        "最近图文",
+        "发表图文",
+        [
+          'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题，22个字符内"]',
+          'textarea[placeholder="填写标题，22个字符内"]',
+          'input[placeholder*="填写标题"]',
+          'input[placeholder*="标题"]',
+          'textarea[placeholder*="标题"]',
+          'div.post-desc-box div.input-editor[contenteditable]',
+          'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        ],
+        9000,
+      );
+      return;
+    }
+
+    await openWechatMpRecentEntry(
+      "最近视频",
+      "发表视频",
+      [
+        'div.post-desc-box div.input-editor[contenteditable]',
+        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        '[contenteditable][data-placeholder="添加描述"]',
+      ],
+      7000,
+    );
   }
 
   function buildTagText(tags) {
@@ -711,13 +867,17 @@
       .join(" ");
   }
 
+  function buildPublishPageBodyWithTags(job) {
+    const parts = [job?.draftBody, buildTagText(job?.draftTags)]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    return parts.join("\n").trim();
+  }
+
   async function publishXiaohongshu(job) {
     const isVideo = Boolean(job.draftVideoUrl);
-    await gotoUrl(
-      isVideo
-        ? "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video&openFilePicker=true"
-        : "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image&openFilePicker=true",
-    );
+    const bodyWithTags = buildPublishPageBodyWithTags(job);
+    await gotoUrl("https://creator.xiaohongshu.com/");
     await ensureXiaohongshuPublishReady(isVideo);
     await uploadFiles(
       [
@@ -732,18 +892,41 @@
     await fillFirst(
       ['input[placeholder*="标题"]', 'textarea[placeholder*="标题"]', 'input[type="text"]'],
       job.draftTitle,
+      30000,
+      document,
+      { preferHumanType: true, perCharMin: 110, perCharMax: 190 },
     );
     await fillFirst(
       ['div.tiptap.ProseMirror', 'div[role="textbox"]', 'div[contenteditable="true"]'],
-      job.draftBody,
+      bodyWithTags,
+      30000,
+      document,
+      { preferHumanType: true, perCharMin: 110, perCharMax: 180 },
     );
-    const tagText = buildTagText(job.draftTags);
-    if (tagText) {
-      await appendText(['div.tiptap.ProseMirror', 'div[role="textbox"]', 'div[contenteditable="true"]'], `\n${tagText}`);
-    }
-    await clickFirst(['button:has-text("发布")', 'div[role="button"]:has-text("发布")', 'text=发布']);
+    await clickFirst(
+      [
+        "button.ce-btn.bg-red",
+        'button.bg-red:has-text("发布")',
+        'button.ce-btn:has-text("发布")',
+        'button:has-text("发布")',
+        'div[role="button"]:has-text("发布")',
+        'text=发布',
+      ],
+      30000,
+      document,
+      {
+        beforeMoveMin: 320,
+        beforeMoveMax: 620,
+        movePauseMin: 200,
+        movePauseMax: 380,
+        holdPauseMin: 170,
+        holdPauseMax: 320,
+        afterClickMin: 520,
+        afterClickMax: 960,
+      },
+    );
     await waitForHints(
-      ["发布成功", "笔记发布成功", "审核中", "发布中", "笔记管理"],
+      ["发布成功", "笔记发布成功", "审核中", "发布中"],
       ["发布失败", "请完善", "请先上传", "请填写标题"],
       "未识别到小红书发布成功状态，请确认页面是否仍停留在发布页",
     );
@@ -782,27 +965,103 @@
 
   async function publishWechatMp(job) {
     const isVideo = Boolean(job.draftVideoUrl);
-    await gotoUrl(
-      isVideo
-        ? "https://channels.weixin.qq.com/platform/post/create"
-        : "https://channels.weixin.qq.com/platform/post/finderNewLifeCreate",
-    );
+    const bodyWithTags = buildPublishPageBodyWithTags(job);
+    await gotoUrl("https://channels.weixin.qq.com/platform");
     await ensureWechatMpPublishReady(isVideo);
+
+    if (!isVideo) {
+      await fillFirst(
+        [
+          'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题，22个字符内"]',
+          'textarea[placeholder="填写标题，22个字符内"]',
+          'input[placeholder*="填写标题"]',
+          'input[placeholder*="标题"]',
+          'textarea[placeholder*="标题"]',
+          'input[type="text"]',
+        ],
+        job.draftTitle,
+        30000,
+        document,
+        { preferHumanType: true, perCharMin: 115, perCharMax: 185 },
+      ).catch(() => null);
+    }
+
+    await fillFirst(
+      [
+        'div.post-desc-box div.input-editor[contenteditable]',
+        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        '[contenteditable][data-placeholder="添加描述"]',
+        'div[contenteditable="true"]',
+        'textarea[placeholder*="描述"]',
+        'textarea[placeholder*="内容"]',
+      ],
+      bodyWithTags,
+      30000,
+      document,
+      { preferHumanType: true, perCharMin: 105, perCharMax: 170 },
+    );
+    await sleep(700);
+
+    await clickFirst(
+      isVideo
+        ? [
+            '.upload-content',
+            '.upload-content .center',
+            '.upload-content .upload-tip',
+            'button:has-text("上传视频")',
+            '[role="button"]:has-text("上传视频")',
+            'div:has-text("上传视频")',
+            'text=上传视频',
+          ]
+        : [
+            '.upload-content',
+            '.upload-content .center',
+            '.upload-content .upload-tip',
+            'button:has-text("上传图片")',
+            '[role="button"]:has-text("上传图片")',
+            'div:has-text("上传图片")',
+            'text=上传图片',
+            'div:has-text("发布图片动态")',
+            'text=发布图片动态',
+          ],
+      9000,
+      document,
+      {
+        beforeMoveMin: 260,
+        beforeMoveMax: 520,
+        movePauseMin: 160,
+        movePauseMax: 300,
+        holdPauseMin: 140,
+        holdPauseMax: 240,
+        afterClickMin: 380,
+        afterClickMax: 720,
+      },
+    ).catch(() => null);
+    await sleep(700);
+
     await uploadFiles(
       ['input[type="file"][accept*="image"]', 'input[type="file"][accept*="video"]', 'input[type="file"]'],
       isVideo ? [job.draftVideoUrl] : job.draftImages,
       isVideo ? "video" : "image",
     );
-    await sleep(2500);
-    await fillFirst(
-      ['input[placeholder*="标题"]', 'textarea[placeholder*="标题"]', 'input[type="text"]'],
-      job.draftTitle,
-    ).catch(() => null);
-    await fillFirst(
-      ['div[contenteditable="true"]', 'textarea[placeholder*="描述"]', 'textarea[placeholder*="内容"]'],
-      job.draftBody,
+    await sleep(2200);
+    await clickFirst(
+      ['button:has-text("发表")', '[role="button"]:has-text("发表")', 'button:has-text("发布")', 'text=发表'],
+      30000,
+      document,
+      {
+        beforeMoveMin: 280,
+        beforeMoveMax: 560,
+        movePauseMin: 170,
+        movePauseMax: 320,
+        holdPauseMin: 150,
+        holdPauseMax: 260,
+        afterClickMin: 420,
+        afterClickMax: 760,
+      },
     );
-    await clickFirst(['button:has-text("发表")', '[role="button"]:has-text("发表")', 'button:has-text("发布")', 'text=发表']);
     await waitForHints(
       ["发表成功", "发布成功", "审核中", "内容管理"],
       ["发布失败", "上传失败", "请完善", "请填写"],

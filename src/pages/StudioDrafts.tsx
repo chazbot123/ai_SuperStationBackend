@@ -36,6 +36,7 @@ type DraftItem = {
   id: string;
   rawId: string;
   source: "social" | "product";
+  prompt: string;
   title: string;
   body: string;
   tags: string[];
@@ -157,6 +158,7 @@ export default function StudioDrafts() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [hint, setHint] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<DraftItem | null>(null);
+  const [editPrompt, setEditPrompt] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editBody, setEditBody] = useState("");
   const [editTags, setEditTags] = useState("");
@@ -166,6 +168,7 @@ export default function StudioDrafts() {
   const [uploadingImages, setUploadingImages] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [syncingProductDraftId, setSyncingProductDraftId] = useState<string | null>(null);
   const isAgent = user?.roleKey === "level1_agent";
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -204,6 +207,7 @@ export default function StudioDrafts() {
       id: `social_${item.id}`,
       rawId: item.id,
       source: "social",
+      prompt: item.prompt,
       title: item.title,
       body: item.body,
       tags: item.tags,
@@ -222,9 +226,10 @@ export default function StudioDrafts() {
       id: `product_${item.id}`,
       rawId: item.id,
       source: "product",
+      prompt: item.prompt,
       title: item.title,
       body: item.body,
-      tags: [],
+      tags: item.tags,
       createdAt: item.createdAt,
       images: item.images,
       downloadableImages: item.downloadableImages ?? item.images.map(() => false),
@@ -250,13 +255,18 @@ export default function StudioDrafts() {
       if (!normalized) {
         return true;
       }
-      return item.title.toLowerCase().includes(normalized) || item.body.toLowerCase().includes(normalized);
+      return (
+        item.title.toLowerCase().includes(normalized) ||
+        item.body.toLowerCase().includes(normalized) ||
+        item.prompt.toLowerCase().includes(normalized)
+      );
     });
   }, [draftItems, query, sourceFilter]);
 
   function openEditor(item: DraftItem) {
     markDraftViewed(item.source, item.rawId);
     setEditingItem(item);
+    setEditPrompt(item.prompt);
     setEditTitle(item.title);
     setEditBody(item.body);
     setEditTags(formatTagInput(item.tags));
@@ -368,6 +378,7 @@ export default function StudioDrafts() {
         sourceId: item.rawId,
         title: item.title,
         body: item.body,
+        tags: item.tags,
         contentType: "product_asset",
         platformStyle,
         coverImage: item.images[0],
@@ -395,6 +406,8 @@ export default function StudioDrafts() {
 
     void (async () => {
       try {
+        setSyncingProductDraftId(item.id);
+        setHint("正在同步到产品管理...");
         await createProduct(buildProductPayloadFromDraft(item));
         const next = await markProductImageDraftProductSynced(accessToken, item.rawId);
         setProductDrafts((prev) => prev.map((entry) => (entry.id === item.rawId ? next : entry)));
@@ -404,6 +417,8 @@ export default function StudioDrafts() {
         setHint("已同步到产品管理。");
       } catch (error) {
         setHint(error instanceof Error ? error.message : "同步到产品管理失败");
+      } finally {
+        setSyncingProductDraftId((current) => (current === item.id ? null : current));
       }
     })();
   }
@@ -438,6 +453,7 @@ export default function StudioDrafts() {
 
   async function handleSaveEdit() {
     if (!editingItem) return;
+    const prompt = editPrompt.trim();
     const title = editTitle.trim();
     const body = editBody.trim();
     const tags = Array.from(
@@ -475,6 +491,7 @@ export default function StudioDrafts() {
         const next = await updateSocialPost({
           accessToken,
           id: editingItem.rawId,
+          prompt,
           title,
           body,
           tags,
@@ -483,6 +500,7 @@ export default function StudioDrafts() {
         setSocialDrafts((prev) => prev.map((entry) => (entry.id === editingItem.rawId ? next : entry)));
         const nextItem: DraftItem = {
           ...editingItem,
+          prompt: next.prompt,
           title: next.title,
           body: next.body,
           tags: next.tags,
@@ -491,6 +509,7 @@ export default function StudioDrafts() {
           syncedToLeads: next.synced,
         };
         setEditingItem(nextItem);
+        setEditPrompt(next.prompt);
         setEditTitle(next.title);
         setEditBody(next.body);
         setEditTags(formatTagInput(next.tags));
@@ -508,13 +527,29 @@ export default function StudioDrafts() {
       const next = await updateProductImageDraft({
         accessToken,
         id: editingItem.rawId,
+        prompt,
         title,
         body,
+        tags,
         images: nextImages,
       });
       setProductDrafts((prev) => prev.map((entry) => (entry.id === editingItem.rawId ? next : entry)));
+      const nextItem: DraftItem = {
+        ...editingItem,
+        prompt: next.prompt,
+        title: next.title,
+        body: next.body,
+        tags: next.tags,
+        images: next.images,
+        reviewStage: next.reviewStage,
+        syncedToLeads: next.syncedToLeads,
+        syncedToProducts: next.syncedToProducts,
+      };
+      setEditingItem(nextItem);
+      setEditPrompt(next.prompt);
       setEditTitle(next.title);
       setEditBody(next.body);
+      setEditTags(formatTagInput(next.tags));
       setEditImages(next.images);
       setHint("草稿已保存。");
       setDeleteConfirmOpen(false);
@@ -588,12 +623,7 @@ export default function StudioDrafts() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <div className="mb-2 text-sm font-medium text-zinc-100">正在执行的任务</div>
-            {runningTasks.length === 0 ? (
-              <div className="rounded-xl bg-white/[0.04] px-3 py-6 text-center text-sm text-zinc-500 ring-1 ring-white/6">
-                当前没有执行中的任务
-              </div>
-            ) : (
+            {runningTasks.length === 0 ? null : (
               runningTasks.map((task) => (
                 <div
                   key={task.id}
@@ -705,9 +735,13 @@ export default function StudioDrafts() {
                             variant="secondary"
                             size="sm"
                             onClick={() => handleSyncToProducts(item)}
-                            disabled={item.syncedToProducts}
+                            disabled={item.syncedToProducts || syncingProductDraftId === item.id}
                           >
-                            {item.syncedToProducts ? "已同步产品" : "同步到产品管理"}
+                            {item.syncedToProducts
+                              ? "已同步产品"
+                              : syncingProductDraftId === item.id
+                                ? "同步中..."
+                                : "同步到产品管理"}
                           </Button>
                         ) : null}
                         <Badge variant={stageVariant}>{stageLabel}</Badge>
@@ -760,7 +794,7 @@ export default function StudioDrafts() {
         }
       >
         {editingItem ? (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={reviewStageMeta(editingItem.reviewStage).variant}>
                 {reviewStageMeta(editingItem.reviewStage).label}
@@ -770,38 +804,24 @@ export default function StudioDrafts() {
               {editingItem.syncedToProducts ? <Badge variant="blue">已同步产品</Badge> : null}
             </div>
 
-            <div className="rounded-2xl bg-black/20 px-4 py-3 ring-1 ring-white/10">
+            <div className="rounded-2xl bg-black/20 px-3 py-2.5 ring-1 ring-white/10">
               <div className="text-xs text-zinc-400">
                 {new Date(editingItem.createdAt).toLocaleString()} · 来源 {sourceMeta(editingItem.source).label}
               </div>
             </div>
 
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.95fr)]">
-              <div className="space-y-4 rounded-2xl bg-black/20 p-4 ring-1 ring-white/10">
-                {editingItem.source === "social" ? (
-                  <div className="space-y-3">
-                    <div className="text-sm font-medium text-zinc-100">标签</div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {editTags
-                        .split(/\s+/)
-                        .map((item) => item.trim().replace(/^#+/, ""))
-                        .filter(Boolean)
-                        .map((tag) => (
-                          <Badge key={tag} variant="gray">
-                            #{tag}
-                          </Badge>
-                        ))}
-                    </div>
-                    <textarea
-                      value={editTags}
-                      onChange={(event) => setEditTags(event.target.value)}
-                      rows={3}
-                      className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
-                      placeholder="请输入标签，使用空格分隔，例如：#智能好物 #高效工具 #种草推荐"
-                    />
-                    <div className="text-xs text-zinc-500">支持直接输入 #标签，保存时会自动去重。</div>
-                  </div>
-                ) : null}
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)]">
+              <div className="space-y-3 rounded-2xl bg-black/20 p-3 ring-1 ring-white/10">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-zinc-100">提示词</div>
+                  <textarea
+                    value={editPrompt}
+                    onChange={(event) => setEditPrompt(event.target.value)}
+                    rows={3}
+                    className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
+                    placeholder="请输入用户原始提示词"
+                  />
+                </div>
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-zinc-100">标题</div>
@@ -813,14 +833,37 @@ export default function StudioDrafts() {
                   <textarea
                     value={editBody}
                     onChange={(event) => setEditBody(event.target.value)}
-                    rows={12}
-                    className="min-h-[260px] w-full resize-y rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
+                    rows={9}
+                    className="min-h-[200px] w-full resize-y rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
                     placeholder="请输入文案"
                   />
                 </div>
+
+                <div className="space-y-2.5">
+                  <div className="text-sm font-medium text-zinc-100">标签</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {editTags
+                      .split(/\s+/)
+                      .map((item) => item.trim().replace(/^#+/, ""))
+                      .filter(Boolean)
+                      .map((tag) => (
+                        <Badge key={tag} variant="gray">
+                          #{tag}
+                        </Badge>
+                      ))}
+                  </div>
+                  <textarea
+                    value={editTags}
+                    onChange={(event) => setEditTags(event.target.value)}
+                    rows={2}
+                    className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-500 focus:ring-2 focus:ring-amber-400/30"
+                    placeholder="请输入标签，使用空格分隔，例如：#智能好物 #高效工具 #种草推荐"
+                  />
+                  <div className="text-xs text-zinc-500">支持直接输入 #标签，保存时会自动去重。</div>
+                </div>
               </div>
 
-              <div className="space-y-4 rounded-2xl bg-black/20 p-4 ring-1 ring-white/10">
+              <div className="space-y-3 rounded-2xl bg-black/20 p-3 ring-1 ring-white/10">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-medium text-zinc-100">结果预览</div>
                   <div className="flex items-center gap-2">
@@ -840,7 +883,7 @@ export default function StudioDrafts() {
                 </div>
                 <div>
                   {getVisibleImages(editImages).length > 0 ? (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                       {getVisibleImages(editImages).map(({ index: originalIndex, image }, index) => (
                         <div key={`${editingItem.id}_${originalIndex}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/30">
                           <button

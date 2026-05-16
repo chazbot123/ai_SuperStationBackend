@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyRound, ShieldCheck, Smartphone } from "lucide-react";
+import { Download, KeyRound, ShieldCheck, Smartphone } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -338,6 +338,8 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
   },
 ];
 
+const PLATFORM_LOGIN_EXTENSION_DOWNLOAD_URL = "";
+
 function platformLabel(platform: LeadPlatformStyle) {
   return platformOptions.find((item) => item.value === platform)?.label ?? platform;
 }
@@ -398,6 +400,25 @@ function getPlatformLoginUrl(platform: LeadPlatformStyle) {
   }
 }
 
+function getPlatformCreatorCenterUrl(platform: LeadPlatformStyle) {
+  switch (platform) {
+    case "xiaohongshu":
+      return "https://creator.xiaohongshu.com/";
+    case "douyin":
+      return "https://creator.douyin.com/";
+    case "wechat_mp":
+      return "https://channels.weixin.qq.com/platform";
+    case "kuaishou":
+      return "https://cp.kuaishou.com/profile";
+    case "bilibili":
+      return "https://member.bilibili.com/";
+    case "wechat_official":
+      return "https://mp.weixin.qq.com/";
+    default:
+      return "";
+  }
+}
+
 function isExtensionLoginPlatform(platform: LeadPlatformStyle) {
   return (
     platform === "xiaohongshu" ||
@@ -417,6 +438,7 @@ export default function PublishingPlatformLogin() {
   const [saving, setSaving] = useState(false);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [autoRefreshingId, setAutoRefreshingId] = useState<string | null>(null);
   const [startingPlatform, setStartingPlatform] = useState<LeadPlatformStyle | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
   const [extensionReady, setExtensionReady] = useState<boolean | null>(null);
@@ -604,10 +626,66 @@ export default function PublishingPlatformLogin() {
       return true;
     }
 
-    // Some browsers block or break popup navigation for scripted windows.
-    // Fall back to same-tab navigation so the user can still complete authorization.
-    window.location.assign(normalizedUrl);
-    return true;
+    setHint("浏览器拦截了新窗口，请允许当前站点打开新标签页后重试。");
+    return false;
+  }
+
+  function handleDownloadExtension() {
+    if (!PLATFORM_LOGIN_EXTENSION_DOWNLOAD_URL.trim()) {
+      setHint("浏览器扩展下载地址暂未配置，请先补充正式下载链接。");
+      return;
+    }
+    openExternalUrl(PLATFORM_LOGIN_EXTENSION_DOWNLOAD_URL);
+  }
+
+  async function refreshPlatformAccount(item: PlatformAccountItem, options?: { silent?: boolean }) {
+    if (!accessToken) {
+      if (!options?.silent) {
+        setHint("登录已失效，请重新登录。");
+      }
+      return null;
+    }
+
+    try {
+      setValidatingId(item.id);
+      const next = await validatePlatformAccount({ accessToken, id: item.id });
+      setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
+      if (!options?.silent) {
+        setHint(next.status === "valid" ? "账号校验通过。" : next.lastError ?? "账号校验失败。");
+      }
+      return next;
+    } catch (error) {
+      if (!options?.silent) {
+        setHint(error instanceof Error ? error.message : "校验平台账号失败");
+      }
+      return null;
+    } finally {
+      setValidatingId(null);
+    }
+  }
+
+  async function autoRefreshPlatformAccount(item: PlatformAccountItem) {
+    setAutoRefreshingId(item.id);
+    try {
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const next = await refreshPlatformAccount(item, { silent: true });
+        const hasEnoughProfileData =
+          next &&
+          (item.platform === "wechat_mp" || item.platform === "xiaohongshu"
+            ? Boolean(next.avatarUrl) && next.followerCount !== null
+            : Boolean(next.avatarUrl) || next.followerCount !== null);
+        if (hasEnoughProfileData) {
+          setHint("账号资料已自动刷新。");
+          return;
+        }
+        if (attempt < 5) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        }
+      }
+      setHint("已自动尝试刷新账号资料，如仍未显示请确认账号后台首页已正常打开。");
+    } finally {
+      setAutoRefreshingId((current) => (current === item.id ? null : current));
+    }
   }
 
   async function handleStartLogin(platform: LeadPlatformStyle) {
@@ -791,21 +869,7 @@ export default function PublishingPlatformLogin() {
   }
 
   async function handleValidate(item: PlatformAccountItem) {
-    if (!accessToken) {
-      setHint("登录已失效，请重新登录。");
-      return;
-    }
-
-    try {
-      setValidatingId(item.id);
-      const next = await validatePlatformAccount({ accessToken, id: item.id });
-      setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
-      setHint(next.status === "valid" ? "账号校验通过。" : next.lastError ?? "账号校验失败。");
-    } catch (error) {
-      setHint(error instanceof Error ? error.message : "校验平台账号失败");
-    } finally {
-      setValidatingId(null);
-    }
+    await refreshPlatformAccount(item);
   }
 
   async function handleDelete(item: PlatformAccountItem) {
@@ -827,7 +891,17 @@ export default function PublishingPlatformLogin() {
   }
 
   async function handleOpenLoginUrl(item: PlatformAccountItem) {
-    await handleRestartLogin(item);
+    const targetUrl = getPlatformCreatorCenterUrl(item.platform);
+    if (!targetUrl) {
+      setHint("当前平台暂未配置创作者中心地址。");
+      return;
+    }
+    const opened = openExternalUrl(targetUrl);
+    if (!opened) {
+      return;
+    }
+    setHint(`已打开${platformLabel(item.platform)}创作者中心，正在自动刷新账号资料。`);
+    void autoRefreshPlatformAccount(item);
   }
 
   return (
@@ -854,6 +928,12 @@ export default function PublishingPlatformLogin() {
           <div className="text-xs text-zinc-500">
             扩展状态：
             {extensionReady === true ? " 已连接" : extensionReady === false ? " 未检测到扩展" : " 检测中..."}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={handleDownloadExtension}>
+              <Download className="h-4 w-4" />
+              下载浏览器扩展
+            </Button>
           </div>
           <div className="flex flex-wrap gap-3 text-xs text-zinc-400">
             <span>账号总数：{summary.total}</span>
@@ -969,7 +1049,19 @@ export default function PublishingPlatformLogin() {
               <div className="flex-1 rounded-xl border border-white/10 bg-black/10">
                 <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
                   <div className="text-sm font-semibold text-zinc-100">{activePlatformLabel}</div>
-                  <div className="text-xs text-zinc-500">{visibleAccounts.length} 个账号</div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-xs text-zinc-500">{visibleAccounts.length} 个账号</div>
+                    {activePlatform !== "all" ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleStartLogin(activePlatform)}
+                        disabled={startingPlatform === activePlatform}
+                      >
+                        {startingPlatform === activePlatform ? "发起中..." : "新增账号"}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
 
                 {visibleAccounts.length === 0 ? (
@@ -980,7 +1072,10 @@ export default function PublishingPlatformLogin() {
                       const meta = platformMeta(item.platform);
                       const online = item.status === "valid" && item.loginStatus === "authenticated";
                       const actionBusy =
-                        validatingId === item.id || deletingId === item.id || restartingId === item.id;
+                        validatingId === item.id ||
+                        deletingId === item.id ||
+                        restartingId === item.id ||
+                        autoRefreshingId === item.id;
                       const title = item.displayName || item.accountName;
                       const externalId = item.externalAccountId || item.accountName;
 
@@ -1018,7 +1113,7 @@ export default function PublishingPlatformLogin() {
                                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
                                   {item.loginSourceLabel}
                                 </span>
-                                <span>粉丝：{item.followerCount ?? 0}</span>
+                                <span>粉丝：{item.followerCount ?? "-"}</span>
                               </div>
                             </div>
                           </div>
@@ -1027,18 +1122,10 @@ export default function PublishingPlatformLogin() {
                             <Button
                               size="sm"
                               variant="secondary"
-                              onClick={() => void handleStartLogin(item.platform)}
-                              disabled={startingPlatform === item.platform}
-                            >
-                              {startingPlatform === item.platform ? "发起中..." : "新增登录"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
                               onClick={() => void handleOpenLoginUrl(item)}
-                              disabled={restartingId === item.id || actionBusy}
+                              disabled={deletingId === item.id || validatingId === item.id || autoRefreshingId === item.id}
                             >
-                              {restartingId === item.id ? "打开中..." : "登录"}
+                              {autoRefreshingId === item.id ? "刷新中..." : "登录"}
                             </Button>
                             <Button
                               size="sm"
@@ -1047,14 +1134,6 @@ export default function PublishingPlatformLogin() {
                               disabled={validatingId === item.id || actionBusy}
                             >
                               {validatingId === item.id ? "校验中..." : "校验"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => openEditModal(item)}
-                              disabled={actionBusy}
-                            >
-                              编辑
                             </Button>
                             <Button
                               size="sm"

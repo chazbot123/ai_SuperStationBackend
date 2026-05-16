@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Heart, MessageCircle, Plus, Search, Share, Star } from "lucide-react";
+import { ChevronLeft, Heart, MessageCircle, Plus, Search, Share, Star, Trash2 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
@@ -17,6 +17,7 @@ import {
   listPublishingContents,
   listPublishingJobs,
   listPlatformAccounts,
+  deletePublishingJob,
   publishLeadContent,
   startExtensionPublishJob,
   syncExtensionPublishJob,
@@ -203,6 +204,7 @@ export default function Publishing() {
   const [hint, setHint] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [superSiteBaseUrl, setSuperSiteBaseUrl] = useState("");
 
   const refreshPublishJobs = useCallback(
@@ -468,6 +470,21 @@ export default function Publishing() {
     }));
   }
 
+  async function handleDeleteJob(jobId: string) {
+    if (!accessToken || deletingJobId) return;
+
+    setDeletingJobId(jobId);
+    try {
+      await deletePublishingJob({ accessToken, id: jobId });
+      setPublishJobs((current) => current.filter((job) => job.id !== jobId));
+      setHint("发布记录已删除");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "删除发布记录失败");
+    } finally {
+      setDeletingJobId(null);
+    }
+  }
+
   const canSubmitPublish =
     selectedPlatforms.length > 0 &&
     selectedPlatforms.every((platform) => Boolean(selectedAccounts[platform]));
@@ -695,12 +712,13 @@ export default function Publishing() {
                   <Th>发布账号</Th>
                   <Th>执行时间</Th>
                   <Th>状态</Th>
+                  <Th className="w-14 text-right">操作</Th>
                 </tr>
               </thead>
               <tbody>
                 {jobList.length === 0 ? (
                   <Tr>
-                    <Td colSpan={5} className="py-10 text-center text-zinc-400">
+                    <Td colSpan={6} className="py-10 text-center text-zinc-400">
                       暂无发布记录
                     </Td>
                   </Tr>
@@ -714,7 +732,7 @@ export default function Publishing() {
                       <Td>
                         <PublishBadge status={job.status} />
                         {job.lastError ? <div className="mt-1 text-xs text-rose-300">{job.lastError}</div> : null}
-                        {job.draftUrl ? (
+                        {job.draftUrl && job.status !== "success" ? (
                           <div className="mt-1 break-all text-xs text-zinc-400">
                             <a
                               href={job.draftUrl}
@@ -726,6 +744,18 @@ export default function Publishing() {
                             </a>
                           </div>
                         ) : null}
+                      </Td>
+                      <Td className="text-right">
+                        <button
+                          type="button"
+                          aria-label="删除发布记录"
+                          title="删除"
+                          disabled={deletingJobId === job.id}
+                          onClick={() => void handleDeleteJob(job.id)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition hover:bg-white/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </Td>
                     </Tr>
                   ))
@@ -999,9 +1029,9 @@ export default function Publishing() {
                         ) : activeEditorPlatform === "wechat_mp" ? (
                           <>
                             <div className="pt-10">
-                              <div className="aspect-[9/11] bg-black">
+                              <div className="aspect-[9/11] bg-zinc-100">
                                 {activePreviewImage ? (
-                                  <img src={activePreviewImage} alt="" className="h-full w-full object-cover opacity-[0.12]" />
+                                  <img src={activePreviewImage} alt="" className="h-full w-full object-cover" />
                                 ) : (
                                   <div className="flex h-full items-center justify-center text-sm text-zinc-500">暂无预览图片</div>
                                 )}
@@ -1053,11 +1083,31 @@ export default function Publishing() {
                           </>
                         ) : activeEditorPlatform === "xiaohongshu" ? (
                           <>
-                            <div className="overflow-hidden bg-[#f7f7f7] text-zinc-900">
-                              <div className="px-6 pt-10 text-center text-[14px] font-semibold">9:41</div>
-                              <div className="flex items-center justify-between px-4 py-3">
-                                <div className="flex items-center gap-3">
-                                  <div className="text-[24px] leading-none text-zinc-700">‹</div>
+                            <div className="overflow-hidden bg-white text-zinc-900">
+                              <div className="flex items-center justify-between px-4 pt-3 text-black">
+                                <div className="text-[14px] font-semibold tracking-[0.01em]">9:41</div>
+                                <div className="flex items-center gap-1.5">
+                                  <div className="flex items-end gap-[2px]">
+                                    <span className="h-[4px] w-[2px] rounded-full bg-black" />
+                                    <span className="h-[6px] w-[2px] rounded-full bg-black" />
+                                    <span className="h-[8px] w-[2px] rounded-full bg-black" />
+                                    <span className="h-[10px] w-[2px] rounded-full bg-black" />
+                                  </div>
+                                  <div className="flex h-[10px] w-[22px] items-center rounded-[3px] bg-black/10 px-[2px]">
+                                    <div className="h-[6px] w-[14px] rounded-[2px] bg-black" />
+                                  </div>
+                                  <span className="h-[4px] w-[1.5px] rounded-full bg-black/90" />
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between px-3 pb-3 pt-2">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <button
+                                    type="button"
+                                    className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-800"
+                                  >
+                                    <ChevronLeft className="h-5 w-5" strokeWidth={2.4} />
+                                  </button>
                                   <div className="h-8 w-8 overflow-hidden rounded-full bg-zinc-200">
                                     {getDisplayAccount(activeEditorPlatform)?.avatarUrl ? (
                                       <img
@@ -1067,19 +1117,24 @@ export default function Publishing() {
                                       />
                                     ) : null}
                                   </div>
-                                  <div className="max-w-[86px] truncate text-[14px] font-medium">
+                                  <div className="max-w-[84px] truncate text-[13px] font-medium text-zinc-900">
                                     {getDisplayAccountName(activeEditorPlatform)}
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                  <button className="rounded-full border border-rose-300 bg-white px-3 py-1 text-[12px] font-medium text-rose-500">
+                                <div className="flex items-center gap-2">
+                                  <button className="h-7 rounded-full border border-[#ff6b81]/45 bg-[#fff5f7] px-3 text-[12px] font-medium text-[#ff4d6d]">
                                     关注
                                   </button>
-                                  <Share className="h-4 w-4 text-zinc-500" strokeWidth={1.8} />
+                                  <button
+                                    type="button"
+                                    className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700"
+                                  >
+                                    <Share className="h-4 w-4" strokeWidth={1.9} />
+                                  </button>
                                 </div>
                               </div>
 
-                              <div className="h-[320px] bg-zinc-100">
+                              <div className="h-[320px] bg-[#f4f4f4]">
                                 {activePreviewImage ? (
                                   <img src={activePreviewImage} alt="" className="h-full w-full object-cover" />
                                 ) : (

@@ -456,6 +456,13 @@ export async function deletePlatformAccount(input: { accessToken: string; id: st
   });
 }
 
+export async function deletePublishingJob(input: { accessToken: string; id: string }) {
+  return requestJson<{ id: string }>(`/api/publishing/jobs/${input.id}/delete`, {
+    method: "POST",
+    headers: getAuthHeaders(input.accessToken),
+  });
+}
+
 export async function validatePlatformAccount(input: { accessToken: string; id: string }) {
   return requestJson<PlatformAccountItem>(`/api/publishing/platform-accounts/${input.id}/validate`, {
     method: "POST",

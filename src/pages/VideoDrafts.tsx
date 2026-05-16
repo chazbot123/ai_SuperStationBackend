@@ -19,8 +19,8 @@ import {
   updateVideoDraft,
   type AvatarVideoTaskStatusResponse,
 } from "@/lib/ai";
+import { syncPublishingContent, type LeadPlatformStyle } from "@/lib/publishing";
 import { estimateAvatarEta, estimateProductEta, formatClock, formatMmSs } from "@/lib/videoEta";
-import { useAppStore } from "@/store/appStore";
 import { useAuthStore } from "@/store/authStore";
 import { useVideoDraftStore, type VideoDraftItem } from "@/store/videoDraftStore";
 
@@ -110,8 +110,6 @@ export default function VideoDrafts() {
 
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
-  const addContent = useAppStore((s) => s.addContent);
-  const markContentSynced = useAppStore((s) => s.markContentSynced);
   const items = useVideoDraftStore((s) => s.items);
   const replaceItems = useVideoDraftStore((s) => s.replaceItems);
   const updateItem = useVideoDraftStore((s) => s.updateItem);
@@ -127,6 +125,7 @@ export default function VideoDrafts() {
   const [editTitle, setEditTitle] = useState("");
   const [editTag1, setEditTag1] = useState("");
   const [editTag2, setEditTag2] = useState("");
+  const [editPrompt, setEditPrompt] = useState("");
   const [editScript, setEditScript] = useState("");
   const avatarFailureSummary = useMemo(() => summarizeAvatarFailures(avatarDetail), [avatarDetail]);
 
@@ -181,6 +180,7 @@ export default function VideoDrafts() {
       setEditTitle("");
       setEditTag1("");
       setEditTag2("");
+      setEditPrompt("");
       setEditScript("");
       return;
     }
@@ -188,6 +188,7 @@ export default function VideoDrafts() {
     setEditTitle(previewItem.publishTitle ?? previewItem.title);
     setEditTag1(tags[0] ?? "");
     setEditTag2(tags[1] ?? "");
+    setEditPrompt(previewItem.prompt ?? "");
     setEditScript(previewItem.generatedScript ?? "");
   }, [previewItem]);
 
@@ -339,6 +340,7 @@ export default function VideoDrafts() {
 
       return (
         item.title.toLowerCase().includes(normalizedKeyword) ||
+        item.prompt.toLowerCase().includes(normalizedKeyword) ||
         item.generatedScript.toLowerCase().includes(normalizedKeyword)
       );
     });
@@ -363,24 +365,34 @@ export default function VideoDrafts() {
       setHint("只有审核通过后才能同步到获客。");
       return;
     }
+    if (item.status !== "ready" || !item.videoUrl) {
+      setHint("视频还在生成中，完成后再同步到获客。");
+      return;
+    }
     if (!accessToken) {
       setHint("请先登录");
       return;
     }
 
     try {
-      const updated = await markVideoDraftSynced(accessToken, item.id);
-      const content = addContent({
-        type: "video",
+      const platformStyle: LeadPlatformStyle =
+        item.platformStyle === "wechat_mp"
+          ? "wechat_mp"
+          : item.platformStyle === "xiaohongshu"
+            ? "xiaohongshu"
+            : "douyin";
+      await syncPublishingContent({
+        accessToken,
+        sourceType: "video",
+        sourceId: item.id,
         title: item.publishTitle || item.title,
         body: item.generatedScript,
-        platformStyle: item.platformStyle || "douyin",
-        images: [],
+        tags: item.publishTags ?? [],
+        contentType: "video",
+        platformStyle,
         videoUrl: item.videoUrl,
-        syncedToLeads: true,
-        reviewStatus: "approved",
       });
-      markContentSynced(content.id);
+      const updated = await markVideoDraftSynced(accessToken, item.id);
       updateItem(item.id, toVideoDraftItem(updated));
       setHint("已同步到获客内容池。");
     } catch (error) {
@@ -503,7 +515,7 @@ export default function VideoDrafts() {
                             type="button"
                             size="sm"
                             onClick={() => handleSyncToLeads(item)}
-                            disabled={item.syncedToLeads}
+                            disabled={item.syncedToLeads || item.status !== "ready" || !item.videoUrl}
                             className={item.syncedToLeads ? "hidden" : undefined}
                           >
                             {item.syncedToLeads ? "已同步获客" : "同步到获客"}
@@ -554,6 +566,7 @@ export default function VideoDrafts() {
                   const title = editTitle.trim();
                   const tags = [editTag1.trim(), editTag2.trim()].filter(Boolean);
                   const patch: Partial<VideoDraftItem> = {
+                    prompt: editPrompt.trim(),
                     publishTitle: title ? title : undefined,
                     publishTags: tags.length > 0 ? tags : undefined,
                     generatedScript: editScript,
@@ -565,6 +578,7 @@ export default function VideoDrafts() {
                   void updateVideoDraft({
                     accessToken,
                     id: previewItem.id,
+                    prompt: patch.prompt,
                     publishTitle: patch.publishTitle,
                     publishTags: patch.publishTags,
                     generatedScript: patch.generatedScript,
@@ -786,6 +800,16 @@ export default function VideoDrafts() {
                   ) : null}
                 </div>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs text-zinc-400">提示词</div>
+              <textarea
+                className="min-h-[120px] w-full resize-y rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+                value={editPrompt}
+                onChange={(e) => setEditPrompt(e.target.value)}
+                placeholder="请输入用户原始提示词"
+              />
             </div>
 
             <div className="space-y-2">

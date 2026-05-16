@@ -10,6 +10,10 @@ import {
 
 export class CreateVideoDraftDto {
   @IsString()
+  @MaxLength(4000)
+  prompt!: string;
+
+  @IsString()
   @IsIn(['product_video', 'avatar_video'])
   source!: 'product_video' | 'avatar_video';
 

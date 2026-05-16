@@ -304,7 +304,7 @@ export default function Products() {
                     <Tr key={item.id}>
                       <Td>
                         <div className="flex items-center gap-3">
-                          <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/5 p-1">
+                          <div className="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/5">
                             {item.images[0] ? (
                               <img src={item.images[0]} alt={item.name} className="h-full w-full object-contain" />
                             ) : null}

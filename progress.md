@@ -214,3 +214,8 @@ pm run check，结果均通过。
 - [2026-05-12 13:32:00] 已按用户补充要求把快手关键点击改为慢速模拟鼠标点击，不再使用过快的直接点击节奏。
 - [2026-05-12 13:32:00] 已执行 `GetDiagnostics`，扩展脚本与后端发布相关文件诊断均为 0。
 - [2026-05-12 13:32:00] 已执行后端定向测试 `npm test -- modules/publishing/platform-login-browser.service.spec.ts modules/publishing/publishing.service.spec.ts --runInBand`，30 项全部通过。
+- [2026-05-15 00:00:00] 已恢复规划文件并确认新任务：盘点 `origin/main` 相对当前本地 `master` 的文件级差异，并评估如何安全合入当前工作区。
+- [2026-05-15 00:00:00] 已确认当前本地 `git pull` 仅同步 `origin/master`，结果为 `Already up to date`；远端最近持续更新的是 `origin/main`。
+- [2026-05-15 00:00:00] 已完成差异盘点：`origin/main` 更新主要集中在部署脚本、AI 视频流程、超级站前台、文档，以及部分发布与登录页面。
+- [2026-05-15 00:00:00] 已完成重叠文件识别：当前本地未提交改动与 `origin/main` 重叠文件主要集中在 `server/src/modules/publishing/*`、`src/lib/publishing.ts`、`src/pages/Publishing*.tsx`、`src/pages/StudioDrafts.tsx`。
+- [2026-05-15 00:00:00] 当前正在整理按模块的安全合并建议，优先区分“可直接拿 main”与“必须人工合并”的文件。

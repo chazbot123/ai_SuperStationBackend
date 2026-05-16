@@ -518,6 +518,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
   async function createPersistedDraft(input: {
     source: VideoDraftSource;
+    prompt: string;
     title: string;
     platformStyle?: string;
     durationText: string;
@@ -531,6 +532,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     }
     const created = await createVideoDraft({
       accessToken,
+      prompt: input.prompt,
       source: input.source,
       title: input.title,
       platformStyle: input.platformStyle,
@@ -1074,6 +1076,7 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
 
       next = await createPersistedDraft({
         source: props.draftSource,
+        prompt: question.trim(),
         title: draftTitle,
         platformStyle,
         durationText: draftDurationText,

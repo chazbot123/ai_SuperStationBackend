@@ -77,6 +77,11 @@ async function syncLoginResult(session, context) {
 
     const accountName = String(context?.accountName || "").trim();
     const displayName = String(context?.displayName || "").trim();
+    const avatarUrl = String(context?.avatarUrl || "").trim();
+    const followerCount =
+      typeof context?.followerCount === "number" && Number.isFinite(context.followerCount)
+        ? Math.max(0, Math.round(context.followerCount))
+        : null;
     const hasResolvedProfile = Boolean(accountName || displayName);
     if (!hasResolvedProfile) {
       return;
@@ -94,6 +99,8 @@ async function syncLoginResult(session, context) {
         accountName,
         displayName,
         sourceUrl: context?.url || "",
+        avatarUrl,
+        followerCount,
       }),
     });
 
@@ -167,9 +174,7 @@ function getPlatformPublishUrl(platform, job) {
       : "https://creator.douyin.com/creator-micro/content/publish";
   }
   if (platform === "wechat_mp") {
-    return hasVideo
-      ? "https://channels.weixin.qq.com/platform/post/create"
-      : "https://channels.weixin.qq.com/platform/post/finderNewLifeCreate";
+    return "https://channels.weixin.qq.com/platform";
   }
   if (platform === "kuaishou") {
     return "https://cp.kuaishou.com/profile";

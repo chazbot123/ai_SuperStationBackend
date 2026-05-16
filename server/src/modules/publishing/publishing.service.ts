@@ -612,6 +612,14 @@ export class PublishingService {
     return this.serializePublishJob(updated);
   }
 
+  async deleteJob(user: SessionUser, id: string) {
+    const job = await this.findAccessibleLeadPublishJob(user, id);
+    await this.prisma.leadPublishJob.delete({
+      where: { id: job.id },
+    });
+    return { id: job.id };
+  }
+
   async listPlatformAccounts(user: SessionUser, query: ListPlatformAccountsQueryDto) {
     const where: Prisma.LeadPlatformAccountWhereInput = {
       ...(this.isMainCompany(user) ? {} : { creatorId: user.userId }),
@@ -935,9 +943,28 @@ export class PublishingService {
       throw new ConflictException(validation.lastError ?? '登录信息校验未通过');
     }
 
-    const requestedAccountName = dto.accountName?.trim() || '';
-    const displayName = dto.displayName?.trim() || null;
+    const requestedAccountName = this.sanitizeExtensionResolvedAccountText(
+      session.platform,
+      dto.accountName?.trim() || '',
+    );
+    const displayName = this.sanitizeExtensionResolvedAccountText(
+      session.platform,
+      dto.displayName?.trim() || null,
+    );
     const remark = dto.remark?.trim() || null;
+    const avatarUrl = dto.avatarUrl?.trim() || null;
+    const followerCount =
+      typeof dto.followerCount === 'number' && Number.isFinite(dto.followerCount)
+        ? Math.max(0, Math.round(dto.followerCount))
+        : null;
+
+    if (
+      session.platform === LeadPublishPlatform.xiaohongshu &&
+      !requestedAccountName &&
+      !displayName
+    ) {
+      throw new ConflictException('未识别到真实小红书账号，请进入账号主页后再同步');
+    }
 
     let saved: LeadPlatformAccountWithRelations;
     if (session.accountId) {
@@ -968,6 +995,11 @@ export class PublishingService {
           lastLoginCompletedAt: new Date(),
           lastValidatedAt: new Date(),
           lastError: null,
+          externalMeta: {
+            ...(current.externalMeta && typeof current.externalMeta === 'object' ? (current.externalMeta as Record<string, unknown>) : {}),
+            ...(avatarUrl ? { avatarUrl } : {}),
+            ...(followerCount !== null ? { followerCount } : {}),
+          } as Prisma.InputJsonValue,
           ...(remark !== null ? { remark } : {}),
         },
         include: leadPlatformAccountInclude,
@@ -991,6 +1023,10 @@ export class PublishingService {
             lastValidatedAt: new Date(),
             lastError: null,
             remark,
+            externalMeta: {
+              ...(avatarUrl ? { avatarUrl } : {}),
+              ...(followerCount !== null ? { followerCount } : {}),
+            } as Prisma.InputJsonValue,
           },
           include: leadPlatformAccountInclude,
         });
@@ -1078,6 +1114,13 @@ export class PublishingService {
             lastValidatedAt: new Date(),
             lastLoginCompletedAt: new Date(),
             lastError: null,
+            externalMeta: {
+              ...(current.externalMeta && typeof current.externalMeta === 'object'
+                ? (current.externalMeta as Record<string, unknown>)
+                : {}),
+              ...(result.avatarUrl ? { avatarUrl: result.avatarUrl } : {}),
+              ...(result.followerCount !== null ? { followerCount: result.followerCount } : {}),
+            } as Prisma.InputJsonValue,
           },
           include: leadPlatformAccountInclude,
         });
@@ -1311,6 +1354,13 @@ export class PublishingService {
           lastLoginCompletedAt: new Date(),
           lastValidatedAt: new Date(),
           lastError: null,
+          externalMeta: {
+            ...(account.externalMeta && typeof account.externalMeta === 'object'
+              ? (account.externalMeta as Record<string, unknown>)
+              : {}),
+            ...(result.avatarUrl ? { avatarUrl: result.avatarUrl } : {}),
+            ...(result.followerCount !== null ? { followerCount: result.followerCount } : {}),
+          } as Prisma.InputJsonValue,
         },
         include: leadPlatformAccountInclude,
       });
@@ -2737,6 +2787,38 @@ export class PublishingService {
       }
     }
     return null;
+  }
+
+  private sanitizeExtensionResolvedAccountText(
+    platform: LeadPublishPlatform,
+    value?: string | null,
+  ) {
+    const normalized = value?.trim() || '';
+    if (!normalized) return null;
+
+    const lowered = normalized.toLowerCase();
+    const blockedKeywords: Record<LeadPublishPlatform, string[]> = {
+      [LeadPublishPlatform.xiaohongshu]: [
+        '小红书',
+        'xiaohongshu',
+        '创作服务平台',
+        '创作中心',
+        '发布中心',
+        '内容管理',
+        '数据中心',
+      ],
+      [LeadPublishPlatform.douyin]: ['抖音', 'douyin', '创作者平台'],
+      [LeadPublishPlatform.wechat_mp]: ['视频号', '视频号助手', 'wechat', 'channels'],
+      [LeadPublishPlatform.kuaishou]: ['快手', 'kuaishou', '创作者服务平台'],
+      [LeadPublishPlatform.bilibili]: ['哔哩哔哩', 'bilibili'],
+      [LeadPublishPlatform.wechat_official]: ['公众号', '微信公众平台', 'mp.weixin'],
+    };
+
+    if ((blockedKeywords[platform] ?? []).some((keyword) => lowered.includes(keyword.toLowerCase()))) {
+      return null;
+    }
+
+    return normalized;
   }
 
   private readUnknownPath(value: unknown, path: string[]) {

@@ -499,10 +499,14 @@ model ProductImageDraft {
   id               String   @id @default(cuid())
   /// 创建者用户 ID
   creatorId        String
+  /// 用户提示词
+  prompt           String   @default("")
   /// 草稿标题
   title            String
   /// 草稿正文
   body             String
+  /// 草稿标签
+  tags             String[] @default([])
   /// 图片地址列表
   images           String[]
   /// 尺寸预设
@@ -531,6 +535,8 @@ model VideoDraft {
   id            String                @id @default(cuid())
   /// 创建者用户 ID
   creatorId     String
+  /// 用户提示词
+  prompt        String                @default("")
   /// 草稿来源
   source        VideoDraftSource
   /// 草稿标题

@@ -188,3 +188,11 @@
 - 图文草稿箱编辑弹窗在 `src/pages/StudioDrafts.tsx`，当前仍是旧的“标题/文案/标签/图片”表单堆叠布局
 - 视频草稿箱编辑弹窗在 `src/pages/VideoDrafts.tsx`，当前结构是“状态徽标 -> 标签区 -> 标题区 -> 主内容预览 -> 文案编辑”的统一结果页样式
 - 图文草稿箱若要模仿视频草稿箱 UI，最小改造点集中在 `StudioDrafts.tsx` 的编辑 `Modal`，无需改后端或草稿读写接口
+
+## 2026-05-15 `origin/main` 差异与合并评估补充
+- 当前本地所在分支是 `master`，跟踪 `origin/master`；执行 `git pull` 只会同步 `origin/master`，不会带来 `origin/main` 的最新提交
+- `origin/main` 相对当前 `master` 的更新主题集中在：部署脚本、AI 视频流程、超级站前台资源、文档，以及部分 `publishing`/登录/草稿箱页面
+- 当前本地未提交改动与 `origin/main` 的重叠文件主要有：`server/.env.example`、`server/src/modules/publishing/*`、`src/lib/publishing.ts`、`src/pages/Login.tsx`、`src/pages/Publishing.tsx`、`src/pages/PublishingPlatformLogin.tsx`、`src/pages/StudioDrafts.tsx`
+- 这批重叠文件里，`publishing.service.ts`、`Publishing.tsx`、`PublishingPlatformLogin.tsx` 属于高风险文件；两边都改过，且都承载当前平台登录/一键发布主链路
+- `origin/main` 中还出现了对 `scripts/browser-extension/platform-login-helper/*` 的删除；若直接整分支合并，可能把本地已接通的扩展登录/本地发布脚本误删
+- 以当前工作区状态，更稳妥的方案不是直接 `merge origin/main`，而是先新建保护分支，再按模块挑拣 `origin/main` 中真正需要的文件或提交

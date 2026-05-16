@@ -12,6 +12,11 @@ import {
 export class UpdateVideoDraftDto {
   @IsOptional()
   @IsString()
+  @MaxLength(4000)
+  prompt?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(160)
   title?: string;
 

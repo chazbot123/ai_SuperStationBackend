@@ -3441,7 +3441,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       items.map((item) => this.repairProductDraftImages(user.userId, item)),
     );
 
-    return normalizedItems.map((item) => this.serializeProductImageDraft(item));
+    return normalizedItems.map((item) => this.serializeProductImageDraft(this.repairMalformedProductDraftCopy(item)));
   }
 
   async listVideoDrafts(user: SessionUser) {
@@ -3583,8 +3583,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   async createProductImageDraft(user: SessionUser, dto: CreateProductImageDraftDto) {
+    const prompt = dto.prompt.trim();
     const title = dto.title.trim();
     const body = dto.body.trim();
+    const tags = Array.from(new Set((dto.tags ?? []).map((item) => item.trim()).filter(Boolean))).slice(0, 20);
     const images = dto.images.map((item) => item.trim()).filter(Boolean).slice(0, 12);
 
     if (!title) {
@@ -3598,8 +3600,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const created = await this.prisma.productImageDraft.create({
       data: {
         creatorId: user.userId,
+        prompt,
         title,
         body,
+        tags,
         images,
         sizePreset: dto.sizePreset,
         resolution: dto.resolution,
@@ -3615,6 +3619,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   async createVideoDraft(user: SessionUser, dto: CreateVideoDraftDto) {
+    const prompt = dto.prompt.trim();
     const title = dto.title.trim();
     const durationText = dto.durationText.trim();
     const generatedScript = dto.generatedScript.trim();
@@ -3651,6 +3656,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const created = await this.prisma.videoDraft.create({
       data: {
         creatorId: user.userId,
+        prompt,
         source,
         title,
         platformStyle,
@@ -3761,6 +3767,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
   async updateSocialPost(user: SessionUser, id: string, dto: UpdateSocialPostDto) {
     const existing = await this.findAccessibleSocialPost(user, id);
+    const nextPrompt = dto.prompt !== undefined ? dto.prompt.trim() : existing.prompt;
     const nextTitle = dto.title.trim();
     const nextBody = dto.body.trim();
     const nextTags = (dto.tags ?? existing.tags)
@@ -3780,6 +3787,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const updated = await this.prisma.socialGeneratedPost.update({
       where: { id },
       data: {
+        prompt: nextPrompt,
         title: nextTitle,
         body: nextBody,
         tags: Array.from(new Set(nextTags)),
@@ -3805,8 +3813,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
   async updateProductImageDraft(user: SessionUser, id: string, dto: UpdateProductImageDraftDto) {
     const existing = await this.findAccessibleProductImageDraft(user, id);
+    const nextPrompt = dto.prompt !== undefined ? dto.prompt.trim() : existing.prompt;
     const nextTitle = dto.title.trim();
     const nextBody = dto.body.trim();
+    const nextTags = (dto.tags ?? existing.tags).map((item) => item.trim()).filter(Boolean).slice(0, 20);
     const nextImages = (dto.images ?? existing.images).map((item) => item.trim()).filter(Boolean).slice(0, 12);
 
     if (!nextTitle) {
@@ -3820,8 +3830,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const updated = await this.prisma.productImageDraft.update({
       where: { id },
       data: {
+        prompt: nextPrompt,
         title: nextTitle,
         body: nextBody,
+        tags: Array.from(new Set(nextTags)),
         images: nextImages,
         syncedToLeads: false,
         syncedToProducts: false,
@@ -3906,6 +3918,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
   async updateVideoDraft(user: SessionUser, id: string, dto: UpdateVideoDraftDto) {
     const existing = await this.findAccessibleVideoDraft(user, id);
+    const nextPrompt = dto.prompt !== undefined ? dto.prompt.trim() : existing.prompt;
     const nextTitle = dto.title?.trim() ?? existing.title;
     const nextDurationText = dto.durationText?.trim() ?? existing.durationText;
     const nextGeneratedScript = dto.generatedScript?.trim() ?? existing.generatedScript;
@@ -3949,6 +3962,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const updated = await this.prisma.videoDraft.update({
       where: { id },
       data: {
+        prompt: nextPrompt,
         title: nextTitle,
         platformStyle: nextPlatformStyle,
         publishTitle: nextPublishTitle,
@@ -4120,6 +4134,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   private serializeSocialPost(item: SocialGeneratedPost) {
     return {
       id: item.id,
+      prompt: item.prompt,
       title: item.title,
       createdAt: item.createdAt,
       body: item.body,
@@ -4137,9 +4152,11 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   private serializeProductImageDraft(item: ProductImageDraft) {
     return {
       id: item.id,
+      prompt: item.prompt,
       title: item.title,
       createdAt: item.createdAt,
       body: item.body,
+      tags: item.tags,
       images: item.images,
       downloadableImages: item.images.map((image) => !this.productImageStorage.isManagedPublicUrl(image)),
       sizePreset: item.sizePreset,
@@ -4150,9 +4167,34 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private repairMalformedProductDraftCopy(item: ProductImageDraft) {
+    const normalizedBody = item.body.trim();
+    if (!normalizedBody.startsWith('{') || !/"title"\s*:/.test(normalizedBody) || !/"body"\s*:/.test(normalizedBody)) {
+      return item;
+    }
+
+    const repaired = this.parseGeneratedCopyPayload(normalizedBody, {
+      style: 'xhs',
+      productName: item.title || '产品',
+      prompt: item.prompt || '',
+    });
+
+    if (!repaired.body) {
+      return item;
+    }
+
+    return {
+      ...item,
+      title: repaired.title || item.title,
+      body: repaired.body,
+      tags: repaired.tags.length > 0 ? repaired.tags : item.tags,
+    };
+  }
+
   private serializeVideoDraft(item: VideoDraft) {
     return {
       id: item.id,
+      prompt: item.prompt,
       source: item.source,
       title: item.title,
       platformStyle: item.platformStyle,
@@ -4522,13 +4564,18 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       tags?: unknown;
       text?: unknown;
     }>(raw);
+    const looseParsed = !parsed ? this.parseLooseGeneratedCopyPayload(raw) : null;
     const fallbackStyle = input.style === 'xhs' ? 'xiaohongshu' : input.style;
     const fallbackBody = raw.trim();
     const bodySource =
       typeof parsed?.body === 'string'
         ? parsed.body
+        : typeof looseParsed?.body === 'string'
+          ? looseParsed.body
         : typeof parsed?.text === 'string'
           ? parsed.text
+          : typeof looseParsed?.text === 'string'
+            ? looseParsed.text
           : fallbackBody;
     const body = this.normalizeGeneratedBody(bodySource);
     const fallbackTitle =
@@ -4537,11 +4584,48 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     return {
       title: this.normalizeGeneratedTitle(
-        typeof parsed?.title === 'string' ? parsed.title : fallbackTitle,
+        typeof parsed?.title === 'string'
+          ? parsed.title
+          : typeof looseParsed?.title === 'string'
+            ? looseParsed.title
+            : fallbackTitle,
         fallbackTitle,
       ),
       body,
-      tags: this.normalizeGeneratedTags(parsed?.tags),
+      tags: this.normalizeGeneratedTags(parsed?.tags ?? looseParsed?.tags),
+    };
+  }
+
+  private parseLooseGeneratedCopyPayload(text: string) {
+    const normalized = text.trim();
+    if (!normalized.startsWith('{')) {
+      return null;
+    }
+
+    const titleMatch = normalized.match(/"title"\s*:\s*"([\s\S]*?)"\s*,\s*"body"\s*:/);
+    const bodyMatch = normalized.match(/"body"\s*:\s*"([\s\S]*?)"\s*,\s*"tags"\s*:/);
+    const tagsArrayMatch = normalized.match(/"tags"\s*:\s*\[([\s\S]*?)\]\s*\}?$/);
+    const tagsStringMatch = normalized.match(/"tags"\s*:\s*"([\s\S]*?)"\s*\}?$/);
+
+    const title = titleMatch?.[1]?.trim() ?? '';
+    const body = bodyMatch?.[1]?.trim() ?? '';
+    const tags =
+      tagsArrayMatch?.[1]
+        ?.split(',')
+        .map((item) => item.replace(/^["'\s]+|["'\s]+$/g, '').trim())
+        .filter(Boolean) ??
+      tagsStringMatch?.[1]?.trim() ??
+      '';
+
+    if (!title && !body && !tags) {
+      return null;
+    }
+
+    return {
+      title,
+      body,
+      tags,
+      text: body,
     };
   }
 

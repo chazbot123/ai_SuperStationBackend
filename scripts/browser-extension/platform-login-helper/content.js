@@ -21,6 +21,23 @@
       .trim();
   }
 
+  function parseCountText(value) {
+    const normalized = normalize(value).replace(/[,，]/g, "");
+    if (!normalized) return null;
+    const match = normalized.match(/(\d+(?:\.\d+)?)(万|w|W|k|K)?/);
+    if (!match) return null;
+    const base = Number(match[1]);
+    if (Number.isNaN(base)) return null;
+    const unit = match[2];
+    if (unit === "万" || unit === "w" || unit === "W") {
+      return Math.round(base * 10000);
+    }
+    if (unit === "k" || unit === "K") {
+      return Math.round(base * 1000);
+    }
+    return Math.round(base);
+  }
+
   function getPageText() {
     const text = normalize(document.body?.innerText || document.body?.textContent || "");
     return text.length > 20000 ? text.slice(0, 20000) : text;
@@ -41,6 +58,87 @@
     return "";
   }
 
+  function findFirstImageSrc(selectors) {
+    for (const selector of selectors) {
+      try {
+        const node = document.querySelector(selector);
+        const src = normalize(node?.getAttribute?.("src") || node?.src || "");
+        if (src) {
+          return src;
+        }
+      } catch (_) {
+        // ignore invalid selector
+      }
+    }
+    return "";
+  }
+
+  function findMetricCountByLabel(label) {
+    const labelNodes = Array.from(document.querySelectorAll("span, div, p"));
+    for (const node of labelNodes) {
+      const text = normalize(node.textContent || "");
+      if (!text || !text.includes(label) || text.length > 40) continue;
+      const containers = [
+        node.parentElement,
+        node.parentElement?.parentElement,
+        node.closest?.("li, div, section, article"),
+      ].filter(Boolean);
+      for (const container of containers) {
+        const scopedMetric = normalize(
+          container?.querySelector?.(
+            ".finder-info-num, [class*='finder-info-num'], .numerical, [class*='numerical']",
+          )?.textContent || "",
+        );
+        const parsedScopedMetric = parseCountText(scopedMetric);
+        if (parsedScopedMetric !== null) {
+          return parsedScopedMetric;
+        }
+      }
+    }
+
+    const metricContainers = Array.from(document.querySelectorAll("div, li, section, article"));
+    for (const container of metricContainers) {
+      const text = normalize(container.textContent || "");
+      if (!text || !text.includes(label) || text.length > 160) continue;
+      const scopedMetric = normalize(
+        container.querySelector?.(".finder-info-num, [class*='finder-info-num'], .numerical, [class*='numerical']")
+          ?.textContent || "",
+      );
+      const parsedScopedMetric = parseCountText(scopedMetric);
+      if (parsedScopedMetric !== null) {
+        return parsedScopedMetric;
+      }
+    }
+
+    const nodes = Array.from(document.querySelectorAll("span, div, p"));
+    for (const node of nodes) {
+      const text = normalize(node.textContent || "");
+      if (!text || !text.includes(label) || text.length > 80) continue;
+
+      const directCount = parseCountText(text.replace(label, " "));
+      if (directCount !== null) {
+        return directCount;
+      }
+
+      const parent = node.parentElement;
+      const nearbyCount = normalize(
+        parent?.querySelector?.(".numerical, [class*='numerical'], .finder-info-num, [class*='finder-info-num']")
+          ?.textContent || "",
+      );
+      const parsedNearby = parseCountText(nearbyCount);
+      if (parsedNearby !== null) {
+        return parsedNearby;
+      }
+
+      const siblingText = normalize(parent?.textContent || "");
+      const parsedSibling = parseCountText(siblingText.replace(label, " "));
+      if (parsedSibling !== null) {
+        return parsedSibling;
+      }
+    }
+    return null;
+  }
+
   function extractByRegex(text, regex) {
     const match = text.match(regex);
     return match?.[1]?.trim() || "";
@@ -55,6 +153,30 @@
       kuaishou: ["快手", "kuaishou"],
     };
     return (labels[platform] || []).some((label) => normalized.includes(String(label).toLowerCase()));
+  }
+
+  function isGenericPlatformText(value, platform) {
+    const normalized = normalize(value).toLowerCase();
+    if (!normalized) return true;
+    if (looksLikePlatformLabel(normalized, platform)) return true;
+
+    const genericLabels = {
+      xiaohongshu: [
+        "创作服务平台",
+        "创作中心",
+        "发布中心",
+        "内容管理",
+        "数据中心",
+        "小红书专业号",
+      ],
+      douyin: ["创作者平台", "创作服务平台"],
+      wechat_mp: ["视频号助手", "视频号管理"],
+      kuaishou: ["快手创作者服务平台"],
+    };
+
+    return (genericLabels[platform] || []).some((label) =>
+      normalized.includes(String(label).toLowerCase()),
+    );
   }
 
   function extractNameFromTitle(title, platform) {
@@ -201,7 +323,8 @@
             "div.account-name[data-v-bf295dc2]",
             "[class*='user-name']",
             "[class*='username']",
-            "[class*='name']",
+            "[class*='nickname']",
+            "[class*='account-name']",
           ],
           douyin: [
             "div.name-_lSSDc",
@@ -235,22 +358,56 @@
 
     const profileFromAnchoredText = extractProfileFromPageText(anchoredText, platform);
     const profileFromPageText = extractProfileFromPageText(pageText, platform);
+    const titleFallback =
+      platform === "xiaohongshu"
+        ? null
+        : extractNameFromTitle(document.title || "", platform);
     const displayName =
       directDisplayName ||
       profileFromAnchoredText.displayName ||
       profileFromPageText.displayName ||
-      extractNameFromTitle(document.title || "", platform) ||
+      titleFallback ||
       null;
     const accountName =
       profileFromAnchoredText.accountName ||
       profileFromPageText.accountName ||
       displayName ||
-      extractNameFromTitle(document.title || "", platform) ||
+      titleFallback ||
       null;
 
+    const avatarUrl =
+      platform === "xiaohongshu"
+        ? findFirstImageSrc([
+            "img[src*='img.xiaohongshu.com/avatar']",
+            "img[src*='/avatar/']",
+            ".avatar img",
+            "[class*='avatar'] img",
+            "[class*='user'] img",
+          ]) || null
+        : platform === "wechat_mp"
+          ? findFirstImageSrc([
+              "img.avatar",
+              "img[src*='wx.qlogo.cn/finderhead/']",
+              "[class*='finder'] img.avatar",
+              "[class*='finder'] [class*='avatar'] img",
+              ".weui-desktop-account__info img",
+            ]) || null
+          : null;
+    const followerCount =
+      platform === "xiaohongshu" || platform === "wechat_mp"
+        ? findMetricCountByLabel("粉丝")
+        : null;
+
+    const normalizedDisplayName =
+      displayName && !isGenericPlatformText(displayName, platform) ? displayName : null;
+    const normalizedAccountName =
+      accountName && !isGenericPlatformText(accountName, platform) ? accountName : null;
+
     return {
-      accountName,
-      displayName: displayName && !looksLikePlatformLabel(displayName, platform) ? displayName : null,
+      accountName: normalizedAccountName,
+      displayName: normalizedDisplayName,
+      avatarUrl,
+      followerCount,
     };
   }
 
@@ -356,6 +513,8 @@
         title: document.title || "",
         accountName: profile.accountName,
         displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
+        followerCount: profile.followerCount,
       },
     });
   };

@@ -92,7 +92,7 @@ export class ProductsService {
   }
 
   async create(user: SessionUser, dto: CreateProductDto) {
-    const nextEnglishName = dto.englishName?.trim() || (await this.buildEnglishName(dto.name, user.userId));
+    const nextEnglishName = dto.englishName?.trim() || this.buildEnglishNameFallback(dto.name);
     this.validatePriceFields({
       specialOfferEnabled: dto.specialOfferEnabled ?? false,
       priceText: dto.priceText?.trim() || '',

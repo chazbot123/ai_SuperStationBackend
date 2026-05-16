@@ -148,6 +148,7 @@ type ExpandAvatarVideoScriptResponse = {
 
 export type SocialPostItem = {
   id: string;
+  prompt: string;
   title: string;
   createdAt: string;
   body: string;
@@ -163,9 +164,11 @@ export type SocialPostItem = {
 
 export type ProductImageDraftItem = {
   id: string;
+  prompt: string;
   title: string;
   createdAt: string;
   body: string;
+  tags: string[];
   images: string[];
   downloadableImages?: boolean[];
   sizePreset: "1_1" | "3_4" | "4_5" | "9_16" | "16_9";
@@ -177,6 +180,7 @@ export type ProductImageDraftItem = {
 
 export type VideoDraftRecord = {
   id: string;
+  prompt: string;
   source: "product_video" | "avatar_video";
   title: string;
   platformStyle?: string | null;
@@ -553,6 +557,7 @@ export async function markSocialPostSynced(accessToken: string, id: string) {
 export async function updateSocialPost(input: {
   accessToken: string;
   id: string;
+  prompt?: string;
   title: string;
   body: string;
   tags: string[];
@@ -562,6 +567,7 @@ export async function updateSocialPost(input: {
     method: "PATCH",
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({
+      prompt: input.prompt,
       title: input.title,
       body: input.body,
       tags: input.tags,
@@ -581,8 +587,10 @@ export async function removeSocialPost(accessToken: string, id: string) {
 
 export async function createProductImageDraft(input: {
   accessToken: string;
+  prompt: string;
   title: string;
   body: string;
+  tags?: string[];
   images: string[];
   sizePreset: "1_1" | "3_4" | "4_5" | "9_16" | "16_9";
   resolution: "1k" | "2k" | "4k";
@@ -591,8 +599,10 @@ export async function createProductImageDraft(input: {
     method: "POST",
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({
+      prompt: input.prompt,
       title: input.title,
       body: input.body,
+      tags: input.tags,
       images: input.images,
       sizePreset: input.sizePreset,
       resolution: input.resolution,
@@ -602,6 +612,7 @@ export async function createProductImageDraft(input: {
 
 export async function createVideoDraft(input: {
   accessToken: string;
+  prompt: string;
   source: VideoDraftRecord["source"];
   title: string;
   platformStyle?: string;
@@ -621,6 +632,7 @@ export async function createVideoDraft(input: {
     method: "POST",
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({
+      prompt: input.prompt,
       source: input.source,
       title: input.title,
       platformStyle: input.platformStyle,
@@ -642,16 +654,20 @@ export async function createVideoDraft(input: {
 export async function updateProductImageDraft(input: {
   accessToken: string;
   id: string;
+  prompt?: string;
   title: string;
   body: string;
+  tags?: string[];
   images: string[];
 }) {
   return requestJson<ProductImageDraftItem>(`/api/ai/product-image-drafts/${input.id}`, {
     method: "PATCH",
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({
+      prompt: input.prompt,
       title: input.title,
       body: input.body,
+      tags: input.tags,
       images: input.images,
     }),
   });
@@ -660,6 +676,7 @@ export async function updateProductImageDraft(input: {
 export async function updateVideoDraft(input: {
   accessToken: string;
   id: string;
+  prompt?: string;
   title?: string;
   platformStyle?: string;
   publishTitle?: string;
@@ -679,6 +696,7 @@ export async function updateVideoDraft(input: {
     method: "PATCH",
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({
+      prompt: input.prompt,
       title: input.title,
       platformStyle: input.platformStyle,
       publishTitle: input.publishTitle,

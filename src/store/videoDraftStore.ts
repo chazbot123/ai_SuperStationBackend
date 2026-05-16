@@ -24,6 +24,7 @@ function stripScriptTemplate(script: string) {
 
 export type VideoDraftItem = {
   id: string;
+  prompt: string;
   source: VideoDraftSource;
   title: string;
   platformStyle?: PlatformKey;
@@ -74,7 +75,7 @@ export const useVideoDraftStore = create<VideoDraftState>()(
     }),
     {
       name: "video_drafts_v1",
-      version: 2,
+      version: 3,
       migrate: (persistedState) => {
         const raw = persistedState as any;
         const state = raw?.state?.items ? raw.state : raw;
@@ -83,6 +84,7 @@ export const useVideoDraftStore = create<VideoDraftState>()(
           ...state,
           items: state.items.map((item: VideoDraftItem) => ({
             ...item,
+            prompt: String(item.prompt ?? ""),
             generatedScript: stripScriptTemplate(item.generatedScript),
           })),
         } satisfies VideoDraftState;

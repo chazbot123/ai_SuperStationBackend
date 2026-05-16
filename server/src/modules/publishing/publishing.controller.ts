@@ -114,6 +114,11 @@ export class PublishingController {
     return this.publishingService.retryJob(req.user, id);
   }
 
+  @Post('jobs/:id/delete')
+  deleteJob(@Req() req: { user: SessionUser }, @Param('id') id: string) {
+    return this.publishingService.deleteJob(req.user, id);
+  }
+
   @Get('platform-accounts')
   listPlatformAccounts(
     @Req() req: { user: SessionUser },

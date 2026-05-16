@@ -4,6 +4,7 @@ import type { VideoDraftItem } from "@/store/videoDraftStore";
 export function toVideoDraftItem(record: VideoDraftRecord): VideoDraftItem {
   return {
     id: record.id,
+    prompt: record.prompt,
     source: record.source,
     title: record.title,
     platformStyle: (record.platformStyle as VideoDraftItem["platformStyle"]) ?? undefined,

@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 const PLATFORM_ACCOUNT_AUTH_TYPES = ['cookie', 'token'] as const;
 
@@ -34,4 +34,14 @@ export class SyncPlatformExtensionLoginDto {
   @IsString()
   @MaxLength(1000)
   sourceUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  avatarUrl?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  followerCount?: number;
 }

@@ -16,11 +16,15 @@ type PlatformLoginResult = {
   authPayload: string;
   accountName: string;
   displayName: string | null;
+  avatarUrl: string | null;
+  followerCount: number | null;
 };
 
 type AccountProfile = {
   accountName: string | null;
   displayName: string | null;
+  avatarUrl: string | null;
+  followerCount: number | null;
 };
 
 type PlatformDraftSaveInput = {
@@ -52,6 +56,7 @@ type PageActionWaitOptions = {
 
 type HumanizedEditorOptions = {
   humanizedMode?: 'default' | 'kuaishou-fast';
+  perCharDelay?: number;
 };
 
 type LocatorContext = Page | Frame;
@@ -134,6 +139,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         authPayload: cookiePairs.join('; '),
         accountName: profile.accountName,
         displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
+        followerCount: profile.followerCount,
       };
     });
   }
@@ -552,9 +559,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
           ? 'https://creator.douyin.com/creator-micro/content/upload'
           : 'https://creator.douyin.com/creator-micro/content/publish';
       case LeadPublishPlatform.wechat_mp:
-        return hasVideo
-          ? 'https://channels.weixin.qq.com/platform/post/create'
-          : 'https://channels.weixin.qq.com/platform/post/finderNewLifeCreate';
+        return 'https://channels.weixin.qq.com/platform';
       case LeadPublishPlatform.kuaishou:
         return 'https://cp.kuaishou.com/profile';
       default:
@@ -713,12 +718,16 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       'input[placeholder*="标题"]',
       'textarea[placeholder*="标题"]',
       'input[type="text"]',
-    ], input.title).catch(() => undefined);
-    const editor = await this.fillEditor(page, xiaohongshuEditorSelectors, input.body).catch(() => null);
+    ], input.title, {
+      perCharDelay: 130,
+    }).catch(() => undefined);
+    const editor = await this.fillEditor(page, xiaohongshuEditorSelectors, input.body, {
+      perCharDelay: 120,
+    }).catch(() => null);
     await this.appendPlainTagsAfterBody(page, editor, input.tags);
     await this.clickXiaohongshuPublish(page);
     await this.waitForActionFinished(page, {
-      successHints: ['发布成功', '笔记发布成功', '审核中', '发布中', '笔记管理'],
+      successHints: ['发布成功', '笔记发布成功', '审核中', '发布中'],
       failureHints: ['发布失败', '请完善', '请先上传', '请填写标题'],
       timeoutErrorMessage: '未识别到小红书发布成功状态，请确认页面是否仍停留在发布页',
     });
@@ -763,12 +772,17 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         'input[type="text"]',
       ],
       input.title,
+      {
+        perCharDelay: 130,
+      },
     ).catch(() => undefined);
-    const editor = await this.fillEditor(page, xiaohongshuEditorSelectors, input.body).catch(() => null);
+    const editor = await this.fillEditor(page, xiaohongshuEditorSelectors, input.body, {
+      perCharDelay: 120,
+    }).catch(() => null);
     await this.appendPlainTagsAfterBody(page, editor, input.tags);
     await this.clickXiaohongshuPublish(page);
     await this.waitForActionFinished(page, {
-      successHints: ['发布成功', '笔记发布成功', '审核中', '发布中', '笔记管理'],
+      successHints: ['发布成功', '笔记发布成功', '审核中', '发布中'],
       failureHints: ['发布失败', '请完善', '请先上传', '请填写标题'],
       timeoutErrorMessage: '未识别到小红书视频发布成功状态，请确认页面是否仍停留在发布页',
     });
@@ -888,10 +902,22 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     await this.enterWechatMpImagePublish(page);
     const workContext = await this.getWechatMpEditorContext(page);
+    const bodyWithTags = [input.body.trim(), this.buildPlainTagText(input.tags)]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+    await this.fillWechatMpTitle(workContext, input.title);
+    await this.humanPauseFast(workContext, 420, 780);
+    await this.fillWechatMpDescription(workContext, bodyWithTags);
+    await this.humanPauseFast(workContext, 520, 920);
 
     const uploadTrigger = await this.findFirstLocator(
       workContext,
       [
+        '.upload-content',
+        '.upload-content .center',
+        '.upload-content .upload-tip',
         'div.post-upload-wrap .ant-upload.ant-upload-drag',
         'span.ant-upload.ant-upload-btn',
         'div.ant-upload.ant-upload-drag',
@@ -910,8 +936,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       true,
     );
     if (uploadTrigger) {
-      await this.humanClick(uploadTrigger).catch(() => undefined);
-      await this.humanPauseFast(workContext, 120, 240);
+      await this.humanClickWechatSlow(uploadTrigger).catch(() => undefined);
+      await this.humanPauseFast(workContext, 420, 760);
     }
 
     await this.uploadFiles(
@@ -919,6 +945,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       uploadFiles,
       'image',
       [
+        '.upload-content input[type="file"][accept*="image"]',
+        '.upload-content input[accept*="image"]',
         'div.post-upload-wrap input[type="file"][accept*="image"]',
         '.ant-upload input[type="file"][accept*="image"]',
         'input[type="file"][accept*="image/png"]',
@@ -933,9 +961,6 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       false,
     );
     await this.waitForWechatMpUploadSettled(workContext);
-
-    await this.fillWechatMpTitle(workContext, input.title);
-    await this.fillWechatMpDescription(workContext, input.body);
     await this.ensureWechatMpNoMusic(workContext);
 
     const publishButton = await this.findAndHighlightFirst(workContext, [
@@ -950,8 +975,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       'text=发表',
       'text=发布',
     ]);
-    await workContext.waitForTimeout(600);
-    await this.humanClick(publishButton);
+    await workContext.waitForTimeout(1200);
+    await this.humanClickWechatSlow(publishButton);
     await this.waitForWechatMpPublishFinished(page, workContext);
   }
 
@@ -962,10 +987,20 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   ) {
     await this.enterWechatMpVideoPublish(page);
     const workContext = await this.getWechatMpVideoEditorContext(page);
+    const bodyWithTags = [input.body.trim(), this.buildPlainTagText(input.tags)]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+    await this.fillWechatMpDescription(workContext, bodyWithTags);
+    await this.humanPauseFast(workContext, 520, 920);
 
     const uploadTrigger = await this.findFirstLocator(
       workContext,
       [
+        '.upload-content',
+        '.upload-content .center',
+        '.upload-content .upload-tip',
         'button:has-text("上传视频")',
         '[role="button"]:has-text("上传视频")',
         'div:has-text("上传视频")',
@@ -981,8 +1016,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         () => false,
       );
       if (!uploadedByChooser) {
-        await this.humanClickFast(uploadTrigger).catch(() => undefined);
-        await this.humanPauseFast(page, 160, 280);
+        await this.humanClickWechatSlow(uploadTrigger).catch(() => undefined);
+        await this.humanPauseFast(page, 420, 760);
       }
     }
 
@@ -1018,8 +1053,6 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       );
     });
     await this.waitForWechatMpVideoUploadSettled(workContext);
-    await this.fillWechatMpTitle(workContext, input.title);
-    await this.fillWechatMpDescription(workContext, input.body);
     await this.ensureWechatMpNoMusic(workContext);
 
     const publishButton = await this.findAndHighlightFirst(workContext, [
@@ -1034,8 +1067,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       'text=发表',
       'text=发布',
     ]);
-    await workContext.waitForTimeout(600);
-    await this.humanClick(publishButton);
+    await workContext.waitForTimeout(1200);
+    await this.humanClickWechatSlow(publishButton);
     await this.waitForWechatMpPublishFinished(page, workContext);
   }
 
@@ -1620,7 +1653,12 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     throw new ConflictException('未进入抖音图文发布模式');
   }
 
-  private async fillFirst(page: Page, selectors: string[], value: string) {
+  private async fillFirst(
+    page: Page,
+    selectors: string[],
+    value: string,
+    options?: FillBehaviorOptions,
+  ) {
     const normalized = value.trim();
     if (!normalized) {
       return;
@@ -1628,7 +1666,10 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     const locator = await this.findFirstLocator(page, selectors, true);
     if (locator) {
-      await this.humanType(locator, normalized, { clearExisting: true });
+      await this.humanType(locator, normalized, {
+        clearExisting: true,
+        perCharDelay: options?.perCharDelay ?? 90,
+      });
       return;
     }
 
@@ -1651,7 +1692,10 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       if (options?.humanizedMode === 'kuaishou-fast') {
         await this.humanTypeFast(locator, normalized, { clearExisting: true });
       } else {
-        await this.humanType(locator, normalized, { clearExisting: true });
+        await this.humanType(locator, normalized, {
+          clearExisting: true,
+          perCharDelay: options?.perCharDelay ?? 90,
+        });
       }
       return locator;
     }
@@ -2066,13 +2110,19 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     await this.moveCursorToTagLine(page, undefined, editor);
-    await this.humanClick(editor).catch(() => undefined);
+    await this.humanClickSlow(editor).catch(() => undefined);
     await page.keyboard
       .type(
         normalizedTags.map((tag) => `#${tag}`).join(' '),
-        { delay: 60 },
+        { delay: 105 },
       )
       .catch(() => undefined);
+  }
+
+  private buildPlainTagText(tags: string[]) {
+    return Array.from(new Set(tags.map((item) => item.replace(/^#+/, '').trim()).filter(Boolean)))
+      .map((tag) => `#${tag}`)
+      .join(' ');
   }
 
   private async enterXiaohongshuImagePublish(page: Page) {
@@ -2083,7 +2133,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await page.waitForTimeout(2000);
 
     try {
-      await this.clickFirst(page, [
+      await this.clickFirstSlow(page, [
         'div.publish-card:has-text("发布图文笔记")',
         'div.home-card-wrapper .publish-card:has-text("发布图文笔记")',
         'div.group-list .publish-card:has-text("发布图文笔记")',
@@ -2132,7 +2182,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await page.waitForTimeout(2000);
 
     try {
-      await this.clickFirst(page, [
+      await this.clickFirstSlow(page, [
         'div.publish-card:has-text("发布视频笔记")',
         'div.home-card-wrapper .publish-card:has-text("发布视频笔记")',
         'text=发布视频笔记',
@@ -2156,24 +2206,47 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private async enterWechatMpImagePublish(page: Page) {
-    const targetUrl = 'https://channels.weixin.qq.com/platform/post/finderNewLifeCreate';
-    if (page.url().includes('/platform/post/finderNewLifeCreate')) {
-      return;
-    }
-
-    await page.goto(targetUrl, {
+    await page.goto('https://channels.weixin.qq.com/platform', {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(1300);
+
+    const workContext = await this.getWechatMpEditorContext(page);
+    try {
+      await this.clickFirstWechatSlow(page, [
+        'a:has-text("内容管理")',
+        '.finder-ui-desktop-menu__name:has-text("内容管理")',
+        'span:has-text("内容管理")',
+        'text=内容管理',
+      ]);
+    } catch (_error) {
+      // If the submenu is already expanded, continue directly.
+    }
+    await page.waitForTimeout(1200);
+    await this.clickFirstWechatSlow(page, [
+      'a.finder-ui-desktop-menu__link:has-text("图文")',
+      '.finder-ui-desktop-menu__name:has-text("图文")',
+      'span:has-text("图文")',
+      'text=图文',
+    ]);
+    await page.waitForTimeout(1200);
 
     const ready = await this.findFirstLocator(
-      page,
+      workContext,
       [
-        'xpath=//*[@id="container-wrap"]/div[2]/div/div/div[1]/div[3]/div/div[2]/div[1]/div/div/div/span/div/span/div/div',
-        'xpath=//*[@id="container-wrap"]/div[2]/div/div/div[1]/div[3]/div/div[2]/div[2]/div[1]/div[2]/div/div/span/input',
-        'xpath=//*[@id="container-wrap"]/div[2]/div/div/div[1]/div[3]/div/div[2]/div[2]/div[2]/div[2]/div/div[1]',
-        'xpath=//*[@id="container-wrap"]/div[2]/div/div/div[1]/div[3]/div/div[2]/div[2]/div[9]/div[5]/span/div/button',
+        'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+        'div.post-desc-box div.input-editor[contenteditable]',
+        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        '.upload-content',
+        '.upload-content .center',
+        'button.weui-desktop-btn.weui-desktop-btn_primary:has-text("发表")',
+        'button:has-text("发表")',
+        'div.post-upload-wrap .ant-upload.ant-upload-drag',
+        'span.ant-upload.ant-upload-btn',
+        'div.ant-upload.ant-upload-drag',
+        'text=发布图片动态',
+        'text=可上传最多18张图片',
       ],
       true,
     );
@@ -2181,30 +2254,75 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       return;
     }
 
-    await this.clickFirst(page, [
-      'xpath=/html/body/div[1]/div/div[2]/div[2]/div/wujie-app//html/body/div[1]/div/div/div[2]/div/div/div[1]/div[2]/div[2]/div/div/div/div[2]/div/div[2]/div/button',
+    await this.clickFirstWechatSlow(page, [
+      'button[type="button"].weui-desktop-btn.weui-desktop-btn_primary:has-text("发表图文")',
+      'button.weui-desktop-btn.weui-desktop-btn_primary:has-text("发表图文")',
+      'button[type="button"]:has-text("发表图文")',
       'text=发表图文',
+      'text=发布图文',
       'text=图片和文字',
       'text=图文',
-    ]).catch(() => undefined);
-    await page.waitForTimeout(1200);
+    ]);
+    await page.waitForTimeout(1800);
+
+    const refreshedWorkContext = await this.getWechatMpEditorContext(page);
+    const finalReady = await this.findFirstLocator(
+      refreshedWorkContext,
+      [
+        'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+        'div.post-desc-box div.input-editor[contenteditable]',
+        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        '.upload-content',
+        '.upload-content .center',
+        'button.weui-desktop-btn.weui-desktop-btn_primary:has-text("发表")',
+        'button:has-text("发表")',
+        'text=发布图片动态',
+        'text=可上传最多18张图片',
+      ],
+      true,
+    );
+    if (!finalReady) {
+      throw new ConflictException('未进入视频号图文发布页面');
+    }
   }
 
   private async enterWechatMpVideoPublish(page: Page) {
-    if (page.url().includes('/platform/post/create')) {
-      return;
-    }
-
-    await page.goto('https://channels.weixin.qq.com/platform/post/create', {
+    await page.goto('https://channels.weixin.qq.com/platform', {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
+    await page.waitForTimeout(1300);
+
+    try {
+      await this.clickFirstWechatSlow(page, [
+        'a:has-text("内容管理")',
+        '.finder-ui-desktop-menu__name:has-text("内容管理")',
+        'span:has-text("内容管理")',
+        'text=内容管理',
+      ]);
+    } catch (_error) {
+      // If the submenu is already expanded, continue directly.
+    }
+    await page.waitForTimeout(1200);
+    await this.clickFirstWechatSlow(page, [
+      'a.finder-ui-desktop-menu__link:has-text("视频")',
+      '.finder-ui-desktop-menu__name:has-text("视频")',
+      'span:has-text("视频")',
+      'text=视频',
+    ]);
     await page.waitForTimeout(1200);
 
     const workContext = await this.getWechatMpVideoEditorContext(page);
     const ready = await this.findFirstLocator(
       workContext,
       [
+        '.upload-content',
+        '.upload-content .center',
+        'div.post-desc-box div.input-editor[contenteditable]',
+        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        '[contenteditable][data-placeholder="添加描述"]',
+        'button.weui-desktop-btn.weui-desktop-btn_primary:has-text("发表")',
+        'button:has-text("发表")',
         'button:has-text("上传视频")',
         '[role="button"]:has-text("上传视频")',
         'text=上传视频',
@@ -2224,6 +2342,45 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       false,
     );
     if (!ready) {
+      await this.clickFirstWechatSlow(page, [
+        'button[type="button"].weui-desktop-btn.weui-desktop-btn_primary:has-text("发表视频")',
+        'button[type="button"].weui-desktop-btn.weui-desktop-btn_primary:has-text("发表内容")',
+        'button.weui-desktop-btn.weui-desktop-btn_primary:has-text("发表视频")',
+        'button[type="button"]:has-text("发表视频")',
+        'text=发表视频',
+        'text=发布视频',
+        'text=发表内容',
+        'text=发表',
+      ]);
+      await page.waitForTimeout(1800);
+    }
+
+    const refreshedWorkContext = await this.getWechatMpVideoEditorContext(page);
+    const finallyReady = await this.findFirstLocator(
+      refreshedWorkContext,
+      [
+        '.upload-content',
+        '.upload-content .center',
+        'div.post-desc-box div.input-editor[contenteditable]',
+        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        '[contenteditable][data-placeholder="添加描述"]',
+        'button.weui-desktop-btn.weui-desktop-btn_primary:has-text("发表")',
+        'button:has-text("发表")',
+        'button:has-text("上传视频")',
+        '[role="button"]:has-text("上传视频")',
+        'text=上传视频',
+        'button:has-text("重新上传")',
+        '[role="button"]:has-text("重新上传")',
+        'text=重新上传',
+        'input[type="file"][accept*="video"]',
+        'input[accept*="video"]',
+        'textarea[placeholder*="描述"]',
+        'div[contenteditable][data-placeholder*="描述"]',
+        'text=添加描述',
+      ],
+      false,
+    );
+    if (!finallyReady) {
       throw new ConflictException('未进入视频号视频发布页面');
     }
   }
@@ -2309,7 +2466,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       '未找到视频号标题输入框',
       {
         preferHumanType: true,
-        perCharDelay: 120,
+        perCharDelay: 155,
       },
     );
   }
@@ -2319,6 +2476,10 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       page,
       [
         'div.post-desc-box div.input-editor[contenteditable]',
+        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        'xpath=//div[contains(@class,"input-editor") and @data-placeholder="添加描述"]',
+        '[contenteditable][data-placeholder="添加描述"]',
+        'textarea[placeholder="添加描述"]',
         'div.input-editor[contenteditable][data-placeholder="添加描述, 1000个字符内"]',
         'xpath=//div[contains(@class,"post-desc-box")]//div[contains(@class,"input-editor") and @contenteditable=""]',
         'xpath=//div[contains(@class,"input-editor") and @data-placeholder="添加描述, 1000个字符内"]',
@@ -2336,7 +2497,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       '未找到视频号描述输入框',
       {
         preferHumanType: true,
-        perCharDelay: 110,
+        perCharDelay: 145,
       },
     );
   }
@@ -2356,9 +2517,9 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       return;
     }
 
-    await this.humanPauseFast(page, 300, 520);
-    await this.humanClick(noMusicButton).catch(() => undefined);
-    await this.humanPauseFast(page, 300, 520);
+    await this.humanPauseFast(page, 380, 720);
+    await this.humanClickWechatSlow(noMusicButton).catch(() => undefined);
+    await this.humanPauseFast(page, 380, 720);
   }
 
   private async clickXiaohongshuPublish(page: Page) {
@@ -2370,12 +2531,15 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await page.waitForTimeout(600);
 
     const publishButton = await this.findAndHighlightFirst(page, [
+      'button.ce-btn.bg-red',
+      'button.bg-red:has-text("发布")',
+      'button.ce-btn:has-text("发布")',
       'button.d-button:has-text("发布")',
       'div.publish-page-publish-btn button:has-text("发布")',
       'button:has-text("发布")',
       'text=发布',
     ]);
-    await this.humanClick(publishButton);
+    await this.humanClickSlow(publishButton);
   }
 
   private async clickDouyinTopicOption(page: Page, editor: Locator, tag: string) {
@@ -2549,6 +2713,24 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     throw new ConflictException('未找到目标操作按钮');
   }
 
+  private async clickFirstSlow(page: LocatorContext, selectors: string[]) {
+    const locator = await this.findFirstLocator(page, selectors, true);
+    if (locator) {
+      await this.humanClickSlow(locator);
+      return;
+    }
+    throw new ConflictException('未找到目标操作按钮');
+  }
+
+  private async clickFirstWechatSlow(page: LocatorContext, selectors: string[]) {
+    const locator = await this.findFirstLocator(page, selectors, true);
+    if (locator) {
+      await this.humanClickWechatSlow(locator);
+      return;
+    }
+    throw new ConflictException('未找到目标操作按钮');
+  }
+
   private async findAndHighlightFirst(page: LocatorContext, selectors: string[]) {
     const locator = await this.findFirstLocator(page, selectors, true);
     if (!locator) {
@@ -2698,6 +2880,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
           '.post-video video',
           '.material video',
           '.upload-content video',
+          '.upload-content .upload-file-item',
+          '.upload-content [class*="upload-file"]',
           '.finder-video video',
           '[class*="video"] video',
           'button:has-text("重新上传")',
@@ -2714,7 +2898,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         pageText.includes(hint),
       );
       const placeholderGone =
-        !pageText.includes('上传视频') ||
+        (!pageText.includes('上传视频') && !pageText.includes('上传时长8小时内')) ||
         pageText.includes('重新上传') ||
         pageText.includes('填写标题') ||
         pageText.includes('添加描述');
@@ -2735,6 +2919,38 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await locator.focus().catch(() => undefined);
     await locator.click({ timeout: 5000, delay: 80 }).catch(async () => {
       await locator.click({ timeout: 5000, force: true, delay: 80 });
+    });
+  }
+
+  private async humanClickSlow(locator: Locator) {
+    await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+    await locator.hover({ timeout: 4000 }).catch(() => undefined);
+    await locator.focus().catch(() => undefined);
+    await locator.click({
+      timeout: 6500,
+      delay: this.getRandomDelay(150, 280),
+    }).catch(async () => {
+      await locator.click({
+        timeout: 6500,
+        force: true,
+        delay: this.getRandomDelay(150, 280),
+      });
+    });
+  }
+
+  private async humanClickWechatSlow(locator: Locator) {
+    await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+    await locator.hover({ timeout: 4500 }).catch(() => undefined);
+    await locator.focus().catch(() => undefined);
+    await locator.click({
+      timeout: 7000,
+      delay: this.getRandomDelay(220, 420),
+    }).catch(async () => {
+      await locator.click({
+        timeout: 7000,
+        force: true,
+        delay: this.getRandomDelay(220, 420),
+      });
     });
   }
 
@@ -3173,6 +3389,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         pageTextProfile.displayName ||
         (this.isPendingPlaceholder(inferredName) ? null : inferredName) ||
         null,
+      avatarUrl: directProfile.avatarUrl || null,
+      followerCount: directProfile.followerCount ?? null,
     };
   }
 
@@ -3235,6 +3453,62 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     try {
       const profile = await page.evaluate((currentPlatform) => {
         const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+        const parseCount = (value?: string | null) => {
+          const normalized = normalize(value).replace(/[,，]/g, '');
+          const match = normalized.match(/(\d+(?:\.\d+)?)(万|w|W|k|K)?/);
+          if (!match) return null;
+          const base = Number(match[1]);
+          if (Number.isNaN(base)) return null;
+          const unit = match[2];
+          if (unit === '万' || unit === 'w' || unit === 'W') return Math.round(base * 10000);
+          if (unit === 'k' || unit === 'K') return Math.round(base * 1000);
+          return Math.round(base);
+        };
+        const findMetricCountByLabel = (label: string) => {
+          const labelNodes = Array.from(document.querySelectorAll<HTMLElement>('span, div, p'));
+          for (const node of labelNodes) {
+            const text = normalize(node.innerText || node.textContent);
+            if (!text || !text.includes(label) || text.length > 40) {
+              continue;
+            }
+            const containers = [node.parentElement, node.parentElement?.parentElement, node.closest('li, div, section, article')].filter(Boolean);
+            for (const container of containers) {
+              const scopedMetric = normalize(
+                container?.querySelector<HTMLElement>(
+                  '.finder-info-num, [class*="finder-info-num"], .numerical, [class*="numerical"]',
+                )?.innerText ||
+                  container?.querySelector<HTMLElement>(
+                    '.finder-info-num, [class*="finder-info-num"], .numerical, [class*="numerical"]',
+                  )?.textContent,
+              );
+              const parsedScopedMetric = parseCount(scopedMetric);
+              if (parsedScopedMetric !== null) {
+                return parsedScopedMetric;
+              }
+            }
+          }
+
+          const metricContainers = Array.from(document.querySelectorAll<HTMLElement>('div, li, section, article'));
+          for (const container of metricContainers) {
+            const text = normalize(container.innerText || container.textContent);
+            if (!text || !text.includes(label) || text.length > 160) {
+              continue;
+            }
+            const scopedMetric = normalize(
+              container.querySelector<HTMLElement>(
+                '.finder-info-num, [class*="finder-info-num"], .numerical, [class*="numerical"]',
+              )?.innerText ||
+                container.querySelector<HTMLElement>(
+                  '.finder-info-num, [class*="finder-info-num"], .numerical, [class*="numerical"]',
+                )?.textContent,
+            );
+            const parsedScopedMetric = parseCount(scopedMetric);
+            if (parsedScopedMetric !== null) {
+              return parsedScopedMetric;
+            }
+          }
+          return null;
+        };
         const findDivByText = (keyword: string) =>
           Array.from(document.querySelectorAll<HTMLElement>('div, span, p'))
             .find((node) => normalize(node.innerText || node.textContent).includes(keyword));
@@ -3242,17 +3516,41 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         if (currentPlatform === 'xiaohongshu') {
           const nameNode = document.querySelector<HTMLElement>('.account-name');
           const accountIdNode = findDivByText('小红书账号') || findDivByText('小红书号');
+          const avatarNode = document.querySelector<HTMLImageElement>(
+            'img[src*="img.xiaohongshu.com/avatar"], img[src*="/avatar/"], .avatar img, [class*="avatar"] img',
+          );
+          const followerNode = Array.from(document.querySelectorAll<HTMLElement>('span, div, p')).find((node) =>
+            normalize(node.innerText || node.textContent).includes('粉丝'),
+          );
+          const followerText =
+            normalize(
+              followerNode?.parentElement?.querySelector<HTMLElement>('.numerical, [class*="numerical"]')
+                ?.innerText ||
+                followerNode?.parentElement?.querySelector<HTMLElement>('.numerical, [class*="numerical"]')
+                  ?.textContent,
+            ) ||
+            normalize(followerNode?.innerText || followerNode?.textContent);
           const displayName = normalize(nameNode?.innerText || nameNode?.textContent);
           const accountIdText = normalize(accountIdNode?.innerText || accountIdNode?.textContent);
           const accountName =
             accountIdText.match(/小红书(?:账号|号)\s*[:：]?\s*([A-Za-z0-9_-]+)/)?.[1]?.trim() || '';
-          return displayName || accountName
-            ? { displayName: displayName || null, accountName: accountName || null }
+          const avatarUrl = normalize(avatarNode?.getAttribute('src') || avatarNode?.src);
+          const followerCount = parseCount(followerText);
+          return displayName || accountName || avatarUrl || followerCount !== null
+            ? {
+                displayName: displayName || null,
+                accountName: accountName || null,
+                avatarUrl: avatarUrl || null,
+                followerCount,
+              }
             : null;
         }
 
         if (currentPlatform === 'wechat_mp') {
           const nicknameNode = document.querySelector<HTMLElement>('h2.finder-nickname');
+          const avatarNode = document.querySelector<HTMLImageElement>(
+            'img.avatar, img[src*="wx.qlogo.cn/finderhead/"], [class*="finder"] img.avatar, [class*="finder"] [class*="avatar"] img',
+          );
           const getXPathText = (xpath: string) => {
             const result = document.evaluate(
               xpath,
@@ -3298,6 +3596,21 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
             return { accountId: '', rawText: '' };
           };
+          const followerNode = Array.from(document.querySelectorAll<HTMLElement>('span, div, p')).find((node) =>
+            normalize(node.innerText || node.textContent).includes('粉丝'),
+          );
+          const followerText =
+            normalize(
+              followerNode?.parentElement?.querySelector<HTMLElement>(
+                '.finder-info-num, [class*="finder-info-num"], .numerical, [class*="numerical"]',
+              )?.innerText ||
+                followerNode?.parentElement?.querySelector<HTMLElement>(
+                  '.finder-info-num, [class*="finder-info-num"], .numerical, [class*="numerical"]',
+                )?.textContent,
+            ) ||
+            normalize(followerNode?.innerText || followerNode?.textContent);
+          const avatarUrl = normalize(avatarNode?.getAttribute('src') || avatarNode?.src);
+          const followerCount = findMetricCountByLabel('粉丝') ?? parseCount(followerText);
 
           const displayName =
             normalize(nicknameNode?.innerText || nicknameNode?.textContent) ||
@@ -3317,16 +3630,25 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
           const accountIdFromNodes = findVideoChannelIdFromNodes();
           const accountIdText = accountIdFromXPath || accountIdFromNodes.accountId;
 
-          if (displayName || accountIdText) {
+          if (displayName || accountIdText || avatarUrl || followerCount !== null) {
             return {
               displayName: displayName || null,
               accountName: accountIdText || null,
+              avatarUrl: avatarUrl || null,
+              followerCount,
             };
           }
 
           const idNode = findDivByText('视频号ID') || findDivByText('视频号 Id') || findDivByText('视频号ID:');
           if (!idNode) {
-            return null;
+            return avatarUrl || followerCount !== null
+              ? {
+                  displayName: displayName || null,
+                  accountName: accountIdText || null,
+                  avatarUrl: avatarUrl || null,
+                  followerCount,
+                }
+              : null;
           }
 
           let container: HTMLElement | null = idNode;
@@ -3352,10 +3674,21 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
                     !item.includes('播放'),
                 ) || '';
               const accountName = extractVideoChannelId(text);
-              return {
-                displayName: displayNameFromCard || null,
-                accountName: accountName || null,
-              };
+              if (
+                displayNameFromCard ||
+                accountName ||
+                displayName ||
+                accountIdText ||
+                avatarUrl ||
+                followerCount !== null
+              ) {
+                return {
+                  displayName: displayNameFromCard || displayName || null,
+                  accountName: accountName || accountIdText || null,
+                  avatarUrl: avatarUrl || null,
+                  followerCount,
+                };
+              }
             }
             container = container.parentElement;
           }
@@ -3367,6 +3700,11 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       return {
         accountName: this.normalizeProfileText(profile?.accountName),
         displayName: this.normalizeProfileText(profile?.displayName),
+        avatarUrl: this.normalizeProfileText(profile?.avatarUrl),
+        followerCount:
+          typeof profile?.followerCount === 'number' && Number.isFinite(profile.followerCount)
+            ? profile.followerCount
+            : null,
       };
     } catch (error) {
       this.logger.warn(
@@ -3617,7 +3955,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private assertAuthenticatedProfile(
-    profile: { accountName: string; displayName: string | null },
+    profile: AccountProfile,
     platform: LeadPublishPlatform,
     currentUrl: string,
   ) {
@@ -3650,6 +3988,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     return {
       accountName: resolvedAccountName,
       displayName: resolvedDisplayName,
+      avatarUrl: profile.avatarUrl ?? null,
+      followerCount: profile.followerCount ?? null,
     };
   }
 
@@ -3675,6 +4015,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     return {
       accountName: null,
       displayName: null,
+      avatarUrl: null,
+      followerCount: null,
     };
   }
 
