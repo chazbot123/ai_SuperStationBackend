@@ -3261,6 +3261,52 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 
+  private async waitForViduImageUrls(
+    config: ResolvedModelConfig,
+    taskId: string,
+    template?: string,
+  ): Promise<string[]> {
+    const taskQueryTemplate = this.resolveViduTaskQueryTemplate(config, template);
+    let lastErrorMessage = '图片模型任务未返回图片';
+
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const response = await fetch(this.buildTaskQueryUrl(taskQueryTemplate, taskId), {
+        method: 'GET',
+        headers: {
+          Authorization: this.createJsonHeaders(config).Authorization,
+        },
+      });
+      const data = this.parseJsonSafely(await response.text());
+
+      if (!response.ok) {
+        const message = this.buildUpstreamErrorMessage('图片任务查询失败', data, response.status);
+        if ([400, 401, 403, 404, 422].includes(response.status)) {
+          throw new BadGatewayException(message);
+        }
+        lastErrorMessage = message;
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        continue;
+      }
+
+      const status = this.extractVideoTaskStatus(data);
+      const urls = this.extractHttpUrls(data).filter((url) => /\.(png|jpe?g|webp)(\?|$)/i.test(url) || url.includes('image'));
+
+      if (status === 'failed') {
+        throw new BadGatewayException(
+          this.extractErrorMessage(data) ?? this.extractDeepErrorMessage(data) ?? '图片模型生成失败',
+        );
+      }
+
+      if (status === 'success' && urls.length > 0) {
+        return urls;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+
+    throw new BadGatewayException(lastErrorMessage || '图片模型任务未返回图片');
+  }
+
   private async mapWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
     if (items.length === 0) return;
     const limit = Math.max(1, Math.floor(concurrency));
@@ -4837,6 +4883,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       return `${baseUrl}/images/generations`;
     }
 
+    if (config.protocol === 'vidu_image') {
+      return `${this.normalizeViduEntV2BaseUrl(baseUrl)}/reference2image`;
+    }
+
     if (config.protocol === 'dashscope_video') {
       return `${baseUrl}/video-generation/video-synthesis`;
     }
@@ -4862,7 +4912,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       return headers;
     }
 
-    if (config.protocol === 'vidu_video') {
+    if (config.protocol === 'vidu_video' || config.protocol === 'vidu_image') {
       headers.Authorization = `Token ${config.apiKey}`;
       return headers;
     }
@@ -4919,6 +4969,12 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     if (resolution === '4k') return map4k[sizePreset];
     if (resolution === '2k') return map2k[sizePreset];
     return map1k[sizePreset];
+  }
+
+  private pickViduImageAspectRatio(sizePreset: '1_1' | '3_4' | '4_5' | '9_16' | '16_9') {
+    if (sizePreset === '1_1') return '1:1';
+    if (sizePreset === '16_9') return '16:9';
+    return '9:16';
   }
 
   private extractTaskId(payload: unknown): string | null {
@@ -5033,6 +5089,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       count: number;
     },
   ) {
+    if (config.protocol === 'vidu_image') {
+      return this.viduGenerateImages(config, input);
+    }
+
     if (config.protocol === 'vidu_video') {
       throw new BadRequestException('Vidu 当前仅支持视频模型，不支持图片生成');
     }
@@ -5106,6 +5166,16 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async testImageModelConnection(config: ResolvedModelConfig) {
+    if (config.protocol === 'vidu_image') {
+      await this.viduTestCredits(config, '图片模型测试失败');
+      return {
+        success: true,
+        message: '图片模型连接成功',
+        provider: config.providerName,
+        model: config.modelName,
+      };
+    }
+
     const urls = await this.generateImagesByProtocol(config, {
       prompt: '测试连接，请生成一张简单图片。',
       sizePreset: '1_1',
@@ -5400,7 +5470,77 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return urls;
   }
 
-  private async viduTestCredits(config: ResolvedModelConfig) {
+  private async viduGenerateImages(
+    config: ResolvedModelConfig,
+    input: {
+      prompt: string;
+      sizePreset: '1_1' | '3_4' | '4_5' | '9_16' | '16_9';
+      referenceImages: string[];
+      count: number;
+    },
+  ) {
+    const images = (input.referenceImages ?? [])
+      .map((item) => this.normalizeOptionalReferenceImageInput(item))
+      .filter((item): item is string => !!item)
+      .slice(0, 7);
+
+    if (images.length === 0) {
+      throw new BadRequestException('Vidu 图片模型至少需要 1 张参考图');
+    }
+
+    const requestUrl = this.buildRequestUrl(config);
+    const taskQueryTemplate = this.resolveViduTaskQueryTemplate(config, config.taskQueryUrlTemplate);
+    const seedBase = Math.floor(Math.random() * 2000000000);
+    const urls: string[] = [];
+    let lastErrorMessage = '图片模型未返回有效图片';
+
+    for (let i = 0; i < input.count; i += 1) {
+      const response = await fetch(requestUrl, {
+        method: 'POST',
+        headers: this.createJsonHeaders(config),
+        body: JSON.stringify({
+          model: config.modelName,
+          images,
+          prompt: input.prompt.slice(0, 2000),
+          seed: seedBase + i,
+          aspect_ratio: this.pickViduImageAspectRatio(input.sizePreset),
+        }),
+      });
+      const data = this.parseJsonSafely(await response.text());
+
+      if (!response.ok) {
+        lastErrorMessage = this.buildUpstreamErrorMessage('图片模型调用失败', data, response.status);
+        continue;
+      }
+
+      const directUrls = this.extractHttpUrls(data).filter(
+        (url) => /\.(png|jpe?g|webp)(\?|$)/i.test(url) || url.includes('image'),
+      );
+      if (directUrls.length > 0) {
+        urls.push(directUrls[0]);
+        continue;
+      }
+
+      const taskId = this.extractTaskId(data);
+      if (!taskId) {
+        lastErrorMessage = '图片模型未返回有效任务';
+        continue;
+      }
+
+      const generatedUrls = await this.waitForViduImageUrls(config, taskId, taskQueryTemplate);
+      if (generatedUrls.length > 0) {
+        urls.push(generatedUrls[0]);
+      }
+    }
+
+    if (urls.length === 0) {
+      throw new BadGatewayException(lastErrorMessage);
+    }
+
+    return urls;
+  }
+
+  private async viduTestCredits(config: ResolvedModelConfig, errorLabel = '视频模型测试失败') {
     const baseUrl = this.normalizeViduEntV2BaseUrl(config.baseUrl);
     const url = `${baseUrl}/credits?show_detail=false`;
     const response = await fetch(url, {
@@ -5410,7 +5550,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const data = this.parseJsonSafely(await response.text());
     if (!response.ok) {
       throw new BadGatewayException(
-        this.buildUpstreamErrorMessage('视频模型测试失败', data, response.status),
+        this.buildUpstreamErrorMessage(errorLabel, data, response.status),
       );
     }
   }
