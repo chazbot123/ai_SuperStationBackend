@@ -790,6 +790,9 @@ export class PublishingStoreSearchService {
     if (info === 'INVALID_USER_KEY' || info === 'SERVICE_NOT_AVAILABLE') {
       return '高德地图服务密钥无效或未开通对应能力，请检查 Key 配置';
     }
+    if (info === 'USERKEY_PLAT_NOMATCH') {
+      return '当前高德 Key 与接口平台类型不匹配。门店搜索使用的是高德 Web 服务接口，请改用 Web 服务 Key，并确认已开通对应能力';
+    }
     if (info || infoCode) {
       return `${baseMessage}：${info}${infoCode ? ` (${infoCode})` : ''}`;
     }

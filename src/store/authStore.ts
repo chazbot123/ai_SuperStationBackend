@@ -31,10 +31,47 @@ type MeResponse = {
 
 const AUTH_STORAGE_KEY = "aiadmin_auth_v2";
 const DEVICE_ID_STORAGE_KEY = "aiadmin_device_id";
+let authStorageSyncBound = false;
 const presetCredentials: Partial<Record<RoleKey, { username: string; password: string }>> = {
   main_company: { username: "demo_admin", password: "123456" },
   level1_agent: { username: "agent_a001", password: "123456" },
 };
+
+function parsePersistedAuthState(value: string | null): PersistedAuthState {
+  if (!value) {
+    return { user: null, accessToken: null };
+  }
+
+  try {
+    const parsed = JSON.parse(value) as {
+      state?: Partial<PersistedAuthState> | null;
+    };
+    return {
+      user: parsed.state?.user ?? null,
+      accessToken: parsed.state?.accessToken ?? null,
+    };
+  } catch {
+    return { user: null, accessToken: null };
+  }
+}
+
+function isSameUser(left: AuthUser | null, right: AuthUser | null) {
+  if (!left && !right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.id === right.id
+    && left.username === right.username
+    && left.displayName === right.displayName
+    && left.companyName === right.companyName
+    && left.roleKey === right.roleKey
+    && left.agentId === right.agentId
+  );
+}
 
 function getDeviceId() {
   const existing = window.localStorage.getItem(DEVICE_ID_STORAGE_KEY);
@@ -168,3 +205,26 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+function bindAuthStorageSync() {
+  if (authStorageSyncBound || typeof window === "undefined") {
+    return;
+  }
+
+  authStorageSyncBound = true;
+  window.addEventListener("storage", (event) => {
+    if (event.key !== AUTH_STORAGE_KEY) {
+      return;
+    }
+
+    const next = parsePersistedAuthState(event.newValue);
+    const current = useAuthStore.getState();
+    if (current.accessToken === next.accessToken && isSameUser(current.user, next.user)) {
+      return;
+    }
+
+    useAuthStore.setState(next);
+  });
+}
+
+bindAuthStorageSync();
