@@ -1433,7 +1433,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
           voiceId: audioRequested ? voiceId : null,
           text: audioRequested ? textForTts : '',
           subtitleText,
-          subtitleEnabled: true,
+          subtitleEnabled: dto.subtitleEnabled ?? true,
           ttsTaskId: '',
           audioUrl: null,
           bgmUrl: bgmRequested ? bgmUrl : null,
