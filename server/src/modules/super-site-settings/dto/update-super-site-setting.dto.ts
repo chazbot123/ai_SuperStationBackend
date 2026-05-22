@@ -103,6 +103,14 @@ export class SuperSiteImageSlotDto {
   updatedAt?: string | null;
 }
 
+export class SuperSiteVideoSettingsDto {
+  @IsString()
+  videoUrl!: string;
+
+  @IsString()
+  posterUrl!: string;
+}
+
 export class SuperSiteIndustrySourceConfigDto {
   @IsString()
   key!: string;
@@ -174,6 +182,11 @@ export class UpdateSuperSiteSettingDto {
   @ValidateNested({ each: true })
   @Type(() => SuperSiteImageSlotDto)
   siteImageSlots?: SuperSiteImageSlotDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SuperSiteVideoSettingsDto)
+  siteVideoSettings?: SuperSiteVideoSettingsDto;
 
   @IsOptional()
   @IsArray()

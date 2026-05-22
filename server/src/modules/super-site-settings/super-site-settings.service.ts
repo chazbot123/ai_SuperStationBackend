@@ -1,6 +1,9 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { AiVideoStorageService } from '../ai/ai-video-storage.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProductImageStorageService } from '../products/product-image-storage.service';
+import type { ProductUploadFile } from '../products/product-image.types';
 import {
   SuperSiteImageSlotDto,
   UpdateSuperSiteSettingDto,
@@ -9,6 +12,7 @@ import {
   type SuperSiteMetricDto,
   type SuperSiteModuleDto,
   type SuperSiteSpecialOfferDto,
+  type SuperSiteVideoSettingsDto,
 } from './dto/update-super-site-setting.dto';
 import {
   buildDefaultIndustryKeywords,
@@ -29,6 +33,7 @@ type SuperSiteSettingsView = {
   specialOfferSubtitle: string;
   specialOffers: SuperSiteSpecialOfferDto[];
   siteImageSlots: SuperSiteImageSlotDto[];
+  siteVideoSettings: SuperSiteVideoSettingsDto;
   industrySourceConfigs: SuperSiteIndustrySourceConfig[];
   industryKeywords: string[];
   industryRefreshConfig: SuperSiteIndustryRefreshConfig;
@@ -48,12 +53,15 @@ export type PublicSuperSiteSettingsView = Pick<
   | 'specialOfferSubtitle'
   | 'specialOffers'
   | 'siteImageSlots'
+  | 'siteVideoSettings'
 >;
 
 @Injectable()
 export class SuperSiteSettingsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly productImageStorage: ProductImageStorageService,
+    private readonly aiVideoStorage: AiVideoStorageService,
     @Optional()
     private readonly superSiteIndustryQueueService?: SuperSiteIndustryQueueService,
   ) {}
@@ -77,6 +85,9 @@ export class SuperSiteSettingsService {
       specialOfferSubtitle: existing.specialOfferSubtitle,
       specialOffers: this.readJsonArray<SuperSiteSpecialOfferDto>(existing.specialOffers),
       siteImageSlots: this.readJsonArray<SuperSiteImageSlotDto>(existing.siteImageSlots),
+      siteVideoSettings:
+        this.readJsonObject<SuperSiteVideoSettingsDto>(existing.siteVideoSettings) ??
+        undefined,
       industrySourceConfigs: this.readJsonArray<SuperSiteIndustrySourceConfigDto>(
         existing.industrySourceConfigs,
       ),
@@ -111,6 +122,8 @@ export class SuperSiteSettingsService {
         specialOfferSubtitle: next.specialOfferSubtitle,
         specialOffers: next.specialOffers as unknown as Prisma.InputJsonValue,
         siteImageSlots: next.siteImageSlots as unknown as Prisma.InputJsonValue,
+        siteVideoSettings:
+          next.siteVideoSettings as unknown as Prisma.InputJsonValue,
         industrySourceConfigs:
           next.industrySourceConfigs as unknown as Prisma.InputJsonValue,
         industryKeywords: next.industryKeywords as unknown as Prisma.InputJsonValue,
@@ -132,6 +145,8 @@ export class SuperSiteSettingsService {
         specialOfferSubtitle: next.specialOfferSubtitle,
         specialOffers: next.specialOffers as unknown as Prisma.InputJsonValue,
         siteImageSlots: next.siteImageSlots as unknown as Prisma.InputJsonValue,
+        siteVideoSettings:
+          next.siteVideoSettings as unknown as Prisma.InputJsonValue,
         industrySourceConfigs:
           next.industrySourceConfigs as unknown as Prisma.InputJsonValue,
         industryKeywords: next.industryKeywords as unknown as Prisma.InputJsonValue,
@@ -160,6 +175,9 @@ export class SuperSiteSettingsService {
       specialOfferSubtitle: saved.specialOfferSubtitle,
       specialOffers: this.readJsonArray<SuperSiteSpecialOfferDto>(saved.specialOffers),
       siteImageSlots: this.readJsonArray<SuperSiteImageSlotDto>(saved.siteImageSlots),
+      siteVideoSettings:
+        this.readJsonObject<SuperSiteVideoSettingsDto>(saved.siteVideoSettings) ??
+        undefined,
       industrySourceConfigs: this.readJsonArray<SuperSiteIndustrySourceConfigDto>(
         saved.industrySourceConfigs,
       ),
@@ -186,7 +204,24 @@ export class SuperSiteSettingsService {
       specialOfferSubtitle: settings.specialOfferSubtitle,
       specialOffers: settings.specialOffers,
       siteImageSlots: settings.siteImageSlots,
+      siteVideoSettings: settings.siteVideoSettings,
     };
+  }
+
+  async uploadSiteImage(userId: string, file?: ProductUploadFile) {
+    const uploaded = await this.productImageStorage.uploadProductImage(userId, file);
+    return { url: uploaded.url };
+  }
+
+  async uploadSiteVideo(userId: string, file?: ProductUploadFile) {
+    this.validateVideoFile(file);
+    const uploaded = await this.aiVideoStorage.uploadVideoObject({
+      userId,
+      taskId: 'super-site-brand-video',
+      fileName: this.normalizeVideoFileName(file.originalname),
+      buffer: file.buffer,
+    });
+    return { url: uploaded.url };
   }
 
   private buildDefaultSettings(): SuperSiteSettingsView {
@@ -293,6 +328,10 @@ export class SuperSiteSettingsService {
         },
       ],
       siteImageSlots: [],
+      siteVideoSettings: {
+        videoUrl: '',
+        posterUrl: '',
+      },
       industrySourceConfigs: buildDefaultIndustrySourceConfigs(),
       industryKeywords: buildDefaultIndustryKeywords(),
       industryRefreshConfig: buildDefaultIndustryRefreshConfig(),
@@ -310,6 +349,7 @@ export class SuperSiteSettingsService {
     const savedMetrics = settings?.siteMetrics ?? [];
     const savedOffers = settings?.specialOffers ?? [];
     const savedImageSlots = settings?.siteImageSlots ?? [];
+    const savedSiteVideoSettings = settings?.siteVideoSettings;
     const savedIndustrySourceConfigs = settings?.industrySourceConfigs ?? [];
 
     return {
@@ -349,6 +389,16 @@ export class SuperSiteSettingsService {
           sourceContentId: item.sourceContentId?.trim() || null,
           updatedAt: item.updatedAt?.trim() || null,
         })),
+      siteVideoSettings: {
+        videoUrl:
+          typeof savedSiteVideoSettings?.videoUrl === 'string'
+            ? savedSiteVideoSettings.videoUrl.trim()
+            : defaults.siteVideoSettings.videoUrl,
+        posterUrl:
+          typeof savedSiteVideoSettings?.posterUrl === 'string'
+            ? savedSiteVideoSettings.posterUrl.trim()
+            : defaults.siteVideoSettings.posterUrl,
+      },
       industrySourceConfigs: defaults.industrySourceConfigs.map((item) => ({
         ...item,
         enabled:
@@ -381,5 +431,29 @@ export class SuperSiteSettingsService {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as T)
       : null;
+  }
+
+  private validateVideoFile(file?: ProductUploadFile): asserts file is ProductUploadFile {
+    if (!file) {
+      throw new BadRequestException('请选择视频文件');
+    }
+
+    if (!file.mimetype.startsWith('video/')) {
+      throw new BadRequestException('仅支持上传视频文件');
+    }
+
+    if (file.size <= 0) {
+      throw new BadRequestException('视频文件不能为空');
+    }
+
+    if (file.size > 200 * 1024 * 1024) {
+      throw new BadRequestException('视频大小不能超过 200MB');
+    }
+  }
+
+  private normalizeVideoFileName(fileName: string) {
+    const trimmed = String(fileName || '').trim();
+    const safe = trimmed.replace(/[^\w.\-]+/g, '-');
+    return safe || 'brand-video.mp4';
   }
 }

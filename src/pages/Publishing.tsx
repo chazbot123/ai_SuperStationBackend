@@ -587,40 +587,6 @@ export default function Publishing() {
     }
   }
 
-  function hasSuperSiteImages(item: PublishingContentItem) {
-    return Boolean(item.coverImage) || (Array.isArray(item.images) && item.images.length > 0);
-  }
-
-  function openSuperSiteEditor(item: PublishingContentItem) {
-    if (!accessToken || !user?.id) {
-      setHint("当前登录状态无效，请重新登录后再试。");
-      return;
-    }
-    if (!hasSuperSiteImages(item)) {
-      setHint("当前内容没有可上传到超级站的图片素材。");
-      return;
-    }
-    if (!superSiteBaseUrl) {
-      setHint("请先到超级站配置中心填写“超级站前台地址”后再使用上传超级站。");
-      return;
-    }
-
-    try {
-      const url = new URL(superSiteBaseUrl);
-      url.searchParams.set("userId", user.id);
-      url.searchParams.set("siteEditor", "1");
-      url.searchParams.set("contentId", item.id);
-      url.searchParams.set("editorToken", accessToken);
-      const opened = window.open(url.toString(), "_blank", "noopener,noreferrer");
-      if (!opened) {
-        window.location.assign(url.toString());
-      }
-      setHint("已打开超级站编辑页，请在前台选择图片后点击对应位置，再统一保存。");
-    } catch (error) {
-      setHint(error instanceof Error ? error.message : "超级站前台地址无效");
-    }
-  }
-
   return (
     <div className="space-y-4">
       <Card>
@@ -673,14 +639,6 @@ export default function Publishing() {
                         <div className="flex justify-end gap-2">
                           <Button size="sm" onClick={() => openPublishModal(item.id)}>
                             一键发布
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={!hasSuperSiteImages(item)}
-                            onClick={() => openSuperSiteEditor(item)}
-                          >
-                            上传超级站
                           </Button>
                         </div>
                       </Td>

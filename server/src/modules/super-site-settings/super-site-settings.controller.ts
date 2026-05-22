@@ -9,10 +9,14 @@ import {
   Put,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SessionUser } from '../auth/auth.types';
+import type { ProductUploadFile } from '../products/product-image.types';
 import { CreateSuperSiteIndustryItemDto } from './dto/create-super-site-industry-item.dto';
 import { ListSuperSiteIndustryItemsQueryDto } from './dto/list-super-site-industry-items-query.dto';
 import { ReorderSuperSiteIndustryItemsDto } from './dto/reorder-super-site-industry-items.dto';
@@ -41,6 +45,32 @@ export class SuperSiteSettingsController {
     @Body() dto: UpdateSuperSiteSettingDto,
   ) {
     return this.superSiteSettingsService.updateMySettings(req.user.userId, dto);
+  }
+
+  @Post('me/upload-image')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadMyImage(
+    @Req() req: { user: SessionUser },
+    @UploadedFile() file?: ProductUploadFile,
+  ) {
+    return this.superSiteSettingsService.uploadSiteImage(req.user.userId, file);
+  }
+
+  @Post('me/upload-video')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 200 * 1024 * 1024 },
+    }),
+  )
+  uploadMyVideo(
+    @Req() req: { user: SessionUser },
+    @UploadedFile() file?: ProductUploadFile,
+  ) {
+    return this.superSiteSettingsService.uploadSiteVideo(req.user.userId, file);
   }
 
   @Get('me/industry-items')

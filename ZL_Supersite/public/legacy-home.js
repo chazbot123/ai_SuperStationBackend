@@ -1958,17 +1958,55 @@ let particles = [];
       chatBubble.classList.toggle('is-open');
     });
 
+    // --- 平面3D 悬浮视差交互 ---
+    const pseudo3DWrap = document.getElementById('pseudo3DWrap');
+    if (pseudo3DWrap) {
+      ipContainer.addEventListener('mousemove', (e) => {
+        const rect = ipContainer.getBoundingClientRect();
+        // 计算鼠标在容器中的位置比例 (-1 到 1)
+        const x = (e.clientX - rect.left) / rect.width * 2 - 1;
+        const y = (e.clientY - rect.top) / rect.height * 2 - 1;
+        // 映射到旋转角度 (X轴旋转跟Y轴偏移反向，Y轴旋转跟X轴偏移同向)
+        const rotateX = -y * 15; // 最大上下倾斜 15度
+        const rotateY = x * 15;  // 最大左右倾斜 15度
+        
+        pseudo3DWrap.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.05)`;
+      });
+      ipContainer.addEventListener('mouseleave', () => {
+        // 鼠标移出时恢复原状
+        pseudo3DWrap.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg) scale(1)`;
+      });
+    }
+
     // 鍏抽棴鎸夐挳
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       chatBubble.classList.remove('is-open');
     });
 
+    const localAnswers = {
+      'company-profile': '志林科技致力于石墨烯核心科技的研发与应用，将装饰、供暖与健康理疗完美融合，为您打造智能化、健康化的现代生活空间。',
+      'product-advantages': '我们的核心优势在于：1. 石墨烯速发热技术；2. 远红外健康理疗功能；3. 环保安全的高端装饰材料。',
+      'franchise-rules': '我们为您提供八大政策扶持与六步盈利闭环，从开店选址、装修设计到营销推广，全程一站式帮扶，轻松实现盈利。',
+      'company-address': '我们总部欢迎您的莅临考察！具体地址详情可直接咨询人工客服为您预约专属接待行程。'
+    };
+
     actionBtns.forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         const actionText = e.currentTarget.textContent.trim();
         const targetSelector = e.currentTarget.getAttribute('data-target');
+        const localAction = e.currentTarget.getAttribute('data-action');
+        
         chatBubble.classList.add('is-open');
+        
+        if (localAction && localAnswers[localAction]) {
+          appendChatMessage('visitor', actionText);
+          setTimeout(() => {
+            appendChatMessage('ai', localAnswers[localAction]);
+          }, 500);
+          return;
+        }
+
         await sendSupportMessage(actionText, { targetSelector });
       });
     });

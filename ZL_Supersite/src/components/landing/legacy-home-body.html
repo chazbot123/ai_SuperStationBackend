@@ -17,9 +17,10 @@
       </div>
       <div class="bubble-status" id="chatStatus"></div>
       <div class="bubble-actions">
-        <button class="action-btn" data-target="#video">带我看视频</button>
-        <button class="action-btn" data-target="#special-offers">看特价爆款</button>
-        <button class="action-btn" data-target="#industry">了解应用领域</button>
+        <button class="action-btn local-action" data-action="company-profile">阅读公司简介</button>
+        <button class="action-btn local-action" data-action="product-advantages">看看产品优势</button>
+        <button class="action-btn local-action" data-action="franchise-rules">了解招商规则</button>
+        <button class="action-btn local-action" data-action="company-address">导航公司地址</button>
       </div>
       <div class="chat-input-area">
         <input type="text" id="chatInput" placeholder="输入您想咨询的内容…" autocomplete="off">
@@ -30,111 +31,14 @@
     </div>
     
     <div class="ip-avatar-container" id="ipAvatarContainer">
-      <div class="status-dot"></div>
-      <div class="ip-avatar" id="ipAvatar">
-        <!-- 3D 小熊 SVG 结构 -->
-        <svg viewBox="0 0 200 200" width="100%" height="100%" style="overflow:visible;" class="bear-svg">
-          <defs>
-            <radialGradient id="headGrad" cx="40%" cy="30%" r="70%">
-              <stop offset="0%" stop-color="#ffffff"/>
-              <stop offset="40%" stop-color="#d6c3b0"/>
-              <stop offset="100%" stop-color="#a68e7c"/>
-            </radialGradient>
-            <radialGradient id="bodyGrad" cx="50%" cy="30%" r="70%">
-              <stop offset="0%" stop-color="#ffffff"/>
-              <stop offset="40%" stop-color="#d6c3b0"/>
-              <stop offset="100%" stop-color="#a68e7c"/>
-            </radialGradient>
-            <linearGradient id="hatGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#5a4536"/>
-              <stop offset="100%" stop-color="#241a14"/>
-            </linearGradient>
-            <radialGradient id="snoutGrad" cx="50%" cy="30%" r="50%">
-              <stop offset="0%" stop-color="#ffffff"/>
-              <stop offset="100%" stop-color="#fdfbf9"/>
-            </radialGradient>
-            <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#a6533f" flood-opacity="0.25"/>
-            </filter>
-            <filter id="softShadow">
-              <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#a6533f" flood-opacity="0.15"/>
-            </filter>
-          </defs>
-
-          <!-- Body Group -->
-          <g id="bear-body">
-            <!-- Legs -->
-            <path d="M 70 140 L 70 170 A 12 12 0 0 0 94 170 L 94 140 Z" fill="url(#bodyGrad)"/>
-            <path d="M 106 140 L 106 170 A 12 12 0 0 0 130 170 L 130 140 Z" fill="url(#bodyGrad)"/>
-            
-            <!-- Claws/Paws -->
-            <ellipse cx="76" cy="175" rx="2" ry="3" fill="#2a3642"/>
-            <ellipse cx="82" cy="176" rx="2" ry="3" fill="#2a3642"/>
-            <ellipse cx="88" cy="175" rx="2" ry="3" fill="#2a3642"/>
-            <ellipse cx="112" cy="175" rx="2" ry="3" fill="#2a3642"/>
-            <ellipse cx="118" cy="176" rx="2" ry="3" fill="#2a3642"/>
-            <ellipse cx="124" cy="175" rx="2" ry="3" fill="#2a3642"/>
-
-            <!-- Torso -->
-            <path d="M 75 80 C 50 120, 55 160, 100 160 C 145 160, 150 120, 125 80 Z" fill="url(#bodyGrad)" filter="url(#softShadow)"/>
-            
-            <!-- Belly -->
-            <path d="M 85 95 C 70 120, 75 145, 100 145 C 125 145, 130 120, 115 95 Z" fill="#ffffff" opacity="0.7" filter="blur(2px)"/>
-
-            <!-- Arms -->
-            <path id="left-arm" class="animated-arm" d="M 68 95 C 45 100, 35 135, 45 145 C 55 155, 60 120, 65 110 Z" fill="url(#bodyGrad)" filter="url(#softShadow)" transform-origin="65 100"/>
-            <path id="right-arm" d="M 132 95 C 155 100, 165 135, 155 145 C 145 155, 140 120, 135 110 Z" fill="url(#bodyGrad)" filter="url(#softShadow)" transform-origin="135 100"/>
-          </g>
-
-          <!-- Head Group (Animated) -->
-          <g id="bear-head-group" filter="url(#dropShadow)" class="animated-head">
-            <!-- Ears -->
-            <circle cx="50" cy="50" r="16" fill="url(#bodyGrad)"/>
-            <circle cx="50" cy="50" r="8" fill="#ffffff" opacity="0.8"/>
-            <circle cx="150" cy="50" r="16" fill="url(#bodyGrad)"/>
-            <circle cx="150" cy="50" r="8" fill="#ffffff" opacity="0.8"/>
-
-            <!-- Head Base -->
-            <path d="M 100 35 C 160 35, 165 85, 155 100 C 145 120, 120 125, 100 125 C 80 125, 55 120, 45 100 C 35 85, 40 35, 100 35 Z" fill="url(#headGrad)"/>
-
-            <!-- Blush -->
-            <ellipse cx="55" cy="95" rx="14" ry="7" fill="#ff9eb0" opacity="0.5" filter="blur(3px)"/>
-            <ellipse cx="145" cy="95" rx="14" ry="7" fill="#ff9eb0" opacity="0.5" filter="blur(3px)"/>
-
-            <!-- Snout -->
-            <ellipse cx="100" cy="102" rx="24" ry="18" fill="url(#snoutGrad)" filter="url(#softShadow)"/>
-            
-            <!-- Nose & Mouth -->
-            <path d="M 90 94 C 90 90, 110 90, 110 94 C 110 100, 100 102, 100 102 C 100 102, 90 100, 90 94 Z" fill="#1a2229"/>
-            <ellipse cx="96" cy="93" rx="3" ry="1.5" fill="#ffffff" opacity="0.8" transform="rotate(-15 96 93)"/>
-            <path d="M 90 106 C 95 112, 100 112, 100 104 M 110 106 C 105 112, 100 112, 100 104" stroke="#1a2229" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-
-            <!-- Eyes (Blinking) -->
-            <g class="bear-eyes">
-              <ellipse cx="70" cy="78" rx="7" ry="11" fill="#1a2229"/>
-              <circle cx="68" cy="73" r="3" fill="#ffffff"/>
-              <circle cx="72" cy="82" r="1.5" fill="#ffffff"/>
-              
-              <ellipse cx="130" cy="78" rx="7" ry="11" fill="#1a2229"/>
-              <circle cx="128" cy="73" r="3" fill="#ffffff"/>
-              <circle cx="132" cy="82" r="1.5" fill="#ffffff"/>
-            </g>
-
-            <!-- Eyebrows -->
-            <path d="M 62 58 Q 70 54, 78 58" stroke="#2a3642" stroke-width="3" fill="none" stroke-linecap="round"/>
-            <path d="M 138 58 Q 130 54, 122 58" stroke="#2a3642" stroke-width="3" fill="none" stroke-linecap="round"/>
-
-            <!-- Hat -->
-            <g id="bear-hat">
-              <path d="M 65 35 C 70 5, 130 5, 135 35 Z" fill="url(#hatGrad)"/>
-              <path d="M 50 35 C 80 25, 120 25, 150 35 C 140 42, 60 42, 50 35 Z" fill="#241a14" filter="url(#softShadow)"/>
-              <circle cx="100" cy="12" r="4" fill="#1a1714"/>
-              <path d="M 100 12 L 85 35 M 100 12 L 115 35" stroke="#1a1714" stroke-width="1.5" fill="none" opacity="0.5"/>
-            </g>
-          </g>
-        </svg>
+      <div class="desk-pet__speech-bubble">点击唤醒小林助手哦</div>
+      <div class="ip-avatar desk-pet pseudo-3d" id="ipAvatar">
+        <span class="desk-pet__glow"></span>
+        <span class="desk-pet__shadow"></span>
+        <div class="pseudo-3d-wrap" id="pseudo3DWrap">
+          <img class="ip-avatar-img" src="/assets/images/landing/ai客服.png" alt="平面3D AI 客服小林" />
+        </div>
       </div>
-      <div class="hover-hint">需要帮助吗？</div>
     </div>
   </div>
 

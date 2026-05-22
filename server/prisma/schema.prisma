@@ -327,6 +327,8 @@ model SuperSiteSetting {
   superSiteBaseUrl      String   @default("")
   /// 首页与样板店图片槽位配置
   siteImageSlots        Json?
+  /// 首页视频与封面配置
+  siteVideoSettings     Json?
   /// 行业抓取来源配置
   industrySourceConfigs Json?
   /// 行业关键词配置

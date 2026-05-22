@@ -203,3 +203,11 @@
 - 用户最新要求只重做编辑模块 UI 和交互感觉，明确排除“平台参数、图文还是视频生成这些参数”
 - 两个页面都适合改成“上编辑、下结果”：顶部统一编辑卡片，底部保留各自结果编辑区
 - 参考图表现重点更像浅色卡片工作台、紧凑分组、弱边框、信息密度高的顶部编辑区，而不是当前深色分栏面板
+
+## 2026-05-22 图片视频设置改造补充
+- 后台当前 `/personalization/layout` 虽然已经改名成“图文视频设置”，但页面实际只保存 `superSiteBaseUrl`，并没有图片位和视频位设置表单
+- 旧的“上传超级站 -> 打开前台替换图片”模式真实编辑入口在 `ZL_Supersite/public/legacy-home.js`，保存时也是直接写 `PUT /api/super-site-settings/me`
+- 超级站首页可配置图片当前只覆盖 `siteImageSlots`：`home.hero_main`、`sample.story_tall`、`sample.story_wide`、`sample.gallery_v1-v5`
+- 首页横向滚动图片区当前写死在 `ZL_Supersite/src/components/landing/legacy-home-body.html`，还没有纳入后台配置字段
+- 首页视频节点 `brandVideo` 当前只有静态 `poster="/assets/images/landing/img_17.png"`，仓库里未发现后台视频地址配置字段
+- 最小实现路径应为：保留 `siteImageSlots` 作为图片配置来源，补充滚动图片区固定槽位；同时新增独立视频配置字段给首页视频地址和封面地址使用

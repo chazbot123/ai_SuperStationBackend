@@ -30,6 +30,32 @@ export async function updateMySuperSiteSettings(payload: Partial<Settings>) {
   });
 }
 
+export async function uploadMySuperSiteImage(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const payload = await requestJson<{ url: string }>("/api/super-site-settings/me/upload-image", {
+    method: "POST",
+    headers: getAuthorizationHeaders(),
+    body: formData,
+  });
+
+  return payload.url;
+}
+
+export async function uploadMySuperSiteVideo(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const payload = await requestJson<{ url: string }>("/api/super-site-settings/me/upload-video", {
+    method: "POST",
+    headers: getAuthorizationHeaders(),
+    body: formData,
+  });
+
+  return payload.url;
+}
+
 type IndustryListResponse = {
   items: IndustryItem[];
   pagination: {

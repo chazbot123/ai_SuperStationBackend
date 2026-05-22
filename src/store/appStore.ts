@@ -182,6 +182,10 @@ export type Settings = {
     sourceContentId?: string | null;
     updatedAt?: string | null;
   }>;
+  siteVideoSettings: {
+    videoUrl: string;
+    posterUrl: string;
+  };
   industrySourceConfigs: IndustrySourceConfig[];
   industryKeywords: string[];
   industryRefreshConfig: IndustryRefreshConfig;
@@ -419,6 +423,10 @@ function defaultSettings(): Settings {
     specialOfferSubtitle: "支持首页插入限时优惠、秒杀引导与爆款推荐",
     specialOffers: defaultSpecialOffers(),
     siteImageSlots: [],
+    siteVideoSettings: {
+      videoUrl: "",
+      posterUrl: "",
+    },
     industrySourceConfigs: defaultIndustrySourceConfigs(),
     industryKeywords: defaultIndustryKeywords(),
     industryRefreshConfig: defaultIndustryRefreshConfig(),
@@ -434,6 +442,7 @@ function mergeSettings(settings?: Partial<Settings> | null): Settings {
   const savedMetrics = settings?.siteMetrics ?? [];
   const savedOffers = settings?.specialOffers ?? [];
   const savedImageSlots = settings?.siteImageSlots ?? [];
+  const savedSiteVideoSettings = settings?.siteVideoSettings;
   const savedIndustrySourceConfigs = settings?.industrySourceConfigs ?? [];
   const hasSavedOffers = Array.isArray(settings?.specialOffers);
 
@@ -470,6 +479,16 @@ function mergeSettings(settings?: Partial<Settings> | null): Settings {
         sourceContentId: item.sourceContentId?.trim() || null,
         updatedAt: item.updatedAt?.trim() || null,
       })),
+    siteVideoSettings: {
+      videoUrl:
+        typeof savedSiteVideoSettings?.videoUrl === "string"
+          ? savedSiteVideoSettings.videoUrl.trim()
+          : defaults.siteVideoSettings.videoUrl,
+      posterUrl:
+        typeof savedSiteVideoSettings?.posterUrl === "string"
+          ? savedSiteVideoSettings.posterUrl.trim()
+          : defaults.siteVideoSettings.posterUrl,
+    },
     industrySourceConfigs: defaults.industrySourceConfigs.map((item) => ({
       ...item,
       enabled: savedIndustrySourceConfigs.find((saved) => saved.key === item.key)?.enabled ?? item.enabled,
