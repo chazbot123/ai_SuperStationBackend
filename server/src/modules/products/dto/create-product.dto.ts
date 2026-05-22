@@ -59,6 +59,11 @@ export class CreateProductDto {
   specialTag?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  category?: string;
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(20)
   @IsString({ each: true })

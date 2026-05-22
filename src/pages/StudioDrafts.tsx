@@ -114,6 +114,7 @@ function buildProductPayloadFromDraft(item: DraftItem) {
     originalPriceText: "",
     specialPriceText: "",
     specialTag: "",
+    category: "居家",
   };
 }
 

@@ -872,7 +872,7 @@ export default function PublishingStoreSearch() {
                           />
                         </Td>
                         <Td className="text-zinc-100">{item.name}</Td>
-                        <Td>{item.primaryPhone || "暂无"}</Td>
+                        <Td>{item.primaryPhone || item.telRaw || "暂无"}</Td>
                         <Td className="max-w-[280px] truncate">{item.address || "暂无"}</Td>
                         <Td>{[item.pname, item.cityname, item.adname].filter(Boolean).join(" / ") || "暂无"}</Td>
                         <Td>{item.type || "暂无"}</Td>

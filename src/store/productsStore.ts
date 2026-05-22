@@ -17,6 +17,7 @@ export type ProductItem = {
   originalPriceText: string | null;
   specialPriceText: string | null;
   specialTag: string | null;
+  category: string | null;
   images: string[];
   status: ProductStatus;
   rejectReason: string | null;
@@ -52,6 +53,7 @@ type ProductInput = {
   originalPriceText: string;
   specialPriceText: string;
   specialTag: string;
+  category: string;
   images: string[];
   description: string;
 };
@@ -103,6 +105,7 @@ function normalizePayload(input: ProductInput) {
     originalPriceText?: string;
     specialPriceText?: string;
     specialTag?: string;
+    category?: string;
     images: string[];
     description?: string;
   } = {
@@ -117,10 +120,15 @@ function normalizePayload(input: ProductInput) {
   const originalPriceText = input.originalPriceText.trim();
   const specialPriceText = input.specialPriceText.trim();
   const specialTag = input.specialTag.trim();
+  const category = input.category.trim();
   const description = input.description.trim();
 
   if (englishName) {
     payload.englishName = englishName;
+  }
+
+  if (category) {
+    payload.category = category;
   }
 
   if (!input.specialOfferEnabled && priceText) {

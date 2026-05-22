@@ -149,6 +149,10 @@ export type PlatformExtensionPublishSession = {
   sessionToken: string;
   expiresAt: string;
   job: PublishingJobItem;
+  accountAuthPayload: string;
+  platformAccountId: string;
+  platformAccountName: string;
+  platformAccountDisplayName: string | null;
 };
 
 export type PlatformMcpLoginSession = {
@@ -272,6 +276,18 @@ export async function startExtensionPublishJob(input: { accessToken: string; job
     method: "POST",
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({ jobId: input.jobId }),
+  });
+}
+
+export async function openExtensionPlatformAccountHome(input: { accessToken: string; accountId: string }) {
+  return requestJson<{
+    platform: LeadPlatformStyle;
+    loginUrl: string;
+    authPayload: string;
+  }>("/api/publishing/extension/platform-accounts/open-home", {
+    method: "POST",
+    headers: getAuthHeaders(input.accessToken),
+    body: JSON.stringify({ accountId: input.accountId }),
   });
 }
 

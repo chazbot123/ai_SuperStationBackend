@@ -196,3 +196,10 @@
 - 这批重叠文件里，`publishing.service.ts`、`Publishing.tsx`、`PublishingPlatformLogin.tsx` 属于高风险文件；两边都改过，且都承载当前平台登录/一键发布主链路
 - `origin/main` 中还出现了对 `scripts/browser-extension/platform-login-helper/*` 的删除；若直接整分支合并，可能把本地已接通的扩展登录/本地发布脚本误删
 - 以当前工作区状态，更稳妥的方案不是直接 `merge origin/main`，而是先新建保护分支，再按模块挑拣 `origin/main` 中真正需要的文件或提交
+
+## 2026-05-18 生成页编辑模块改造补充
+- `src/pages/Studio.tsx` 与 `src/pages/StudioImages.tsx` 当前结构高度相似，都是“左编辑右结果”的双栏布局
+- 两个页面都内置了相同的 `SectionBlock / ModelStatusCard / GeneratingPreviewState`，存在明显重复，可抽公共组件
+- 用户最新要求只重做编辑模块 UI 和交互感觉，明确排除“平台参数、图文还是视频生成这些参数”
+- 两个页面都适合改成“上编辑、下结果”：顶部统一编辑卡片，底部保留各自结果编辑区
+- 参考图表现重点更像浅色卡片工作台、紧凑分组、弱边框、信息密度高的顶部编辑区，而不是当前深色分栏面板

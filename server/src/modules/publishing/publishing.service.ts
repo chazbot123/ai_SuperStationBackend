@@ -442,20 +442,10 @@ export class PublishingService {
 
   async startExtensionPublishJob(user: SessionUser, dto: StartExtensionPublishJobDto) {
     const job = await this.findAccessibleLeadPublishJob(user, dto.jobId.trim());
-
-    if (!job.platformAccountId || !job.platformAccount) {
-      throw new ConflictException('该发布任务未绑定平台账号，请重新发起');
-    }
-
-    if (
-      job.platformAccount.status !== PlatformAccountStatus.valid ||
-      job.platformAccount.loginStatus !== PlatformAccountLoginStatus.authenticated
-    ) {
-      throw new ConflictException('所选平台账号尚未完成有效登录');
-    }
-
-    if (!this.isAutoPublishPlatformSupported(job.platform)) {
-      throw new ConflictException('当前阶段仅支持小红书、抖音、视频号、快手自动发布');
+    const accountAuthPayload = this.getValidatedExtensionPublishAuthPayload(job);
+    const platformAccount = job.platformAccount;
+    if (!platformAccount) {
+      throw new NotFoundException('未找到发布账号');
     }
 
     const sessionToken = await this.jwtService.signAsync(
@@ -464,7 +454,7 @@ export class PublishingService {
         jid: job.id,
         uid: user.userId,
         platform: job.platform,
-        aid: job.platformAccount.id,
+        aid: platformAccount.id,
       } satisfies ExtensionPublishTokenPayload,
       {
         expiresIn: `${EXTENSION_PUBLISH_TTL_SECONDS}s`,
@@ -487,6 +477,61 @@ export class PublishingService {
       sessionToken,
       expiresAt: new Date(Date.now() + EXTENSION_PUBLISH_TTL_SECONDS * 1000).toISOString(),
       job: this.serializePublishJob(running),
+      accountAuthPayload,
+      platformAccountId: platformAccount.id,
+      platformAccountName: platformAccount.accountName,
+      platformAccountDisplayName: platformAccount.displayName,
+    };
+  }
+
+  async getExtensionPublishAuth(sessionToken: string) {
+    const tokenPayload = await this.verifyExtensionPublishToken(sessionToken.trim());
+    const job = await this.prisma.leadPublishJob.findFirst({
+      where: {
+        id: tokenPayload.jid,
+        createdById: tokenPayload.uid,
+      },
+      include: leadPublishJobInclude,
+    });
+
+    if (!job) {
+      throw new NotFoundException('扩展发布任务不存在或无权限访问');
+    }
+
+    const accountAuthPayload = this.getValidatedExtensionPublishAuthPayload(job);
+    return {
+      sessionToken: sessionToken.trim(),
+      accountAuthPayload,
+      platform: job.platform,
+      platformAccountId: job.platformAccount!.id,
+    };
+  }
+
+  async openPlatformAccountHome(user: SessionUser, accountId: string) {
+    const account = await this.findAccessiblePlatformAccount(user, accountId.trim());
+
+    if (account.provider !== PlatformAccountProvider.extension) {
+      throw new ConflictException('当前仅支持扩展登录账号的一键切号打开');
+    }
+
+    if (account.authType !== PlatformAccountAuthType.cookie) {
+      throw new ConflictException('当前账号不是 Cookie 登录态，无法在扩展中切号打开');
+    }
+
+    const authPayload = this.decryptAuthPayload(account.authPayloadEncrypted).trim();
+    if (!authPayload || authPayload === PENDING_LOGIN_PLACEHOLDER) {
+      throw new ConflictException('当前账号缺少可用 Cookie，请先重新登录后再试');
+    }
+
+    const validation = this.validateAuthPayload(PlatformAccountAuthType.cookie, authPayload);
+    if (validation.status !== PlatformAccountStatus.valid) {
+      throw new ConflictException(validation.lastError ?? '当前账号 Cookie 不可用，请重新登录后再试');
+    }
+
+    return {
+      platform: account.platform,
+      loginUrl: this.getPlatformAccountOpenUrl(account.platform),
+      authPayload,
     };
   }
 
@@ -947,6 +992,10 @@ export class PublishingService {
       session.platform,
       dto.accountName?.trim() || '',
     );
+    const externalAccountId = this.sanitizeExtensionResolvedAccountText(
+      session.platform,
+      dto.externalAccountId?.trim() || null,
+    );
     const displayName = this.sanitizeExtensionResolvedAccountText(
       session.platform,
       dto.displayName?.trim() || null,
@@ -961,21 +1010,42 @@ export class PublishingService {
     if (
       session.platform === LeadPublishPlatform.xiaohongshu &&
       !requestedAccountName &&
+      !externalAccountId &&
       !displayName
     ) {
       throw new ConflictException('未识别到真实小红书账号，请进入账号主页后再同步');
     }
 
-    let saved: LeadPlatformAccountWithRelations;
-    if (session.accountId) {
-      const current = await this.prisma.leadPlatformAccount.findFirst({
-        where: {
-          id: session.accountId,
-          creatorId: session.userId,
-        },
-        include: leadPlatformAccountInclude,
-      });
+    const resolvedAccountName = this.resolveExtensionAccountName({
+      platform: session.platform,
+      authPayload,
+      accountName: requestedAccountName,
+      externalAccountId,
+      displayName,
+    });
 
+    let saved: LeadPlatformAccountWithRelations;
+    const current = session.accountId
+      ? await this.prisma.leadPlatformAccount.findFirst({
+          where: {
+            id: session.accountId,
+            creatorId: session.userId,
+          },
+          include: leadPlatformAccountInclude,
+        })
+      : externalAccountId
+        ? await this.prisma.leadPlatformAccount.findFirst({
+            where: {
+              creatorId: session.userId,
+              platform: session.platform,
+              provider: PlatformAccountProvider.extension,
+              externalAccountId,
+            },
+            include: leadPlatformAccountInclude,
+          })
+        : null;
+
+    if (current) {
       if (!current) {
         throw new NotFoundException('平台登录账号不存在');
       }
@@ -984,14 +1054,14 @@ export class PublishingService {
         where: { id: current.id },
         data: {
           authType: dto.authType as PlatformAccountAuthType,
-          accountName:
-            requestedAccountName || current.accountName || `auto_${session.platform}_${new Date().getTime().toString(36)}`,
+          accountName: resolvedAccountName || current.accountName,
           displayName,
           authPayloadEncrypted: this.encryptAuthPayload(authPayload),
           authPayloadPreview: this.maskAuthPayload(authPayload),
           loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(session.platform),
           status: PlatformAccountStatus.valid,
           loginStatus: PlatformAccountLoginStatus.authenticated,
+          externalAccountId,
           lastLoginCompletedAt: new Date(),
           lastValidatedAt: new Date(),
           lastError: null,
@@ -1011,14 +1081,14 @@ export class PublishingService {
             creatorId: session.userId,
             platform: session.platform,
             authType: dto.authType as PlatformAccountAuthType,
-            accountName:
-              requestedAccountName || `auto_${session.platform}_${new Date().getTime().toString(36)}`,
+            accountName: resolvedAccountName,
             displayName,
             authPayloadEncrypted: this.encryptAuthPayload(authPayload),
             authPayloadPreview: this.maskAuthPayload(authPayload),
             loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(session.platform),
             status: PlatformAccountStatus.valid,
             loginStatus: PlatformAccountLoginStatus.authenticated,
+            externalAccountId,
             lastLoginCompletedAt: new Date(),
             lastValidatedAt: new Date(),
             lastError: null,
@@ -2819,6 +2889,77 @@ export class PublishingService {
     }
 
     return normalized;
+  }
+
+  private getPlatformAccountOpenUrl(platform: LeadPublishPlatform) {
+    switch (platform) {
+      case LeadPublishPlatform.xiaohongshu:
+        return 'https://creator.xiaohongshu.com/';
+      case LeadPublishPlatform.douyin:
+        return 'https://creator.douyin.com/';
+      case LeadPublishPlatform.wechat_mp:
+        return 'https://channels.weixin.qq.com/platform';
+      case LeadPublishPlatform.kuaishou:
+        return 'https://cp.kuaishou.com/profile';
+      default:
+        return this.platformLoginBrowserService.getPlatformLoginUrl(platform);
+    }
+  }
+
+  private resolveExtensionAccountName(input: {
+    platform: LeadPublishPlatform;
+    authPayload: string;
+    accountName: string | null;
+    externalAccountId: string | null;
+    displayName: string | null;
+  }) {
+    const preferredId = input.externalAccountId || input.accountName;
+    if (preferredId) {
+      return preferredId;
+    }
+
+    if (input.displayName) {
+      const fingerprint = createHash('sha1').update(input.authPayload).digest('hex').slice(0, 10);
+      return `${input.platform}_${fingerprint}`;
+    }
+
+    return `auto_${input.platform}_${new Date().getTime().toString(36)}`;
+  }
+
+  private getValidatedExtensionPublishAuthPayload(job: LeadPublishJobWithRelations) {
+    if (!job.platformAccountId || !job.platformAccount) {
+      throw new ConflictException('该发布任务未绑定平台账号，请重新发起');
+    }
+
+    if (
+      job.platformAccount.status !== PlatformAccountStatus.valid ||
+      job.platformAccount.loginStatus !== PlatformAccountLoginStatus.authenticated
+    ) {
+      throw new ConflictException('所选平台账号尚未完成有效登录');
+    }
+
+    if (!this.isAutoPublishPlatformSupported(job.platform)) {
+      throw new ConflictException('当前阶段仅支持小红书、抖音、视频号、快手自动发布');
+    }
+
+    if (job.platformAccount.authType !== PlatformAccountAuthType.cookie) {
+      throw new ConflictException('扩展发布仅支持 Cookie 登录态账号，请先重新登录该平台账号');
+    }
+
+    const accountAuthPayload = this.decryptAuthPayload(job.platformAccount.authPayloadEncrypted).trim();
+    if (!accountAuthPayload || accountAuthPayload === PENDING_LOGIN_PLACEHOLDER) {
+      throw new ConflictException('所选平台账号缺少可用 Cookie，请先重新登录后再发布');
+    }
+
+    const authValidation = this.validateAuthPayload(
+      PlatformAccountAuthType.cookie,
+      accountAuthPayload,
+    );
+    if (authValidation.status !== PlatformAccountStatus.valid) {
+      throw new ConflictException(authValidation.lastError ?? '所选平台账号 Cookie 校验未通过');
+    }
+
+    return accountAuthPayload;
   }
 
   private readUnknownPath(value: unknown, path: string[]) {

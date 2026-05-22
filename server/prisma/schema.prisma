@@ -417,6 +417,8 @@ model Product {
   description        String?
   /// 商品状态
   status             ProductStatus @default(draft)
+  /// 商品类别
+  category           String?       @default("居家")
   /// 驳回原因
   rejectReason       String?
   /// 提审时间

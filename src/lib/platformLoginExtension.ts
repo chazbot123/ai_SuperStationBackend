@@ -21,12 +21,19 @@ type ExtensionRequestPayload =
       session: PlatformExtensionLoginSession;
       apiBaseUrl: string;
       platform: LeadPlatformStyle;
+      forceFreshLogin?: boolean;
     }
   | {
       action: "START_PUBLISH";
       session: PlatformExtensionPublishSession;
       apiBaseUrl: string;
       platform: LeadPlatformStyle;
+    }
+  | {
+      action: "OPEN_ACCOUNT_HOME";
+      platform: LeadPlatformStyle;
+      loginUrl: string;
+      authPayload: string;
     };
 
 type ExtensionResponseMessage = {
@@ -129,12 +136,14 @@ export async function startPlatformLoginExtensionSession(input: {
   session: PlatformExtensionLoginSession;
   platform: LeadPlatformStyle;
   apiBaseUrl: string;
+  forceFreshLogin?: boolean;
 }) {
   const response = await postExtensionRequest({
     action: "START_LOGIN",
     session: input.session,
     platform: input.platform,
     apiBaseUrl: input.apiBaseUrl,
+    forceFreshLogin: input.forceFreshLogin,
   });
 
   if (!response.ok) {
@@ -156,6 +165,23 @@ export async function startPlatformPublishExtensionSession(input: {
 
   if (!response.ok) {
     throw new Error(response.message || "本地发布扩展启动失败");
+  }
+}
+
+export async function openPlatformAccountHomeInExtension(input: {
+  platform: LeadPlatformStyle;
+  loginUrl: string;
+  authPayload: string;
+}) {
+  const response = await postExtensionRequest({
+    action: "OPEN_ACCOUNT_HOME",
+    platform: input.platform,
+    loginUrl: input.loginUrl,
+    authPayload: input.authPayload,
+  });
+
+  if (!response.ok) {
+    throw new Error(response.message || "扩展打开账号页面失败");
   }
 }
 

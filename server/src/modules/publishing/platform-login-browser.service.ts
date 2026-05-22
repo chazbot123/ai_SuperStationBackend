@@ -179,7 +179,11 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
               }
               break;
             case LeadPublishPlatform.douyin:
-              await this.publishDouyinContent(page, input, uploadFiles);
+              if (input.videoUrl) {
+                await this.publishDouyinVideoPost(page, input, uploadFiles);
+              } else {
+                await this.publishDouyinImagePost(page, input, uploadFiles);
+              }
               break;
             case LeadPublishPlatform.wechat_mp:
               if (input.videoUrl) {
@@ -788,58 +792,57 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     });
   }
 
-  private async publishDouyinContent(
+  private async publishDouyinImagePost(
     page: Page,
     input: PlatformDraftSaveInput,
     uploadFiles: string[],
   ) {
-    let douyinBody = input.body;
-    this.logger.log(`[douyin-publish] start job=${input.jobId} video=${Boolean(input.videoUrl)} tags=${input.tags.length}`);
-    await this.prepareDouyinPublishMode(page, Boolean(input.videoUrl));
+    if (input.videoUrl) {
+      throw new ConflictException('当前抖音图文发布不支持视频稿件');
+    }
+
+    this.logger.log(`[douyin-image-publish] start job=${input.jobId} tags=${input.tags.length}`);
+    await this.prepareDouyinImagePublishMode(page);
+    await this.openDouyinImageUpload(page).catch(() => undefined);
+    await this.uploadFiles(page, uploadFiles, 'image', [
+      'input[type="file"][accept*="image/png"]',
+      'input[type="file"][accept*="image/jpeg"]',
+      'input[type="file"][accept*="image/webp"]',
+      'input[type="file"][accept*="image/*"]',
+      'input[accept*="image/png"]',
+      'input[accept*="image/jpeg"]',
+      'input[accept*="image/webp"]',
+      'input[accept*="image/*"]',
+      'input[type="file"][multiple]',
+      'input[type="file"]',
+    ]);
+    await this.finalizeDouyinPublish(page, input, false);
+  }
+
+  private async publishDouyinVideoPost(
+    page: Page,
+    input: PlatformDraftSaveInput,
+    uploadFiles: string[],
+  ) {
     if (!input.videoUrl) {
-      await this.openDouyinImageUpload(page).catch(() => undefined);
+      throw new ConflictException('当前抖音视频发布缺少视频稿件');
     }
-    try {
-      await this.uploadFiles(
-        page,
-        uploadFiles,
-        input.videoUrl ? 'video' : 'image',
-        input.videoUrl
-          ? undefined
-          : [
-              'input[type="file"][accept*="image/png"]',
-              'input[type="file"][accept*="image/jpeg"]',
-              'input[type="file"][accept*="image/webp"]',
-              'input[type="file"][accept*="image/*"]',
-              'input[accept*="image/png"]',
-              'input[accept*="image/jpeg"]',
-              'input[accept*="image/webp"]',
-              'input[accept*="image/*"]',
-              'input[type="file"][multiple]',
-            ],
-        input.videoUrl ? true : false,
-      );
-    } catch (error) {
-      if (input.videoUrl) {
-        throw error;
-      }
-      await this.prepareDouyinPublishMode(page, false);
-      await this.openDouyinImageUpload(page).catch(() => undefined);
-      await this.uploadFiles(page, uploadFiles, 'image', [
-        'input[type="file"][accept*="image/png"]',
-        'input[type="file"][accept*="image/jpeg"]',
-        'input[type="file"][accept*="image/webp"]',
-        'input[type="file"][accept*="image/*"]',
-        'input[accept*="image/png"]',
-        'input[accept*="image/jpeg"]',
-        'input[accept*="image/webp"]',
-        'input[accept*="image/*"]',
-        'input[type="file"][multiple]',
-        'input[type="file"]',
-      ]);
-    }
+
+    this.logger.log(`[douyin-video-publish] start job=${input.jobId} tags=${input.tags.length}`);
+    await this.prepareDouyinVideoPublishMode(page);
+    await this.openDouyinVideoUpload(page).catch(() => undefined);
+    await this.uploadFiles(page, uploadFiles, 'video', undefined, true);
+    await this.finalizeDouyinPublish(page, input, true);
+  }
+
+  private async finalizeDouyinPublish(
+    page: Page,
+    input: PlatformDraftSaveInput,
+    hasVideo: boolean,
+  ) {
+    let douyinBody = input.body;
     this.logger.log(`[douyin-publish] upload-finished job=${input.jobId}`);
-    await this.waitForDouyinUploadSettled(page, Boolean(input.videoUrl));
+    await this.waitForDouyinUploadSettled(page, hasVideo);
     this.logger.log(`[douyin-publish] upload-settled job=${input.jobId}`);
     const normalizedTitle = input.title.trim();
     if (normalizedTitle) {
@@ -856,6 +859,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
           'input[maxlength]',
         ],
         normalizedTitle,
+        { perCharDelay: 115 },
       )
         .then(() => true)
         .catch((error) => {
@@ -885,8 +889,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       '.primary-cECiOJ:has-text("发布")',
       'text=发布',
     ]);
-    await page.waitForTimeout(800);
-    await this.humanClick(publishButton);
+    await page.waitForTimeout(1200);
+    await this.humanClickSlow(publishButton);
     this.logger.log(`[douyin-publish] publish-clicked job=${input.jobId}`);
     await this.waitForDouyinPublishFinished(page);
   }
@@ -1574,72 +1578,118 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     return snapshots;
   }
 
-  private async prepareDouyinPublishMode(page: Page, hasVideo: boolean) {
-    const currentUrl = page.url();
-    if (!hasVideo) {
-      if (currentUrl.includes('/content/publish')) {
-        await this.clickFirst(page, ['text=高清发布']).catch(() => undefined);
-        await page.waitForTimeout(1500);
-      }
+  private async prepareDouyinImagePublishMode(page: Page) {
+    const ready = await this.findFirstLocator(
+      page,
+      [
+        'button.container-drag-btn-k6XmB4:has-text("上传图文")',
+        'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4:has-text("上传图文")',
+        'input[type="file"][accept*="image"]',
+        'input[placeholder="添加作品标题"]',
+        'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
+      ],
+      false,
+    );
+    if (ready) {
+      return;
+    }
 
-      await this.clickFirst(page, [
+    await page.goto('https://creator.douyin.com/creator-micro/home', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+    await page.waitForTimeout(1800);
+
+    await this.clickFirstSlow(page, [
+      'div.bg-tCBPTN:has-text("发布图文")',
+      'div.bg-tCBPTN:has(div.title-HvY9Az:has-text("发布图文"))',
+      'div.content-V1koTs:has(div.title-HvY9Az:has-text("发布图文"))',
+      'div.title-HvY9Az:has-text("发布图文")',
+    ]).catch(() => undefined);
+    await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
+    await page.waitForTimeout(1800);
+
+    try {
+      await this.ensureDouyinImageModeReady(page);
+    } catch {
+      await page.goto('https://creator.douyin.com/creator-micro/content/publish', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+      await page.waitForTimeout(1500);
+      await this.clickFirstSlow(page, ['text=高清发布']).catch(() => undefined);
+      await page.waitForTimeout(1200);
+      await this.clickFirstSlow(page, [
         'text=发布图文',
         'button:has-text("发布图文")',
         '[role="tab"]:has-text("发布图文")',
         'text=图文',
       ]).catch(() => undefined);
       await page.waitForTimeout(1500);
-      try {
-        await this.ensureDouyinImageModeReady(page);
-      } catch {
-        await page.goto('https://creator.douyin.com/creator-micro/content/publish', {
-          waitUntil: 'domcontentloaded',
-          timeout: 30000,
-        });
-        await page.waitForTimeout(1500);
-        await this.clickFirst(page, ['text=高清发布']).catch(() => undefined);
-        await page.waitForTimeout(1200);
-        await this.clickFirst(page, [
-          'text=发布图文',
-          'button:has-text("发布图文")',
-          '[role="tab"]:has-text("发布图文")',
-          'text=图文',
-        ]).catch(() => undefined);
-        await page.waitForTimeout(1500);
-        await this.ensureDouyinImageModeReady(page);
-      }
+      await this.ensureDouyinImageModeReady(page);
+    }
+  }
+
+  private async prepareDouyinVideoPublishMode(page: Page) {
+    const ready = await this.findFirstLocator(
+      page,
+      [
+        'button:has-text("上传视频")',
+        'input[type="file"][accept*="video"]',
+        'input[placeholder*="填写作品标题"]',
+        'div[contenteditable="true"][data-placeholder="添加作品简介"]',
+      ],
+      false,
+    );
+    if (ready) {
       return;
     }
 
-    if (currentUrl.includes('/content/publish')) {
-      await this.clickFirst(page, ['text=高清发布']).catch(() => undefined);
-      await page.waitForTimeout(1500);
+    await page.goto('https://creator.douyin.com/creator-micro/home', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+    await page.waitForTimeout(1800);
+    await this.clickFirstSlow(page, [
+      'div.bg-tCBPTN:has-text("发布视频")',
+      'div[class*="bg-"]:has-text("发布视频")',
+      'div[class*="content"]:has-text("发布视频")',
+      'div:has-text("发布视频")',
+      'text=发布视频',
+    ]).catch(() => undefined);
+    await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => undefined);
+    await page.waitForTimeout(1800);
+
+    const afterHomeReady = await this.findFirstLocator(
+      page,
+      [
+        'button:has-text("上传视频")',
+        'input[type="file"][accept*="video"]',
+        'input[placeholder*="填写作品标题"]',
+        'div[contenteditable="true"][data-placeholder="添加作品简介"]',
+      ],
+      false,
+    );
+    if (afterHomeReady) {
+      return;
     }
 
-    await this.clickFirst(page, ['text=发布视频']).catch(() => undefined);
-    await page.waitForTimeout(1000);
-    const ready = await page
+    await page.goto('https://creator.douyin.com/creator-micro/content/upload', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+    await page.waitForTimeout(1500);
+    await page
       .waitForSelector('input[type="file"][accept*="video"]', { timeout: 8000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!ready) {
-      await page.goto('https://creator.douyin.com/creator-micro/content/upload', {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000,
-      });
-      await page.waitForTimeout(1500);
-      await page
-        .waitForSelector('input[type="file"][accept*="video"]', { timeout: 8000 })
-        .catch(() => undefined);
-    }
+      .catch(() => undefined);
   }
 
   private async ensureDouyinImageModeReady(page: Page) {
     const ready = await this.findFirstLocator(
       page,
       [
-        'button:has-text("上传图文")',
-        'text=上传图文',
+        'button.container-drag-btn-k6XmB4:has-text("上传图文")',
+        'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4:has-text("上传图文")',
         'input[type="file"][accept*="image"]',
         'input[placeholder="添加作品标题"]',
         'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
@@ -1756,8 +1806,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
       const trigger = await this.findFirstLocator(page, douyinEditorTriggerSelectors, true);
       if (trigger) {
-        await this.humanClick(trigger).catch(() => undefined);
-        await page.waitForTimeout(400);
+    await this.humanClickSlow(trigger).catch(() => undefined);
+        await page.waitForTimeout(620);
         const activatedLocator =
           (await this.findFirstLocator(page, douyinEditorSelectors, true)) ??
           (await this.findFirstLocator(page, douyinEditorSelectors, false));
@@ -1782,12 +1832,12 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     await locator.scrollIntoViewIfNeeded().catch(() => undefined);
-    await locator.click({ timeout: 5000, force: true, delay: 80 }).catch(() => undefined);
-    await this.humanClick(locator).catch(() => undefined);
+    await locator.click({ timeout: 6000, force: true, delay: this.getRandomDelay(180, 320) }).catch(() => undefined);
+    await this.humanClickSlow(locator).catch(() => undefined);
     await page.keyboard.press('Control+A').catch(() => undefined);
     await page.keyboard.press('Backspace').catch(() => undefined);
-    await page.keyboard.type(normalized, { delay: 85 }).catch(() => undefined);
-    await page.waitForTimeout(300);
+    await page.keyboard.type(normalized, { delay: 75 }).catch(() => undefined);
+    await page.waitForTimeout(520);
 
     if (await this.hasDouyinDescriptionText(page, normalized)) {
       return;
@@ -1824,7 +1874,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     await refreshedLocator.click({ timeout: 5000, force: true, delay: 80 }).catch(() => undefined);
     await page.keyboard.press('Control+A').catch(() => undefined);
     await page.keyboard.press('Backspace').catch(() => undefined);
-    await page.keyboard.type(normalized, { delay: 60 }).catch(() => undefined);
+    await page.keyboard.type(normalized, { delay: 75 }).catch(() => undefined);
     await page.waitForTimeout(300);
 
     if (await this.hasDouyinDescriptionText(page, normalized)) {
@@ -2078,26 +2128,25 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     await this.moveCursorToTagLine(page, undefined, editor);
 
-    for (const tag of normalizedTags) {
+    for (const [index, tag] of normalizedTags.entries()) {
       this.logger.log(`[douyin-topic] start tag=${tag}`);
-      await this.humanClick(editor).catch(() => undefined);
+      await this.humanClickSlow(editor).catch(() => undefined);
       await page.keyboard.press('Control+End').catch(() => undefined);
-      await page.waitForTimeout(100);
-      await this.humanClick(topicButton).catch(() => undefined);
-      this.logger.log(`[douyin-topic] topic-button-clicked tag=${tag}`);
-      await page.waitForTimeout(300);
-      await page.keyboard.type(tag, { delay: 60 }).catch(() => undefined);
+      await page.waitForTimeout(220);
+      await page.keyboard.type(`${index > 0 ? ' ' : ''}#${tag}`, { delay: 105 }).catch(() => undefined);
       this.logger.log(`[douyin-topic] typed tag=${tag}`);
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(620);
+      await this.humanClickSlow(topicButton).catch(() => undefined);
+      this.logger.log(`[douyin-topic] topic-button-clicked tag=${tag}`);
+      await page.waitForTimeout(520);
       const applied = await this.clickDouyinTopicOption(page, editor, tag);
       if (applied) {
         this.logger.log(`[douyin-topic] applied tag=${tag}`);
         await this.finalizeDouyinTagInput(page, editor);
       } else {
-        this.logger.warn(`[douyin-topic] fallback-plain tag=${tag}`);
-        await this.fallbackAppendPlainTag(page, editor, tag);
+        this.logger.warn(`[douyin-topic] topic-candidate-not-applied tag=${tag}`);
       }
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(520);
     }
   }
 
@@ -2592,12 +2641,12 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
           continue;
         }
 
-        await this.humanClick(candidate).catch(async () => {
+        await this.humanClickSlow(candidate).catch(async () => {
           const clickableParent = candidate
             .locator('xpath=ancestor-or-self::div[contains(@class,"tag-dVUDkJ")][1]')
             .first();
           if (await clickableParent.count().catch(() => 0)) {
-            await this.humanClick(clickableParent).catch(() => undefined);
+            await this.humanClickSlow(clickableParent).catch(() => undefined);
           }
         });
         return true;
@@ -2625,10 +2674,10 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
         continue;
       }
 
-      await this.humanClick(candidate).catch(async () => {
+      await this.humanClickSlow(candidate).catch(async () => {
         const clickableParent = candidate.locator('xpath=ancestor-or-self::div[contains(@class,"tag-dVUDkJ")][1]').first();
         if (await clickableParent.count().catch(() => 0)) {
-          await this.humanClick(clickableParent).catch(() => undefined);
+          await this.humanClickSlow(clickableParent).catch(() => undefined);
         }
       });
       return true;
@@ -2649,8 +2698,6 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     await this.humanClick(editor).catch(() => undefined);
     await page.keyboard.press('Control+End').catch(() => undefined);
-    await page.waitForTimeout(120);
-    await page.keyboard.press('Enter').catch(() => undefined);
     await page.waitForTimeout(120);
   }
 
@@ -2758,13 +2805,61 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private async openDouyinImageUpload(page: Page) {
-    await this.clickFirst(page, [
-      'button:has-text("上传图文")',
-      '.container-drag-upload-tL99XD button',
-      '[role="button"]:has-text("上传图文")',
-      'text=上传图文',
-      'text=上传图片',
+    const readyInput = await this.findFirstLocator(
+      page,
+      [
+        'input[type="file"][accept*="image/png"]',
+        'input[type="file"][accept*="image/jpeg"]',
+        'input[type="file"][accept*="image/webp"]',
+        'input[type="file"][accept*="image/*"]',
+        'input[accept*="image/png"]',
+        'input[accept*="image/jpeg"]',
+        'input[accept*="image/webp"]',
+        'input[accept*="image/*"]',
+        'input[type="file"][multiple]',
+        'input[type="file"]',
+      ],
+      false,
+    );
+    if (readyInput) {
+      return;
+    }
+
+    await this.clickFirstSlow(page, [
+      'button.container-drag-btn-k6XmB4:has-text("上传图文")',
+      'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4:has-text("上传图文")',
     ]);
+    await page
+      .waitForSelector('input[type="file"]', { timeout: 10000 })
+      .catch(() => undefined);
+    await page.waitForTimeout(800);
+  }
+
+  private async openDouyinVideoUpload(page: Page) {
+    const readyInput = await this.findFirstLocator(
+      page,
+      [
+        'input[type="file"][accept*="video/mp4"]',
+        'input[type="file"][accept*="video/*"]',
+        'input[type="file"][accept*="video"]',
+        'input[accept*="video/mp4"]',
+        'input[accept*="video/*"]',
+        'input[accept*="video"]',
+        'input[type="file"]',
+      ],
+      false,
+    );
+    if (readyInput) {
+      return;
+    }
+
+    await this.clickFirstSlow(page, [
+      'button.container-drag-btn-k6XmB4:has-text("上传视频")',
+      'button:has-text("上传视频")',
+    ]).catch(() => undefined);
+    await page
+      .waitForSelector('input[type="file"]', { timeout: 10000 })
+      .catch(() => undefined);
     await page.waitForTimeout(800);
   }
 
@@ -3132,8 +3227,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       return;
     }
 
-    await this.humanClick(declarationSelect).catch(() => undefined);
-    await page.waitForTimeout(300);
+    await this.humanClickSlow(declarationSelect).catch(() => undefined);
+    await page.waitForTimeout(520);
 
     const noDeclarationOption = await this.findFirstLocator(
       page,
@@ -3149,8 +3244,25 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       return;
     }
 
-    await this.humanClick(noDeclarationOption).catch(() => undefined);
-    await page.waitForTimeout(400);
+    await this.humanClickSlow(noDeclarationOption).catch(() => undefined);
+    await page.waitForTimeout(620);
+
+    const confirmButton = await this.findFirstLocator(
+      page,
+      [
+        'button:has-text("确定"):not([disabled])',
+        'button.semi-button:has-text("确定"):not([disabled])',
+        '[role="button"]:has-text("确定")',
+        'text=确定',
+      ],
+      true,
+    );
+    if (!confirmButton) {
+      return;
+    }
+
+    await this.humanClickSlow(confirmButton).catch(() => undefined);
+    await page.waitForTimeout(720);
   }
 
   private isPublishResultPage(currentUrl: string) {

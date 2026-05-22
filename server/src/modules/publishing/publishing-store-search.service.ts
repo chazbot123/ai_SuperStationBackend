@@ -315,7 +315,7 @@ export class PublishingStoreSearchService {
     const normalizedItems = dto.items
       .map((item) => ({
         name: this.normalizeTextValue(item.name),
-        primaryPhone: this.normalizePhone(item.primaryPhone || item.telRaw || ''),
+        phoneNumber: this.normalizeTextValue(item.primaryPhone || item.telRaw || ''),
         address: this.normalizeTextValue(item.address),
         remark: this.normalizeTextValue(item.type),
       }))
@@ -326,7 +326,7 @@ export class PublishingStoreSearchService {
     }
 
     const phones = normalizedItems
-      .map((item) => item.primaryPhone)
+      .map((item) => item.phoneNumber)
       .filter(Boolean);
     const existingByPhone = phones.length
       ? await this.prisma.customerLead.findMany({
@@ -346,15 +346,43 @@ export class PublishingStoreSearchService {
     let skippedCount = 0;
 
     for (const item of normalizedItems) {
-      if (item.primaryPhone && existingPhoneSet.has(item.primaryPhone)) {
+      if (item.phoneNumber && existingPhoneSet.has(item.phoneNumber)) {
         skippedCount += 1;
         continue;
+      }
+
+      if (item.phoneNumber) {
+        const existingLead = await this.prisma.customerLead.findFirst({
+          where: {
+            sourcePlatform: CustomerSourcePlatform.gaode_map,
+            name: item.name,
+            address: item.address || null,
+          },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            phoneNumber: true,
+          },
+        });
+
+        if (existingLead && !this.normalizeTextValue(existingLead.phoneNumber)) {
+          await this.prisma.customerLead.update({
+            where: { id: existingLead.id },
+            data: {
+              phoneNumber: item.phoneNumber,
+              remark: item.remark || undefined,
+            },
+          });
+          existingPhoneSet.add(item.phoneNumber);
+          skippedCount += 1;
+          continue;
+        }
       }
 
       await this.prisma.customerLead.create({
         data: {
           name: item.name,
-          phoneNumber: item.primaryPhone || null,
+          phoneNumber: item.phoneNumber || null,
           address: item.address || null,
           remark: item.remark || null,
           wechatId: null,
@@ -363,8 +391,8 @@ export class PublishingStoreSearchService {
         },
       });
       createdCount += 1;
-      if (item.primaryPhone) {
-        existingPhoneSet.add(item.primaryPhone);
+      if (item.phoneNumber) {
+        existingPhoneSet.add(item.phoneNumber);
       }
     }
 

@@ -509,16 +509,22 @@ export default function Publishing() {
       setPublishing(true);
 
       const extensionTargets = targets.filter(
-        (item) => item.platform === "xiaohongshu" || item.platform === "wechat_mp",
+        (item) =>
+          item.platform === "xiaohongshu" ||
+          item.platform === "douyin" ||
+          item.platform === "wechat_mp",
       );
       const serverTargets = targets.filter(
-        (item) => item.platform !== "xiaohongshu" && item.platform !== "wechat_mp",
+        (item) =>
+          item.platform !== "xiaohongshu" &&
+          item.platform !== "douyin" &&
+          item.platform !== "wechat_mp",
       );
 
       if (extensionTargets.length > 0) {
         const extensionReady = await pingPlatformLoginExtension();
         if (!extensionReady) {
-          setHint("未检测到平台扩展，请先安装并启用扩展后再发布小红书/视频号。");
+          setHint("未检测到平台扩展，请先安装并启用扩展后再发布小红书/抖音/视频号。");
           return;
         }
       }
@@ -568,7 +574,7 @@ export default function Publishing() {
       setPublishTarget(null);
       setHint(
         extensionTargets.length > 0 && serverTargets.length > 0
-          ? "已创建发布任务：小红书/视频号由本机扩展执行，其余平台由后端执行。"
+          ? "已创建发布任务：小红书/抖音/视频号由本机扩展执行，其余平台由后端执行。"
           : extensionTargets.length > 0
             ? "已创建发布任务：扩展正在用户本机浏览器执行发布流程。"
             : "已创建发布任务：后端正在执行发布流程。",
@@ -622,7 +628,7 @@ export default function Publishing() {
           <CardTitle>获客内容池</CardTitle>
         </CardHeader>
         <CardContent className="text-sm leading-6 text-zinc-300">
-          内容池展示已同步入池的正式素材。小红书/视频号走本机浏览器扩展执行，其余平台由后端执行发布流程。
+          内容池展示已同步入池的正式素材。小红书、抖音、视频号走本机浏览器扩展执行，其余平台由后端执行发布流程。
         </CardContent>
       </Card>
 

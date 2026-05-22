@@ -111,6 +111,7 @@ export class ProductsService {
         originalPriceText: dto.specialOfferEnabled ? dto.originalPriceText?.trim() || '' : null,
         specialPriceText: dto.specialOfferEnabled ? dto.specialPriceText?.trim() || '' : null,
         specialTag: dto.specialOfferEnabled ? dto.specialTag?.trim() || '' : null,
+        category: dto.category?.trim() || '居家',
         description: dto.description?.trim() || null,
         status: ProductStatus.draft,
         sortOrder: nextSortOrder,
@@ -199,6 +200,9 @@ export class ProductsService {
                 ? dto.specialTag?.trim() ?? existing.specialTag ?? ''
                 : null,
             }
+          : {}),
+        ...(dto.category !== undefined
+          ? { category: dto.category.trim() || '居家' }
           : {}),
         ...(dto.description !== undefined
           ? { description: dto.description.trim() || null }
@@ -445,7 +449,8 @@ export class ProductsService {
       originalPriceText: product.originalPriceText,
       specialPriceText: product.specialPriceText,
       specialTag: product.specialTag,
-      images: product.images.map((image) => image.imageUrl),
+      category: product.category,
+      images: product.images.map((img) => img.imageUrl),
       status: product.status,
       rejectReason: product.rejectReason,
       submittedAt: product.submittedAt,
@@ -469,6 +474,7 @@ export class ProductsService {
       originalPriceText: product.originalPriceText,
       specialPriceText: product.specialPriceText,
       specialTag: product.specialTag,
+      category: product.category,
       description: product.description,
       images: product.images.map((image) => image.imageUrl),
       sortOrder: product.sortOrder,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, KeyRound, ShieldCheck, Smartphone } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -18,6 +18,7 @@ import { usePageMeta } from "@/hooks/usePageMeta";
 import {
   deletePlatformAccount,
   listPlatformAccounts,
+  openExtensionPlatformAccountHome,
   startOfficialOauthLogin,
   startExtensionPlatformLogin,
   type LeadPlatformStyle,
@@ -28,6 +29,7 @@ import {
 } from "@/lib/publishing";
 import {
   listenPlatformExtensionEvents,
+  openPlatformAccountHomeInExtension,
   pingPlatformLoginExtension,
   startPlatformLoginExtensionSession,
 } from "@/lib/platformLoginExtension";
@@ -197,7 +199,7 @@ type ConnectChannelPlatform = {
   badge?: string;
   hint: string;
   actionLabel: string;
-  localLoginPlatform?: Extract<LeadPlatformStyle, "xiaohongshu" | "wechat_mp">;
+  localLoginPlatform?: Extract<LeadPlatformStyle, "xiaohongshu" | "douyin" | "wechat_mp">;
   oauthPlatform?: Extract<LeadPlatformStyle, "douyin" | "kuaishou" | "bilibili" | "wechat_official">;
 };
 
@@ -209,8 +211,8 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
     iconWrapClassName: "rounded-[10px]",
     enabled: true,
     badge: "浏览器插件",
-    hint: "点击后会拉起本地扩展，在用户本地浏览器完成 Cookie 登录并自动保存账号。",
-    actionLabel: "立即登录",
+    hint: "点击后会先清理当前浏览器该平台登录态，再进入新账号登录，完成后自动保存账号。",
+    actionLabel: "新增账号",
     localLoginPlatform: "xiaohongshu",
   },
   {
@@ -239,9 +241,10 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
     icon: <DouyinIcon className={connectChannelIconClassName} />,
     iconWrapClassName: "rounded-[10px]",
     enabled: true,
-    hint: "已预留官方 OAuth 入口，本轮优先接入。",
-    actionLabel: "即将接入",
-    oauthPlatform: "douyin",
+    badge: "浏览器插件",
+    hint: "点击后会先清理当前浏览器该平台登录态，再进入新账号登录，完成后自动保存账号。",
+    actionLabel: "新增账号",
+    localLoginPlatform: "douyin",
   },
   {
     key: "wechat_video",
@@ -250,8 +253,8 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
     iconWrapClassName: "rounded-[10px]",
     enabled: true,
     badge: "浏览器插件",
-    hint: "点击后会拉起本地扩展，在用户本地浏览器完成 Cookie 登录并自动保存账号。",
-    actionLabel: "立即登录",
+    hint: "点击后会先清理当前浏览器该平台登录态，再进入新账号登录，完成后自动保存账号。",
+    actionLabel: "新增账号",
     localLoginPlatform: "wechat_mp",
   },
   {
@@ -439,6 +442,7 @@ export default function PublishingPlatformLogin() {
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [autoRefreshingId, setAutoRefreshingId] = useState<string | null>(null);
+  const loginActionLocksRef = useRef(new Set<string>());
   const [startingPlatform, setStartingPlatform] = useState<LeadPlatformStyle | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
   const [extensionReady, setExtensionReady] = useState<boolean | null>(null);
@@ -613,6 +617,44 @@ export default function PublishingPlatformLogin() {
     openExternalUrl(targetUrl);
   }
 
+  function openPendingExternalWindow() {
+    const opened = window.open("about:blank", "_blank");
+    if (opened) {
+      try {
+        opened.opener = null;
+      } catch {
+        // ignore opener assignment failure
+      }
+      opened.document.title = "正在打开登录页...";
+      opened.focus?.();
+      return opened;
+    }
+    return null;
+  }
+
+  function navigatePendingExternalWindow(pendingWindow: Window | null, targetUrl: string) {
+    const normalizedUrl = targetUrl.trim();
+    if (!normalizedUrl) {
+      pendingWindow?.close();
+      setHint("跳转地址为空，请稍后重试。");
+      return false;
+    }
+
+    if (!pendingWindow || pendingWindow.closed) {
+      return openExternalUrl(normalizedUrl);
+    }
+
+    pendingWindow.location.replace(normalizedUrl);
+    pendingWindow.focus?.();
+    return true;
+  }
+
+  function closePendingExternalWindow(pendingWindow: Window | null) {
+    if (pendingWindow && !pendingWindow.closed) {
+      pendingWindow.close();
+    }
+  }
+
   function openExternalUrl(targetUrl: string) {
     const normalizedUrl = targetUrl.trim();
     if (!normalizedUrl) {
@@ -628,6 +670,18 @@ export default function PublishingPlatformLogin() {
 
     setHint("浏览器拦截了新窗口，请允许当前站点打开新标签页后重试。");
     return false;
+  }
+
+  function acquireLoginActionLock(key: string) {
+    if (loginActionLocksRef.current.has(key)) {
+      return false;
+    }
+    loginActionLocksRef.current.add(key);
+    return true;
+  }
+
+  function releaseLoginActionLock(key: string) {
+    loginActionLocksRef.current.delete(key);
   }
 
   function handleDownloadExtension() {
@@ -689,18 +743,30 @@ export default function PublishingPlatformLogin() {
   }
 
   async function handleStartLogin(platform: LeadPlatformStyle) {
+    const actionKey = `start:${platform}`;
+    if (!acquireLoginActionLock(actionKey)) {
+      return;
+    }
+    const pendingWindow = openPendingExternalWindow();
+
     if (!accessToken) {
+      closePendingExternalWindow(pendingWindow);
       setHint("登录已失效，请重新登录。");
+      releaseLoginActionLock(actionKey);
       return;
     }
 
     if (!isExtensionLoginPlatform(platform)) {
+      closePendingExternalWindow(pendingWindow);
       setHint(`${platformLabel(platform)} 当前请走“连接新频道”里的官方授权入口。`);
+      releaseLoginActionLock(actionKey);
       return;
     }
 
     if (extensionReady === false) {
+      closePendingExternalWindow(pendingWindow);
       setHint("未检测到平台登录扩展，请先安装并启用扩展。");
+      releaseLoginActionLock(actionKey);
       return;
     }
 
@@ -711,30 +777,47 @@ export default function PublishingPlatformLogin() {
         session,
         platform,
         apiBaseUrl: window.location.origin,
+        forceFreshLogin: true,
       });
-      openLocalLoginPage(platform, session.loginUrl);
-      setHint(`已打开${platformLabel(platform)}官方登录页，完成登录后系统会自动保存账号。`);
+      if (!navigatePendingExternalWindow(pendingWindow, session.loginUrl || getPlatformLoginUrl(platform))) {
+        return;
+      }
+      setHint(`已打开${platformLabel(platform)}新账号登录页，完成登录后系统会自动保存为新账号。`);
     } catch (error) {
+      closePendingExternalWindow(pendingWindow);
       setHint(error instanceof Error ? error.message : "发起平台登录失败");
     } finally {
       setStartingPlatform(null);
+      releaseLoginActionLock(actionKey);
     }
   }
 
   async function handleConnectChannel(platform: ConnectChannelPlatform) {
+    const actionKey = `connect:${platform.key}`;
+    if (!acquireLoginActionLock(actionKey)) {
+      return;
+    }
+    const pendingWindow = openPendingExternalWindow();
+
     if (!platform.enabled) {
+      closePendingExternalWindow(pendingWindow);
       setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
+      releaseLoginActionLock(actionKey);
       return;
     }
 
     if (!accessToken) {
+      closePendingExternalWindow(pendingWindow);
       setHint("登录已失效，请重新登录。");
+      releaseLoginActionLock(actionKey);
       return;
     }
 
     if (platform.localLoginPlatform) {
       if (extensionReady === false) {
+        closePendingExternalWindow(pendingWindow);
         setHint("未检测到平台登录扩展，请先安装并启用扩展。");
+        releaseLoginActionLock(actionKey);
         return;
       }
 
@@ -748,19 +831,29 @@ export default function PublishingPlatformLogin() {
           session,
           platform: platform.localLoginPlatform,
           apiBaseUrl: window.location.origin,
+          forceFreshLogin: true,
         });
-        openLocalLoginPage(platform.localLoginPlatform, session.loginUrl);
-        setHint(`已打开${platform.label}登录页，完成本地 Cookie 登录后系统会自动保存账号。`);
+        if (!navigatePendingExternalWindow(
+          pendingWindow,
+          session.loginUrl || getPlatformLoginUrl(platform.localLoginPlatform),
+        )) {
+          return;
+        }
+        setHint(`已打开${platform.label}新账号登录页，完成本地 Cookie 登录后系统会自动保存为新账号。`);
       } catch (error) {
+        closePendingExternalWindow(pendingWindow);
         setHint(error instanceof Error ? error.message : `${platform.label} 本地登录发起失败`);
       } finally {
         setConnectingPlatform(null);
+        releaseLoginActionLock(actionKey);
       }
       return;
     }
 
     if (!platform.oauthPlatform) {
+      closePendingExternalWindow(pendingWindow);
       setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
+      releaseLoginActionLock(actionKey);
       return;
     }
 
@@ -770,12 +863,16 @@ export default function PublishingPlatformLogin() {
         accessToken,
         platform: platform.oauthPlatform,
       });
-      openExternalUrl(session.loginUrl);
+      if (!navigatePendingExternalWindow(pendingWindow, session.loginUrl)) {
+        return;
+      }
       setHint(`${platform.label} 已打开官方授权页，授权完成后会自动回到平台登录页。`);
     } catch (error) {
+      closePendingExternalWindow(pendingWindow);
       setHint(error instanceof Error ? error.message : `${platform.label} 官方授权发起失败`);
     } finally {
       setConnectingPlatform(null);
+      releaseLoginActionLock(actionKey);
     }
   }
 
@@ -820,8 +917,9 @@ export default function PublishingPlatformLogin() {
       setHint("登录已失效，请重新登录。");
       return;
     }
+    const pendingWindow = openPendingExternalWindow();
 
-    if (item.provider === "official_oauth") {
+    if (item.provider === "official_oauth" && item.platform !== "douyin") {
       try {
         setRestartingId(item.id);
         const session = await startOfficialOauthLogin({
@@ -832,9 +930,12 @@ export default function PublishingPlatformLogin() {
           >,
           accountId: item.id,
         });
-        openExternalUrl(session.loginUrl);
+        if (!navigatePendingExternalWindow(pendingWindow, session.loginUrl)) {
+          return;
+        }
         setHint(`${platformLabel(item.platform)} 已重新打开官方授权页。`);
       } catch (error) {
+        closePendingExternalWindow(pendingWindow);
         setHint(error instanceof Error ? error.message : "重新发起官方授权失败");
       } finally {
         setRestartingId(null);
@@ -843,6 +944,7 @@ export default function PublishingPlatformLogin() {
     }
 
     if (extensionReady === false) {
+      closePendingExternalWindow(pendingWindow);
       setHint("未检测到平台登录扩展，请先安装并启用扩展。");
       return;
     }
@@ -859,9 +961,15 @@ export default function PublishingPlatformLogin() {
         platform: item.platform,
         apiBaseUrl: window.location.origin,
       });
-      openLocalLoginPage(item.platform, session.loginUrl || item.loginUrl);
+      if (!navigatePendingExternalWindow(
+        pendingWindow,
+        session.loginUrl || item.loginUrl || getPlatformLoginUrl(item.platform),
+      )) {
+        return;
+      }
       setHint(`已重新打开${platformLabel(item.platform)}官方登录页，完成登录后系统会自动更新账号。`);
     } catch (error) {
+      closePendingExternalWindow(pendingWindow);
       setHint(error instanceof Error ? error.message : "重新发起登录失败");
     } finally {
       setRestartingId(null);
@@ -891,16 +999,45 @@ export default function PublishingPlatformLogin() {
   }
 
   async function handleOpenLoginUrl(item: PlatformAccountItem) {
-    const targetUrl = getPlatformCreatorCenterUrl(item.platform);
-    if (!targetUrl) {
-      setHint("当前平台暂未配置创作者中心地址。");
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
       return;
     }
-    const opened = openExternalUrl(targetUrl);
-    if (!opened) {
-      return;
+
+    if (item.provider === "extension") {
+      if (extensionReady === false) {
+        setHint("未检测到平台登录扩展，请先安装并启用扩展。");
+        return;
+      }
+
+      try {
+        const session = await openExtensionPlatformAccountHome({
+          accessToken,
+          accountId: item.id,
+        });
+        await openPlatformAccountHomeInExtension({
+          platform: session.platform,
+          loginUrl: session.loginUrl,
+          authPayload: session.authPayload,
+        });
+        setHint(`已切换到${platformLabel(item.platform)}对应账号并打开平台页面，正在自动刷新账号资料。`);
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : "打开对应账号页面失败");
+        return;
+      }
+    } else {
+      const targetUrl = getPlatformCreatorCenterUrl(item.platform);
+      if (!targetUrl) {
+        setHint("当前平台暂未配置创作者中心地址。");
+        return;
+      }
+      const opened = openExternalUrl(targetUrl);
+      if (!opened) {
+        return;
+      }
+      setHint(`已打开${platformLabel(item.platform)}创作者中心，正在自动刷新账号资料。`);
     }
-    setHint(`已打开${platformLabel(item.platform)}创作者中心，正在自动刷新账号资料。`);
+
     void autoRefreshPlatformAccount(item);
   }
 
@@ -948,7 +1085,7 @@ export default function PublishingPlatformLogin() {
                   key={item.key}
                   type="button"
                   onClick={() => void handleConnectChannel(item)}
-                  disabled={connectingPlatform !== null && connectingPlatform !== item.key}
+                  disabled={connectingPlatform !== null}
                   className={`relative flex min-h-28 flex-col items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-center transition-colors disabled:cursor-not-allowed ${
                     item.enabled
                       ? "border-white/10 bg-white/5 hover:border-orange-400/40 hover:bg-orange-500/10"
@@ -984,7 +1121,7 @@ export default function PublishingPlatformLogin() {
             <div className="rounded-xl border border-white/10 bg-black/10 px-4 py-3 text-xs text-zinc-400">
               {connectingPlatform
                 ? connectChannelPlatforms.find((item) => item.key === connectingPlatform)?.hint
-                : "当前小红书、微信视频号走本地扩展 Cookie 登录；抖音、快手、哔哩哔哩、微信公众号走官方 OAuth。"}
+                : "当前小红书、抖音、微信视频号点击“连接新频道”会先清掉该平台当前浏览器登录态，再进入新账号登录；快手、哔哩哔哩、微信公众号走官方 OAuth。"}
             </div>
           </div>
         </CardContent>

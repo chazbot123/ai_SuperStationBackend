@@ -4,7 +4,6 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { SessionStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -19,7 +18,6 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -41,7 +39,7 @@ export class AuthService {
       throw new UnauthorizedException('用户名或密码错误');
     }
 
-    const deviceLimit = Number(this.configService.get('SESSION_DEVICE_LIMIT') ?? 2);
+    const deviceLimit = 5;
     const activeSessions = await this.prisma.userSession.findMany({
       where: {
         userId: user.id,

@@ -1,11 +1,20 @@
 (function () {
   const PAGE_SOURCE = "ai-superweb-page";
   const EXTENSION_SOURCE = "ai-superweb-extension";
+  const debugPrefix = "[ai-superweb-content]";
   const publishExecutionState = {
     sessionToken: "",
     pageUrl: "",
     running: false,
   };
+
+  function debugLog(scope, detail, extra) {
+    if (typeof extra === "undefined") {
+      console.log(`${debugPrefix}[${scope}] ${detail}`);
+      return;
+    }
+    console.log(`${debugPrefix}[${scope}] ${detail}`, extra);
+  }
 
   function resolvePlatformFromHost(hostname) {
     if (hostname.includes("xiaohongshu.com")) return "xiaohongshu";
@@ -65,6 +74,44 @@
         const src = normalize(node?.getAttribute?.("src") || node?.src || "");
         if (src) {
           return src;
+        }
+      } catch (_) {
+        // ignore invalid selector
+      }
+    }
+    return "";
+  }
+
+  function pickNameFromTextBlock(text, platform) {
+    const lines = String(text || "")
+      .split(/\n+/)
+      .map((item) => normalize(item))
+      .filter(Boolean);
+    for (const line of lines) {
+      if (line.length > 24) continue;
+      if (looksLikePlatformLabel(line, platform)) continue;
+      if (/(粉丝|关注|获赞|点赞|作品|数据|平台|创作|服务|矩阵|登录|发布)/.test(line)) continue;
+      if (parseCountText(line) !== null) continue;
+      if (/\d{3,}/.test(line)) continue;
+      return line;
+    }
+    return "";
+  }
+
+  function findNearbyProfileName(selectors, platform) {
+    for (const selector of selectors) {
+      try {
+        const node = document.querySelector(selector);
+        if (!node) continue;
+        let current = node instanceof HTMLElement ? node : node.parentElement;
+        let depth = 0;
+        while (current && depth < 5) {
+          const candidate = pickNameFromTextBlock(current.innerText || current.textContent || "", platform);
+          if (candidate) {
+            return candidate;
+          }
+          current = current.parentElement;
+          depth += 1;
         }
       } catch (_) {
         // ignore invalid selector
@@ -142,6 +189,16 @@
   function extractByRegex(text, regex) {
     const match = text.match(regex);
     return match?.[1]?.trim() || "";
+  }
+
+  function normalizeDouyinAccountId(value) {
+    const normalized = normalize(value);
+    if (!normalized) return "";
+    const cleaned = normalized
+      .replace(/^抖音号\s*[:：]?\s*/i, "")
+      .replace(/^douyin\s*id\s*[:：]?\s*/i, "")
+      .trim();
+    return /^[A-Za-z0-9_-]{2,}$/.test(cleaned) ? cleaned : "";
   }
 
   function looksLikePlatformLabel(value, platform) {
@@ -332,7 +389,6 @@
             "[class*='creator-name']",
             "[class*='nickname']",
             "[class*='user-name']",
-            "[class*='name']",
           ],
           wechat_mp: [
             "h2.finder-nickname",
@@ -355,11 +411,24 @@
           ],
         }[platform] || [],
       ) || null;
+    const directAccountName =
+      platform === "douyin"
+        ? normalizeDouyinAccountId(
+            findFirstText([
+              "div.unique_id-EuH8eA",
+              "[class*='unique_id-']",
+              "[class*='unique-id']",
+              "[class*='douyin-id']",
+            ]),
+          ) || null
+        : null;
 
-    const profileFromAnchoredText = extractProfileFromPageText(anchoredText, platform);
-    const profileFromPageText = extractProfileFromPageText(pageText, platform);
+    const profileFromAnchoredText =
+      platform === "douyin" ? { accountName: null, displayName: null } : extractProfileFromPageText(anchoredText, platform);
+    const profileFromPageText =
+      platform === "douyin" ? { accountName: null, displayName: null } : extractProfileFromPageText(pageText, platform);
     const titleFallback =
-      platform === "xiaohongshu"
+      platform === "xiaohongshu" || platform === "douyin"
         ? null
         : extractNameFromTitle(document.title || "", platform);
     const displayName =
@@ -369,6 +438,7 @@
       titleFallback ||
       null;
     const accountName =
+      directAccountName ||
       profileFromAnchoredText.accountName ||
       profileFromPageText.accountName ||
       displayName ||
@@ -384,6 +454,12 @@
             "[class*='avatar'] img",
             "[class*='user'] img",
           ]) || null
+        : platform === "douyin"
+          ? findFirstImageSrc([
+              "img.img-PeynF_",
+              "img[src*='aweme-avatar']",
+              "img[src*='douyinpic.com/aweme/']",
+            ]) || null
         : platform === "wechat_mp"
           ? findFirstImageSrc([
               "img.avatar",
@@ -396,15 +472,23 @@
     const followerCount =
       platform === "xiaohongshu" || platform === "wechat_mp"
         ? findMetricCountByLabel("粉丝")
-        : null;
+        : platform === "douyin"
+          ? parseCountText(
+              findFirstText([
+                "span.number-No6ev9",
+                "[class*='fans'] span.number-No6ev9",
+                "[class*='follower'] span.number-No6ev9",
+              ]),
+            ) ||
+            findMetricCountByLabel("粉丝")
+          : null;
 
     const normalizedDisplayName =
       displayName && !isGenericPlatformText(displayName, platform) ? displayName : null;
     const normalizedAccountName =
       accountName && !isGenericPlatformText(accountName, platform) ? accountName : null;
-
     return {
-      accountName: normalizedAccountName,
+      accountName: normalizedAccountName || normalizedDisplayName,
       displayName: normalizedDisplayName,
       avatarUrl,
       followerCount,
@@ -452,11 +536,21 @@
     if (message.type === "AI_SUPERWEB_EXTENSION_EXECUTE_PUBLISH" && message.payload?.session) {
       const session = message.payload.session;
       const currentUrl = window.location.href;
+      debugLog("publish", "execute-message-received", {
+        currentUrl,
+        sessionToken: String(session.sessionToken || "").slice(0, 12),
+        running: publishExecutionState.running,
+        rememberedUrl: publishExecutionState.pageUrl,
+      });
       if (
         publishExecutionState.running &&
         publishExecutionState.sessionToken === session.sessionToken &&
         publishExecutionState.pageUrl === currentUrl
       ) {
+        debugLog("publish", "execute-message-skipped-same-session", {
+          currentUrl,
+          sessionToken: String(session.sessionToken || "").slice(0, 12),
+        });
         return;
       }
 
@@ -465,6 +559,11 @@
       publishExecutionState.running = true;
       const sendStatus = async (payload) => {
         const profile = extractProfile(platform);
+        debugLog("publish-status", "send", {
+          status: payload?.status || "",
+          sourceUrl: payload?.sourceUrl || window.location.href,
+          lastError: payload?.lastError || "",
+        });
         return new Promise((resolve) => {
           chrome.runtime.sendMessage(
             {
@@ -483,6 +582,10 @@
 
       void globalThis.AISuperWebPublishAutomation.executePublishSession(session, sendStatus)
         .catch(async (error) => {
+          debugLog("publish", "execute-failed", {
+            currentUrl: window.location.href,
+            message: error instanceof Error ? error.message : "扩展本地发布失败",
+          });
           await sendStatus({
             status: "failed",
             lastError: error instanceof Error ? error.message : "扩展本地发布失败",
@@ -490,6 +593,10 @@
           });
         })
         .finally(() => {
+          debugLog("publish", "execute-finished", {
+            currentUrl: window.location.href,
+            sessionToken: String(session.sessionToken || "").slice(0, 12),
+          });
           publishExecutionState.running = false;
         });
       return;
@@ -505,6 +612,13 @@
 
   const notifyPageReady = () => {
     const profile = extractProfile(platform);
+    debugLog("page-ready", "send", {
+      platform,
+      url: window.location.href,
+      title: document.title || "",
+      accountName: profile.accountName,
+      displayName: profile.displayName,
+    });
     chrome.runtime.sendMessage({
       type: "AI_SUPERWEB_PLATFORM_PAGE_READY",
       payload: {

@@ -1,5 +1,6 @@
 (function () {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const debugPrefix = "[ai-superweb-publish]";
   const randomBetween = (min, max) => {
     const lower = Math.min(min, max);
     const upper = Math.max(min, max);
@@ -10,6 +11,14 @@
     return String(value || "")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function debugLog(scope, detail, extra) {
+    if (typeof extra === "undefined") {
+      console.log(`${debugPrefix}[${scope}] ${detail}`);
+      return;
+    }
+    console.log(`${debugPrefix}[${scope}] ${detail}`, extra);
   }
 
   function inferFileName(url, fallbackName) {
@@ -411,6 +420,45 @@
     await sleep(randomBetween(240, 420));
   }
 
+  function douyinSlowClickOptions() {
+    return {
+      beforeMoveMin: 260,
+      beforeMoveMax: 520,
+      movePauseMin: 160,
+      movePauseMax: 320,
+      holdPauseMin: 140,
+      holdPauseMax: 260,
+      afterClickMin: 420,
+      afterClickMax: 760,
+    };
+  }
+
+  function douyinSlowActionClickOptions() {
+    return {
+      beforeMoveMin: 240,
+      beforeMoveMax: 500,
+      movePauseMin: 150,
+      movePauseMax: 300,
+      holdPauseMin: 130,
+      holdPauseMax: 240,
+      afterClickMin: 360,
+      afterClickMax: 680,
+    };
+  }
+
+  function douyinSlowPublishClickOptions() {
+    return {
+      beforeMoveMin: 320,
+      beforeMoveMax: 620,
+      movePauseMin: 200,
+      movePauseMax: 380,
+      holdPauseMin: 170,
+      holdPauseMax: 320,
+      afterClickMin: 520,
+      afterClickMax: 960,
+    };
+  }
+
   function escapeHasText(value) {
     return String(value || "")
       .replace(/\\/g, "\\\\")
@@ -540,8 +588,10 @@
 
   async function gotoUrl(url) {
     if (window.location.href.startsWith(url)) {
+      debugLog("goto", "skip same url", { currentUrl: window.location.href, targetUrl: url });
       return;
     }
+    debugLog("goto", "navigate", { currentUrl: window.location.href, targetUrl: url });
     window.location.assign(url);
     await sleep(2500);
   }
@@ -694,45 +744,396 @@
     }
   }
 
-  async function ensureDouyinPublishReady(isVideo) {
+  async function ensureDouyinImagePublishReady() {
+    debugLog("douyin-image", "ensure-ready-start", { url: window.location.href });
     await sleep(1200);
-    if (!isVideo) {
-      await clickFirst(
-        [
-          'button:has-text("高清发布")',
-          'div:has-text("高清发布")',
-          'text=高清发布',
-        ],
-        3000,
-      ).catch(() => null);
-      await sleep(1000);
+    await clickFirst(
+      [
+        'button:has-text("高清发布")',
+        'div:has-text("高清发布")',
+        'text=高清发布',
+      ],
+      3000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    await sleep(1000);
 
-      await clickFirst(
-        [
-          'button:has-text("发布图文")',
-          '[role="tab"]:has-text("发布图文")',
-          'div:has-text("发布图文")',
-          'text=发布图文',
-          'button:has-text("图文")',
-          'text=图文',
-        ],
-        6000,
-      ).catch(() => null);
-      await sleep(1200);
+    await clickFirst(
+      [
+        'button:has-text("发布图文")',
+        '[role="tab"]:has-text("发布图文")',
+        'div:has-text("发布图文")',
+        'text=发布图文',
+        'button:has-text("图文")',
+        'text=图文',
+      ],
+      6000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    await sleep(1200);
+    debugLog("douyin-image", "ensure-ready-finished", { url: window.location.href });
+  }
 
-      await clickFirst(
-        [
-          'button:has-text("上传图文")',
-          '[role="button"]:has-text("上传图文")',
-          'div:has-text("上传图文")',
-          'text=上传图文',
-        ],
-        5000,
-      ).catch(() => null);
-      await sleep(500);
+  async function enterDouyinImagePublishFromHome() {
+    debugLog("douyin-image", "enter-from-home-start", { url: window.location.href });
+    await gotoUrl("https://creator.douyin.com/creator-micro/home");
+    await sleep(1600);
+    await clickFirst(
+      [
+        'div.bg-tCBPTN:has-text("发布图文")',
+        'div.bg-tCBPTN:has(div.title-HvY9Az:has-text("发布图文"))',
+        'div.content-V1koTs:has(div.title-HvY9Az:has-text("发布图文"))',
+        'div.title-HvY9Az:has-text("发布图文")',
+      ],
+      12000,
+      document,
+      douyinSlowClickOptions(),
+    );
+    await sleep(2200);
+    debugLog("douyin-image", "enter-from-home-finished", { url: window.location.href });
+  }
+
+  async function openDouyinImageUpload() {
+    debugLog("douyin-image", "open-upload-start", { url: window.location.href });
+    const readyInput = queryFirst(
+      [
+        'input[type="file"][accept*="image/png"]',
+        'input[type="file"][accept*="image/jpeg"]',
+        'input[type="file"][accept*="image/webp"]',
+        'input[type="file"][accept*="image/*"]',
+        'input[accept*="image/png"]',
+        'input[accept*="image/jpeg"]',
+        'input[accept*="image/webp"]',
+        'input[accept*="image/*"]',
+        'input[type="file"][multiple]',
+        'input[type="file"]',
+      ],
+      document,
+      false,
+    );
+    if (readyInput instanceof HTMLInputElement) {
+      debugLog("douyin-image", "file-input-already-ready", {
+        className: readyInput.className || "",
+        accept: readyInput.accept || "",
+      });
       return;
     }
 
+    const uploadButton = queryFirst(
+      [
+        'button.container-drag-btn-k6XmB4:has-text("上传图文")',
+        'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4:has-text("上传图文")',
+      ],
+      document,
+      true,
+    );
+    debugLog("douyin-image", "upload-button-detected", {
+      found: Boolean(uploadButton),
+      className: uploadButton instanceof HTMLElement ? uploadButton.className : "",
+      text: uploadButton instanceof HTMLElement ? normalize(uploadButton.textContent || "") : "",
+      currentUrl: window.location.href,
+    });
+
+    await clickFirst(
+      [
+        'button.container-drag-btn-k6XmB4:has-text("上传图文")',
+        'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4:has-text("上传图文")',
+      ],
+      10000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    const fileInput = await waitForVisible(
+      [
+        'input[type="file"][accept*="image/png"]',
+        'input[type="file"][accept*="image/jpeg"]',
+        'input[type="file"][accept*="image/webp"]',
+        'input[type="file"][accept*="image/*"]',
+        'input[accept*="image/png"]',
+        'input[accept*="image/jpeg"]',
+        'input[accept*="image/webp"]',
+        'input[accept*="image/*"]',
+        'input[type="file"][multiple]',
+        'input[type="file"]',
+      ],
+      10000,
+      document,
+      false,
+    ).catch(() => null);
+    debugLog("douyin-image", "open-upload-finished", {
+      fileInputReady: Boolean(fileInput),
+      currentUrl: window.location.href,
+    });
+    await sleep(700);
+  }
+
+  async function enterDouyinVideoPublishFromHome() {
+    await gotoUrl("https://creator.douyin.com/creator-micro/home");
+    await sleep(1600);
+    await clickFirst(
+      [
+        'div.bg-tCBPTN:has-text("发布视频")',
+        'div[class*="bg-"]:has-text("发布视频")',
+        'div[class*="content"]:has-text("发布视频")',
+        'div:has-text("发布视频")',
+        'text=发布视频',
+      ],
+      12000,
+      document,
+      douyinSlowClickOptions(),
+    );
+    await sleep(2200);
+  }
+
+  async function openDouyinVideoUpload() {
+    const readyInput = queryFirst(
+      [
+        'input[type="file"][accept*="video/mp4"]',
+        'input[type="file"][accept*="video/*"]',
+        'input[type="file"][accept*="video"]',
+        'input[accept*="video/mp4"]',
+        'input[accept*="video/*"]',
+        'input[accept*="video"]',
+        'input[type="file"]',
+      ],
+      document,
+      false,
+    );
+    if (readyInput instanceof HTMLInputElement) {
+      return;
+    }
+
+    await clickFirst(
+      [
+        'button.container-drag-btn-k6XmB4:has-text("上传视频")',
+        'button:has-text("上传视频")',
+      ],
+      10000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    await waitForVisible(
+      [
+        'input[type="file"][accept*="video/mp4"]',
+        'input[type="file"][accept*="video/*"]',
+        'input[type="file"][accept*="video"]',
+        'input[accept*="video/mp4"]',
+        'input[accept*="video/*"]',
+        'input[accept*="video"]',
+        'input[type="file"]',
+      ],
+      10000,
+      document,
+      false,
+    ).catch(() => null);
+    await sleep(700);
+  }
+
+  function buildDouyinTopicCandidateSelectors(tag) {
+    const safeTag = escapeHasText(tag);
+    return [
+      `.mention-suggest-mount-dom .tag-dVUDkJ:has-text("${safeTag}")`,
+      `.mention-suggest-mount-dom [class*="tag-hash-view-name"]:has-text("${safeTag}")`,
+      `.mention-suggest-mount-dom [class*="tag-hash"]:has-text("${safeTag}")`,
+      `.mention-suggest-mount-dom [role="option"]:has-text("${safeTag}")`,
+      `div[class*="tag"]:has-text("${safeTag}")`,
+      `span[class*="tag"]:has-text("${safeTag}")`,
+      `div:has-text("${safeTag}")`,
+      `span:has-text("${safeTag}")`,
+    ];
+  }
+
+  async function clickDouyinTopicCandidate(tag) {
+    return clickFirst(buildDouyinTopicCandidateSelectors(tag), 5000, document, douyinSlowActionClickOptions())
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  async function fillDouyinImageDescriptionAndTopics(job) {
+    const editorSelectors = [
+      'div.zone-container.editor-kit-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
+      'div.zone-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
+      'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
+      'div[contenteditable="true"][data-placeholder*="作品描述"]',
+      'div[contenteditable="true"][data-placeholder*="描述"]',
+      'div.zone-container[contenteditable="true"]',
+      'div[contenteditable="true"]',
+    ];
+    const editor = await waitForVisible(editorSelectors, 30000, document, true);
+    if (!(editor instanceof HTMLElement)) {
+      throw new Error("未找到抖音文案输入框");
+    }
+
+    await humanClickElement(editor, douyinSlowActionClickOptions());
+    await sleep(randomBetween(220, 420));
+    clearEditable(editor);
+    await sleep(randomBetween(220, 420));
+
+    const body = String(job?.draftBody || "").trim();
+    const tags = normalizeTags(job?.draftTags);
+
+    if (body) {
+      await typeEditableTextHuman(editor, body, 75, 125);
+    }
+
+    for (const [index, tag] of tags.entries()) {
+      await humanClickElement(editor, douyinSlowActionClickOptions()).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+
+      await sleep(randomBetween(320, 560));
+      await appendText(
+        editorSelectors,
+        `${body || index > 0 ? " " : ""}#${tag}`,
+        8000,
+        document,
+        { preferHumanType: true, perCharMin: 110, perCharMax: 185 },
+      );
+      await sleep(randomBetween(620, 980));
+
+      const topicButton = await clickFirst(
+        [
+          'div.toolbar-button-spPS4r:has-text("#添加话题")',
+          '[class*="toolbar-button"]:has-text("#添加话题")',
+          'div:has-text("#添加话题")',
+          'text=#添加话题',
+        ],
+        5000,
+        document,
+        douyinSlowActionClickOptions(),
+      ).catch(() => null);
+
+      const applied = await clickDouyinTopicCandidate(tag);
+      if (!applied && topicButton) {
+        debugLog("douyin-image", "topic-candidate-not-applied", { tag });
+      }
+
+      await sleep(randomBetween(480, 840));
+      await humanClickElement(editor, douyinSlowActionClickOptions()).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+    }
+  }
+
+  async function fillDouyinVideoDescriptionAndTopics(job) {
+    const editorSelectors = [
+      'div.zone-container.editor-kit-container[contenteditable="true"][data-placeholder="添加作品简介"]',
+      'div.zone-container[contenteditable="true"][data-placeholder="添加作品简介"]',
+      'div[contenteditable="true"][data-placeholder="添加作品简介"]',
+      'div[contenteditable="true"][data-placeholder*="作品简介"]',
+      'div[contenteditable="true"][data-placeholder*="简介"]',
+      'div.zone-container[contenteditable="true"]',
+      'div[contenteditable="true"]',
+    ];
+    const editor = await waitForVisible(editorSelectors, 30000, document, true);
+    if (!(editor instanceof HTMLElement)) {
+      throw new Error("未找到抖音简介输入框");
+    }
+
+    await humanClickElement(editor, douyinSlowActionClickOptions());
+    await sleep(randomBetween(220, 420));
+    clearEditable(editor);
+    await sleep(randomBetween(220, 420));
+
+    const body = String(job?.draftBody || "").trim();
+    const tags = normalizeTags(job?.draftTags);
+
+    if (body) {
+      await typeEditableTextHuman(editor, body, 75, 125);
+    }
+
+    for (const [index, tag] of tags.entries()) {
+      await humanClickElement(editor, douyinSlowActionClickOptions()).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+
+      await sleep(randomBetween(320, 560));
+      await appendText(
+        editorSelectors,
+        `${body || index > 0 ? " " : ""}#${tag}`,
+        8000,
+        document,
+        { preferHumanType: true, perCharMin: 110, perCharMax: 185 },
+      );
+      await sleep(randomBetween(620, 980));
+
+      const topicButton = await clickFirst(
+        [
+          'div.toolbar-button-spPS4r:has-text("#添加话题")',
+          '[class*="toolbar-button"]:has-text("#添加话题")',
+          'div:has-text("#添加话题")',
+          'text=#添加话题',
+        ],
+        5000,
+        document,
+        douyinSlowActionClickOptions(),
+      ).catch(() => null);
+
+      const applied = await clickDouyinTopicCandidate(tag);
+      if (!applied && topicButton) {
+        debugLog("douyin-video", "topic-candidate-not-applied", { tag });
+      }
+
+      await sleep(randomBetween(480, 840));
+      await humanClickElement(editor, douyinSlowActionClickOptions()).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+    }
+  }
+
+  async function selectDouyinNoDeclaration() {
+    await clickFirst(
+      [
+        'div.selectBox-buZRzi',
+        '[class*="selectBox"]:has-text("请选择自主声明")',
+        '[class*="selectText"]:has-text("请选择自主声明")',
+        'text=请选择自主声明',
+      ],
+      8000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    await sleep(300);
+
+    await clickFirst(
+      [
+        'label.semi-radio:has-text("无需添加自主声明")',
+        'label:has-text("无需添加自主声明")',
+        '[class*="semi-radio"]:has-text("无需添加自主声明")',
+        'text=无需添加自主声明',
+      ],
+      6000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    await sleep(520);
+
+    const confirmSelectors = [
+      'button:has-text("确定")',
+      '[role="button"]:has-text("确定")',
+      'text=确定',
+    ];
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 10000) {
+      const node = queryFirst(confirmSelectors, document, true);
+      if (
+        node instanceof HTMLElement &&
+        !node.hasAttribute("disabled") &&
+        node.getAttribute("aria-disabled") !== "true" &&
+        (!(node instanceof HTMLButtonElement) || !node.disabled)
+      ) {
+        await humanClickElement(node, douyinSlowActionClickOptions()).catch(() => null);
+        await sleep(680);
+        return;
+      }
+      await sleep(300);
+    }
+  }
+
+  async function ensureDouyinVideoPublishReady() {
+    await sleep(1200);
     await clickFirst(
       [
         'button:has-text("发布视频")',
@@ -743,8 +1144,10 @@
         'text=上传视频',
       ],
       5000,
+      document,
+      douyinSlowActionClickOptions(),
     ).catch(() => null);
-    await sleep(600);
+    await sleep(1200);
   }
 
   async function openWechatMpRecentEntry(recentEntryText, publishButtonText, readySelectors, publishTimeoutMs) {
@@ -932,35 +1335,111 @@
     );
   }
 
-  async function publishDouyin(job) {
-    const isVideo = Boolean(job.draftVideoUrl);
-    await gotoUrl(
-      isVideo
-        ? "https://creator.douyin.com/creator-micro/content/upload"
-        : "https://creator.douyin.com/creator-micro/content/publish",
-    );
-    await ensureDouyinPublishReady(isVideo);
-    await uploadFiles(
-      ['input[type="file"][accept*="image"]', 'input[type="file"][accept*="video"]', 'input[type="file"]'],
-      isVideo ? [job.draftVideoUrl] : job.draftImages,
-      isVideo ? "video" : "image",
-    );
+  async function finalizeDouyinImagePublish(job) {
     await sleep(3000);
     await fillFirst(
-      ['input[placeholder*="作品标题"]', 'input[placeholder*="添加标题"]', 'textarea[placeholder*="标题"]'],
+      ['input[placeholder="添加作品标题"]', 'input[placeholder*="作品标题"]', 'textarea[placeholder*="标题"]'],
       job.draftTitle,
+      30000,
+      document,
+      { preferHumanType: true, perCharMin: 115, perCharMax: 190 },
     ).catch(() => null);
-    const bodyWithTags = [job.draftBody, buildTagText(job.draftTags)].filter(Boolean).join("\n").trim();
-    await fillFirst(
-      ['div[contenteditable="true"]', 'textarea[placeholder*="描述"]', 'textarea[placeholder*="文案"]'],
-      bodyWithTags,
+    await fillDouyinImageDescriptionAndTopics(job);
+    await selectDouyinNoDeclaration();
+    await clickFirst(
+      [
+        'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
+        'button:has-text("发布")',
+        '[role="button"]:has-text("发布")',
+        'text=发布',
+      ],
+      30000,
+      document,
+      douyinSlowPublishClickOptions(),
     );
-    await clickFirst(['button:has-text("发布")', '[role="button"]:has-text("发布")', 'text=发布']);
     await waitForHints(
       ["发布成功", "作品发布成功", "审核中", "内容管理", "发布完成"],
       ["发布失败", "上传失败", "请完善", "请填写"],
-      "未识别到抖音发布成功状态，请确认页面是否仍停留在发布页",
+      "未识别到抖音图文发布成功状态，请确认页面是否仍停留在发布页",
     );
+  }
+
+  async function finalizeDouyinVideoPublish(job) {
+    await sleep(3000);
+    await fillFirst(
+      [
+        'input[placeholder="填写作品标题，为作品获得更多流量"]',
+        'input[placeholder*="填写作品标题"]',
+        'input[placeholder*="作品标题"]',
+        'input[placeholder*="添加标题"]',
+        'textarea[placeholder*="标题"]',
+      ],
+      job.draftTitle,
+      30000,
+      document,
+      { preferHumanType: true, perCharMin: 115, perCharMax: 190 },
+    ).catch(() => null);
+    await fillDouyinVideoDescriptionAndTopics(job);
+    await selectDouyinNoDeclaration();
+    await clickFirst(
+      [
+        'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
+        'button:has-text("发布")',
+        '[role="button"]:has-text("发布")',
+        'text=发布',
+      ],
+      30000,
+      document,
+      douyinSlowPublishClickOptions(),
+    );
+    await waitForHints(
+      ["发布成功", "作品发布成功", "审核中", "内容管理", "发布完成"],
+      ["发布失败", "上传失败", "请完善", "请填写"],
+      "未识别到抖音视频发布成功状态，请确认页面是否仍停留在发布页",
+    );
+  }
+
+  async function publishDouyinImage(job) {
+    debugLog("douyin-image", "publish-start", {
+      currentUrl: window.location.href,
+      imageCount: Array.isArray(job?.draftImages) ? job.draftImages.length : 0,
+      hasTitle: Boolean(String(job?.draftTitle || "").trim()),
+      tagCount: Array.isArray(job?.draftTags) ? job.draftTags.length : 0,
+    });
+    await enterDouyinImagePublishFromHome();
+    await ensureDouyinImagePublishReady().catch(() => null);
+    await openDouyinImageUpload();
+    await uploadFiles(
+      ['input[type="file"][accept*="image"]', 'input[type="file"]'],
+      job.draftImages,
+      "image",
+    );
+    debugLog("douyin-image", "upload-files-dispatched", {
+      currentUrl: window.location.href,
+      imageCount: Array.isArray(job?.draftImages) ? job.draftImages.length : 0,
+    });
+    await finalizeDouyinImagePublish(job);
+  }
+
+  async function publishDouyinVideo(job) {
+    await enterDouyinVideoPublishFromHome();
+    await ensureDouyinVideoPublishReady().catch(() => null);
+    await openDouyinVideoUpload();
+    await uploadFiles(
+      ['input[type="file"][accept*="video"]', 'input[type="file"]'],
+      [job.draftVideoUrl],
+      "video",
+    );
+    await finalizeDouyinVideoPublish(job);
+  }
+
+  async function publishDouyin(job) {
+    if (job.draftVideoUrl) {
+      await publishDouyinVideo(job);
+      return;
+    }
+
+    await publishDouyinImage(job);
   }
 
   async function publishWechatMp(job) {
@@ -1135,6 +1614,13 @@
     if (!job?.platform) {
       throw new Error("扩展未收到有效发布任务");
     }
+
+    debugLog("session", "execute-start", {
+      platform: job.platform,
+      currentUrl: window.location.href,
+      hasVideo: Boolean(job.draftVideoUrl),
+      sessionToken: String(session?.sessionToken || "").slice(0, 12),
+    });
 
     await sendStatus({
       status: "running",

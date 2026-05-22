@@ -1,4 +1,4 @@
-﻿let particles = [];
+let particles = [];
     const numParticles = 800;
     const noiseScale = 0.01;
     let customSeed;
@@ -578,7 +578,7 @@
 
     reveals.forEach((el) => {
       // Mersi-style curtain reveal for images/visuals
-      if(el.classList.contains('photo-tall') || el.classList.contains('photo-wide') || el.classList.contains('visual') || el.classList.contains('hero-image') || el.classList.contains('video-box') || el.classList.contains('p-image-wrap')) {
+      if(el.classList.contains('photo-tall') || el.classList.contains('photo-wide') || el.classList.contains('visual') || el.classList.contains('hero-image') || el.classList.contains('video-box') || el.classList.contains('p-image-wrap') || el.classList.contains('marquee-section')) {
         // Reset CSS transform/transition conflict for these
         el.style.transition = 'none';
         gsap.fromTo(el,
@@ -590,9 +590,26 @@
             ease: "power4.inOut",
             scrollTrigger: {
               trigger: el,
-              start: "top 85%",
+              start: "top 90%",
+              end: "bottom 10%",
+              toggleActions: "play reverse play reverse",
               onEnter: () => {
                 el.classList.add('in-view');
+              },
+              onLeave: () => {
+                el.classList.remove('in-view');
+                if(el.hasAttribute('data-count')) el.dataset.animated = 'false';
+                el.querySelectorAll?.('[data-count]').forEach((node)=>node.dataset.animated = 'false');
+              },
+              onEnterBack: () => {
+                el.classList.add('in-view');
+                if(el.hasAttribute('data-count')) animateCount(el);
+                el.querySelectorAll?.('[data-count]').forEach((node)=>animateCount(node));
+              },
+              onLeaveBack: () => {
+                el.classList.remove('in-view');
+                if(el.hasAttribute('data-count')) el.dataset.animated = 'false';
+                el.querySelectorAll?.('[data-count]').forEach((node)=>node.dataset.animated = 'false');
               }
             },
             onComplete: () => {
@@ -611,11 +628,28 @@
             ease: "power3.out",
             scrollTrigger: {
               trigger: el,
-              start: "top 85%",
+              start: "top 90%",
+              end: "bottom 10%",
+              toggleActions: "play reverse play reverse",
               onEnter: () => {
                 el.classList.add('in-view');
                 if(el.hasAttribute('data-count')) animateCount(el);
                 el.querySelectorAll?.('[data-count]').forEach((node)=>animateCount(node));
+              },
+              onLeave: () => {
+                el.classList.remove('in-view');
+                if(el.hasAttribute('data-count')) el.dataset.animated = 'false';
+                el.querySelectorAll?.('[data-count]').forEach((node)=>node.dataset.animated = 'false');
+              },
+              onEnterBack: () => {
+                el.classList.add('in-view');
+                if(el.hasAttribute('data-count')) animateCount(el);
+                el.querySelectorAll?.('[data-count]').forEach((node)=>animateCount(node));
+              },
+              onLeaveBack: () => {
+                el.classList.remove('in-view');
+                if(el.hasAttribute('data-count')) el.dataset.animated = 'false';
+                el.querySelectorAll?.('[data-count]').forEach((node)=>node.dataset.animated = 'false');
               }
             }
           }
@@ -626,8 +660,12 @@
     if(trendBox) {
       ScrollTrigger.create({
         trigger: trendBox,
-        start: "top 85%",
-        onEnter: () => trendBox.classList.add('in-view')
+        start: "top 90%",
+        end: "bottom 10%",
+        onEnter: () => trendBox.classList.add('in-view'),
+        onLeave: () => trendBox.classList.remove('in-view'),
+        onEnterBack: () => trendBox.classList.add('in-view'),
+        onLeaveBack: () => trendBox.classList.remove('in-view')
       });
     }
 
@@ -635,8 +673,12 @@
       if(!el.closest('.reveal')) {
         ScrollTrigger.create({
           trigger: el,
-          start: "top 85%",
-          onEnter: () => animateCount(el)
+          start: "top 90%",
+          end: "bottom 10%",
+          onEnter: () => animateCount(el),
+          onLeave: () => el.dataset.animated = 'false',
+          onEnterBack: () => animateCount(el),
+          onLeaveBack: () => el.dataset.animated = 'false'
         });
       }
     });
@@ -846,14 +888,13 @@
 
     function renderPortfolioCard(product, index){
       const primaryImage = product.images?.[0] || extraGalleryPool[(index + 3) % extraGalleryPool.length] || '/assets/images/landing/img_8.jpeg';
-      const categoryLabel = String(product.summary || product.description || '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 18);
+      const categoryValue = String(product.category || '').trim();
+      const categoryLabel = categoryValue || String(product.summary || product.description || '').replace(/\s+/g, ' ').trim().slice(0, 18);
       const currentPrice = String(product.priceText || '欢迎咨询').trim() || '欢迎咨询';
+      const dataCat = categoryValue || 'all';
 
       return `
-        <article class="p-item reveal in-view" data-category="all" data-product-id="${escapeHtml(product.id)}" data-desc="${escapeHtml(product.summary || product.description || '欢迎咨询该案例对应的空间适配、材质组合与施工方案。')}" data-price-label="售价" data-price-value="${escapeHtml(currentPrice)}">
+        <article class="p-item reveal in-view" data-category="${escapeHtml(dataCat)}" data-product-id="${escapeHtml(product.id)}" data-desc="${escapeHtml(product.summary || product.description || '欢迎咨询该案例对应的空间适配、材质组合与施工方案。')}" data-price-label="售价" data-price-value="${escapeHtml(currentPrice)}">
           <div class="p-image-wrap"><div class="p-image" style="background-image:url('${escapeHtml(primaryImage)}')"></div></div>
           <div class="p-info">
             ${categoryLabel ? `<span class="p-cat">${escapeHtml(categoryLabel)}</span>` : ''}
@@ -908,7 +949,49 @@
       if(!portfolioGrid) return;
       portfolioGrid.innerHTML = items.map((item, index) => renderPortfolioCard(item, index)).join('');
       if(portfolioFilters){
-        portfolioFilters.hidden = true;
+        const categories = [...new Set(items.map(i => String(i.category || '').trim()).filter(Boolean))];
+        if (categories.length > 0) {
+          portfolioFilters.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:center;gap:36px;width:100%;position:relative;">
+              <div style="display:flex;gap:36px;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap;">
+                <button class="pf-btn active" data-filter="all">全部空间</button>
+                ${categories.map(cat => `<button class="pf-btn" data-filter="${escapeHtml(cat)}">${escapeHtml(cat)}</button>`).join('')}
+              </div>
+               <button class="pf-btn" onclick="(() => { const params = new URLSearchParams(window.location.search); params.set('view','products'); window.location.href = window.location.pathname + '?' + params.toString(); })()" style="position:absolute;right:0;bottom:0;font-weight:700;">更多&gt;</button>
+            </div>
+          `;
+          portfolioFilters.hidden = false;
+          
+          const newBtns = portfolioFilters.querySelectorAll('.pf-btn');
+          newBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+              const pItems = getPortfolioItems();
+              newBtns.forEach(b => b.classList.remove('active'));
+              btn.classList.add('active');
+              
+              const filterValue = btn.getAttribute('data-filter');
+              portfolioGrid.style.opacity = '0';
+              setTimeout(() => {
+                pItems.forEach(item => {
+                  if (filterValue === 'all' || item.getAttribute('data-category') === filterValue) {
+                    item.classList.remove('hidden');
+                  } else {
+                    item.classList.add('hidden');
+                  }
+                });
+                portfolioGrid.style.opacity = '1';
+              }, 600);
+            });
+          });
+        } else {
+          portfolioFilters.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:center;gap:36px;width:100%;position:relative;">
+              <button class="pf-btn active" data-filter="all">全部空间</button>
+               <button class="pf-btn" onclick="(() => { const params = new URLSearchParams(window.location.search); params.set('view','products'); window.location.href = window.location.pathname + '?' + params.toString(); })()" style="position:absolute;right:0;bottom:0;font-weight:700;">更多&gt;</button>
+            </div>
+          `;
+          portfolioFilters.hidden = false;
+        }
       }
       bindPortfolioItems();
     }

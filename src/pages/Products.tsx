@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -8,6 +9,8 @@ import { Table, TableWrap, Td, Th, Tr } from "@/components/ui/Table";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { useAuthStore } from "@/store/authStore";
 import { useProductsStore, type ProductItem } from "@/store/productsStore";
+
+const DEFAULT_PRODUCT_CATEGORIES = ["居家", "办公", "保健养生", "建材"];
 
 type Draft = {
   name: string;
@@ -20,6 +23,7 @@ type Draft = {
   originalPriceText: string;
   specialPriceText: string;
   specialTag: string;
+  category: string;
 };
 
 function emptyDraft(): Draft {
@@ -34,6 +38,7 @@ function emptyDraft(): Draft {
     originalPriceText: "",
     specialPriceText: "",
     specialTag: "",
+    category: "居家",
   };
 }
 
@@ -78,7 +83,13 @@ export default function Products() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [customCategoryDraft, setCustomCategoryDraft] = useState("");
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const categoryMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isMainCompany = user?.roleKey === "main_company";
 
@@ -89,20 +100,43 @@ export default function Products() {
     }
   }, [accessToken, initialized, loadProducts, productsError]);
 
+  useEffect(() => {
+    if (!isCategoryMenuOpen) return;
+
+    function handleClickOutside(event: MouseEvent) {
+      if (!categoryMenuRef.current?.contains(event.target as Node)) {
+        setIsCategoryMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isCategoryMenuOpen]);
+
   const visibleProducts = useMemo(() => {
     const scoped = isMainCompany ? products : products.filter((item) => item.ownerUserId === user?.id);
     const keyword = query.trim().toLowerCase();
     return scoped.filter((item) => {
       if (!keyword) return true;
-      return `${item.name} ${item.englishName} ${item.summary} ${item.description ?? ""} ${item.ownerName}`
+      return `${item.name} ${item.englishName} ${item.summary} ${item.description ?? ""} ${item.ownerName} ${item.category ?? ""}`
         .toLowerCase()
         .includes(keyword);
     });
   }, [isMainCompany, products, query, user?.id]);
 
+  const categoryOptions = useMemo(() => {
+    const fromProducts = products.map((p) => p.category?.trim()).filter(Boolean) as string[];
+    return Array.from(new Set([...DEFAULT_PRODUCT_CATEGORIES, ...fromProducts, ...customCategories])).filter(
+      (category) => !hiddenCategories.includes(category)
+    );
+  }, [customCategories, hiddenCategories, products]);
+
   function openCreate() {
     setEditingId(null);
     setDraft(emptyDraft());
+    setCustomCategoryDraft("");
+    setIsAddingCategory(false);
+    setIsCategoryMenuOpen(false);
     setHint(null);
     setError(null);
   }
@@ -120,8 +154,54 @@ export default function Products() {
       originalPriceText: item.originalPriceText ?? "",
       specialPriceText: item.specialPriceText ?? "",
       specialTag: item.specialTag ?? "",
+      category: item.category ?? "居家",
     });
+    setCustomCategoryDraft("");
+    setIsAddingCategory(false);
+    setIsCategoryMenuOpen(false);
     setHint(null);
+    setError(null);
+  }
+
+  function handleAddCategory() {
+    const nextCategory = customCategoryDraft.trim();
+    if (!nextCategory || !draft) return;
+
+    setCustomCategories((prev) => (prev.includes(nextCategory) ? prev : [...prev, nextCategory]));
+    setDraft({ ...draft, category: nextCategory });
+    setCustomCategoryDraft("");
+    setIsAddingCategory(false);
+    setIsCategoryMenuOpen(false);
+    setHint(`已新增类别：${nextCategory}`);
+    setError(null);
+  }
+
+  function handleCategoryChange(value: string) {
+    if (!draft) return;
+
+    setDraft({ ...draft, category: value });
+    setIsAddingCategory(false);
+    setIsCategoryMenuOpen(false);
+    setCustomCategoryDraft("");
+  }
+
+  function handleDeleteCategory(category: string) {
+    if (!draft) return;
+    if (categoryOptions.length <= 1) {
+      setHint("至少保留一个类别。");
+      return;
+    }
+
+    setHiddenCategories((prev) => (prev.includes(category) ? prev : [...prev, category]));
+    setCustomCategories((prev) => prev.filter((item) => item !== category));
+
+    if (draft.category === category) {
+      const nextCategory =
+        categoryOptions.find((item) => item !== category) ?? DEFAULT_PRODUCT_CATEGORIES[0];
+      setDraft({ ...draft, category: nextCategory });
+    }
+
+    setHint(`已删除类别：${category}`);
     setError(null);
   }
 
@@ -206,6 +286,7 @@ export default function Products() {
       originalPriceText: draft.specialOfferEnabled ? trimmedOriginalPriceText : "",
       specialPriceText: draft.specialOfferEnabled ? trimmedSpecialPriceText : "",
       specialTag: draft.specialOfferEnabled ? draft.specialTag : "",
+      category: draft.category || "居家",
     };
 
     setSubmitting(true);
@@ -310,7 +391,12 @@ export default function Products() {
                             ) : null}
                           </div>
                           <div className="min-w-0">
-                            <div className="font-medium text-zinc-100">{item.name}</div>
+                            <div className="flex items-center gap-2">
+                              <div className="font-medium text-zinc-100">{item.name}</div>
+                              <Badge variant="gray" className="px-1.5 py-0 text-[10px]">
+                                {item.category || "居家"}
+                              </Badge>
+                            </div>
                             <div className="text-xs text-zinc-500">{item.englishName}</div>
                             <div
                               className="text-xs leading-5 text-zinc-400"
@@ -483,6 +569,85 @@ export default function Products() {
                 placeholder="留空则自动生成"
                 disabled={submitting}
               />
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-medium text-zinc-300">产品类别</div>
+              <div ref={categoryMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsCategoryMenuOpen((prev) => !prev)}
+                  disabled={submitting}
+                  className="flex h-10 w-full items-center justify-between rounded-md border border-white/10 bg-white/5 px-3 text-sm text-zinc-100 outline-none transition-shadow focus:ring-2 focus:ring-amber-400/30 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span>{draft.category}</span>
+                  <ChevronDown className={`h-4 w-4 text-zinc-400 transition-transform ${isCategoryMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {isCategoryMenuOpen ? (
+                  <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-md border border-white/10 bg-[#1f1f22] shadow-[0_16px_40px_rgba(0,0,0,.35)]">
+                    <div className="max-h-56 overflow-y-auto py-1">
+                      {categoryOptions.map((cat) => (
+                        <div
+                          key={cat}
+                          className="flex items-center gap-1 px-1 py-0.5"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleCategoryChange(cat)}
+                            className={`flex min-h-8 flex-1 items-center rounded-sm px-2 text-left text-sm transition-colors ${
+                              draft.category === cat
+                                ? "bg-orange-500/15 text-orange-200"
+                                : "text-zinc-100 hover:bg-white/5"
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCategory(cat)}
+                            className="flex h-7 w-7 items-center justify-center rounded-sm text-zinc-400 transition-colors hover:bg-red-500/12 hover:text-red-300"
+                            title={`删除类别 ${cat}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t border-white/10 p-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingCategory(true);
+                          setIsCategoryMenuOpen(false);
+                        }}
+                        className="flex min-h-8 w-full items-center gap-2 rounded-sm px-2 text-sm text-zinc-200 transition-colors hover:bg-white/5"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>新增类别</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {isAddingCategory ? (
+                  <div className="absolute left-0 right-0 top-full z-50 mt-1 flex gap-2 rounded-md border border-white/10 bg-[#1f1f22] p-2 shadow-[0_16px_40px_rgba(0,0,0,.35)]">
+                    <Input
+                      value={customCategoryDraft}
+                      onChange={(e) => setCustomCategoryDraft(e.target.value)}
+                      placeholder="输入新类别"
+                      disabled={submitting}
+                      className="bg-zinc-900"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handleAddCategory}
+                      disabled={submitting || !customCategoryDraft.trim()}
+                    >
+                      确定
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div>

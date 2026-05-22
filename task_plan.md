@@ -90,6 +90,10 @@
 - [completed] 阶段 181：盘点 `origin/main` 相对当前本地的文件级差异
 - [in_progress] 阶段 182：评估将 `origin/main` 更新安全合入当前工作区的方案
 - [pending] 阶段 183：输出按模块的合并优先级与操作建议
+- [in_progress] 阶段 184：确认社媒图文生成与商品图生成页当前编辑区结构和可复用能力
+- [pending] 阶段 185：抽取统一的上下结构编辑壳层并对齐参考图的 UI 风格
+- [pending] 阶段 186：分别改造 `Studio` 与 `StudioImages` 的编辑区和结果区布局
+- [pending] 阶段 187：执行诊断与最小构建校验
 
 ## 当前决定
 - 保留现有 `personalization` 路由与权限键，优先改展示文案，避免扩大 RBAC 影响面
@@ -152,6 +156,8 @@
 - 运行包 `backups/deploy_bundle_20260509_143128/project-root` 也需要同步携带 `scripts/*.sh`、`docs/ubuntu-install-and-deploy-with-test-data.md` 与最新 `server/dist`
 - 当前本地分支仍是 `master`，跟踪的是 `origin/master`；远端实际持续更新的是 `origin/main`
 - 本轮先做“差异清单 + 安全评估”，不直接执行 `merge/rebase/reset`，避免覆盖当前未提交的发布链路改动
+- 本轮“社媒图文生成 / 商品图与详情图生成”只改编辑模块 UI 和交互形态，不改用户明确排除的平台参数、图文/视频生成类型参数
+- 两个页面本轮统一改成“上编辑、下结果”的结构，优先抽公共编辑壳层，避免重复开发
 
 ## 风险
 - 当前 `Personalization` 仍同时承载布局、运营指标、行业招商，继续加逻辑仍可能变重，需要适度拆分

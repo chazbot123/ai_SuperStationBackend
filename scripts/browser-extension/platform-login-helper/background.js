@@ -1,5 +1,6 @@
 const activeLoginSessions = new Map();
 const activePublishSessions = new Map();
+const debugPrefix = "[ai-superweb-background]";
 
 const platformCookieDomains = {
   xiaohongshu: ["creator.xiaohongshu.com", ".xiaohongshu.com"],
@@ -38,6 +39,26 @@ function notifyPublishError(session, message) {
   });
 }
 
+async function closeLoginTabIfNeeded(session) {
+  const loginTabId = Number(session?.loginTabId);
+  const appTabId = Number(session?.appTabId);
+  if (!Number.isInteger(loginTabId) || loginTabId <= 0) {
+    return;
+  }
+  if (Number.isInteger(appTabId) && loginTabId === appTabId) {
+    return;
+  }
+  await chrome.tabs.remove(loginTabId).catch(() => undefined);
+}
+
+function debugLog(scope, detail, extra) {
+  if (typeof extra === "undefined") {
+    console.log(`${debugPrefix}[${scope}] ${detail}`);
+    return;
+  }
+  console.log(`${debugPrefix}[${scope}] ${detail}`, extra);
+}
+
 async function getCookiesByDomain(domain) {
   const cookies = await chrome.cookies.getAll({ domain });
   return cookies ?? [];
@@ -63,6 +84,184 @@ async function collectPlatformCookies(platform) {
     .join("; ");
 }
 
+function buildCookieRemovalUrls(cookie) {
+  const normalizedDomain = String(cookie?.domain || "").trim().replace(/^\./, "");
+  const normalizedPath = String(cookie?.path || "/").trim() || "/";
+  if (!normalizedDomain) {
+    return [];
+  }
+
+  const protocols = cookie?.secure ? ["https"] : ["https", "http"];
+  return protocols.map((protocol) => `${protocol}://${normalizedDomain}${normalizedPath}`);
+}
+
+async function clearPlatformCookies(platform) {
+  const domains = platformCookieDomains[platform] ?? [];
+  const cookies = [];
+
+  for (const domain of domains) {
+    const scopedCookies = await getCookiesByDomain(domain);
+    cookies.push(...scopedCookies);
+  }
+
+  const deduplicatedCookies = new Map();
+  for (const cookie of cookies) {
+    const key = `${cookie.storeId || ""}|${cookie.domain}|${cookie.path}|${cookie.name}`;
+    if (!deduplicatedCookies.has(key)) {
+      deduplicatedCookies.set(key, cookie);
+    }
+  }
+
+  const removals = [];
+  for (const cookie of deduplicatedCookies.values()) {
+    const urls = buildCookieRemovalUrls(cookie);
+    for (const url of urls) {
+      removals.push(
+        chrome.cookies
+          .remove({
+            url,
+            name: cookie.name,
+            storeId: cookie.storeId,
+          })
+          .catch(() => undefined),
+      );
+    }
+  }
+
+  await Promise.all(removals);
+}
+
+function parseCookieHeader(authPayload) {
+  return String(authPayload || "")
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const separatorIndex = entry.indexOf("=");
+      if (separatorIndex <= 0) {
+        return null;
+      }
+      const name = entry.slice(0, separatorIndex).trim();
+      const value = entry.slice(separatorIndex + 1).trim();
+      if (!name) {
+        return null;
+      }
+      return { name, value };
+    })
+    .filter(Boolean);
+}
+
+function getPlatformCookieSetUrls(platform, job) {
+  const urls = new Set([getPlatformPublishUrl(platform, job)]);
+  if (platform === "xiaohongshu") {
+    urls.add("https://creator.xiaohongshu.com/");
+    urls.add("https://www.xiaohongshu.com/");
+  }
+  if (platform === "douyin") {
+    urls.add("https://creator.douyin.com/");
+    urls.add("https://www.douyin.com/");
+  }
+  if (platform === "wechat_mp") {
+    urls.add("https://channels.weixin.qq.com/");
+    urls.add("https://mp.weixin.qq.com/");
+  }
+  if (platform === "kuaishou") {
+    urls.add("https://cp.kuaishou.com/");
+    urls.add("https://www.kuaishou.com/");
+  }
+  return Array.from(urls);
+}
+
+function buildCookieWritePayloads(targetUrl, platform, cookie) {
+  const host = new URL(targetUrl).hostname;
+  const payloads = [
+    {
+      url: targetUrl,
+      name: cookie.name,
+      value: cookie.value,
+      path: "/",
+    },
+  ];
+
+  for (const domain of platformCookieDomains[platform] ?? []) {
+    const normalizedDomain = String(domain || "").trim().replace(/^\./, "");
+    if (!normalizedDomain || !host.endsWith(normalizedDomain)) {
+      continue;
+    }
+    payloads.push({
+      url: targetUrl,
+      name: cookie.name,
+      value: cookie.value,
+      path: "/",
+      domain,
+    });
+  }
+
+  const deduplicated = new Map();
+  for (const payload of payloads) {
+    const key = `${payload.url}|${payload.name}|${payload.path}|${payload.domain || ""}`;
+    if (!deduplicated.has(key)) {
+      deduplicated.set(key, payload);
+    }
+  }
+  return Array.from(deduplicated.values());
+}
+
+async function applyPlatformAuthPayload(platform, authPayload, job) {
+  const parsedCookies = parseCookieHeader(authPayload);
+  if (parsedCookies.length === 0) {
+    throw new Error("所选账号缺少可注入的 Cookie");
+  }
+
+  const writes = [];
+  for (const targetUrl of getPlatformCookieSetUrls(platform, job)) {
+    for (const cookie of parsedCookies) {
+      for (const payload of buildCookieWritePayloads(targetUrl, platform, cookie)) {
+        writes.push(
+          chrome.cookies
+            .set(payload)
+            .then((result) => Boolean(result))
+            .catch(() => false),
+        );
+      }
+    }
+  }
+
+  const results = await Promise.all(writes);
+  if (!results.some(Boolean)) {
+    throw new Error("所选账号 Cookie 注入失败，请重新登录该账号后再试");
+  }
+}
+
+async function resolveExtensionPublishAuthPayload(apiBaseUrl, session) {
+  const directAuthPayload = String(session?.accountAuthPayload || "").trim();
+  if (directAuthPayload) {
+    return directAuthPayload;
+  }
+
+  const response = await fetch(`${apiBaseUrl}/api/publishing/extension/publish-jobs/auth`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sessionToken: session?.sessionToken || "",
+    }),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.message || "扩展补取所选账号登录态失败");
+  }
+
+  const accountAuthPayload = String(payload?.accountAuthPayload || "").trim();
+  if (!accountAuthPayload) {
+    throw new Error("扩展补取到的账号登录态为空，无法按指定账号发布");
+  }
+
+  return accountAuthPayload;
+}
+
 async function syncLoginResult(session, context) {
   if (!session || session.syncing || session.status === "completed") {
     return;
@@ -82,7 +281,10 @@ async function syncLoginResult(session, context) {
       typeof context?.followerCount === "number" && Number.isFinite(context.followerCount)
         ? Math.max(0, Math.round(context.followerCount))
         : null;
-    const hasResolvedProfile = Boolean(accountName || displayName);
+    const hasResolvedProfile =
+      session.platform === "douyin"
+        ? Boolean(accountName && displayName && avatarUrl && followerCount !== null)
+        : Boolean(accountName || displayName || avatarUrl || followerCount !== null);
     if (!hasResolvedProfile) {
       return;
     }
@@ -119,6 +321,7 @@ async function syncLoginResult(session, context) {
         account: payload?.account,
       },
     });
+    await closeLoginTabIfNeeded(session);
   } catch (error) {
     notifyApp(session, {
       source: "ai-superweb-extension",
@@ -169,9 +372,7 @@ function getPlatformPublishUrl(platform, job) {
       : "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image&openFilePicker=true";
   }
   if (platform === "douyin") {
-    return hasVideo
-      ? "https://creator.douyin.com/creator-micro/content/upload"
-      : "https://creator.douyin.com/creator-micro/content/publish";
+    return "https://creator.douyin.com/creator-micro/home";
   }
   if (platform === "wechat_mp") {
     return "https://channels.weixin.qq.com/platform";
@@ -251,27 +452,64 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (payload?.action === "START_LOGIN") {
-      const session = {
-        sessionId: payload.session.sessionId,
-        sessionToken: payload.session.sessionToken,
-        platform: payload.platform,
-        apiBaseUrl: payload.apiBaseUrl,
-        appTabId: sender.tab?.id,
-        status: "pending",
-        syncing: false,
-      };
-      activeLoginSessions.set(session.sessionId, session);
-      sendResponseSafe(sendResponse, { ok: true });
+      void (async () => {
+        try {
+          if (payload.forceFreshLogin) {
+            await clearPlatformCookies(payload.platform);
+          }
+
+          const session = {
+            sessionId: payload.session.sessionId,
+            sessionToken: payload.session.sessionToken,
+            platform: payload.platform,
+            apiBaseUrl: payload.apiBaseUrl,
+            appTabId: sender.tab?.id,
+            loginTabId: null,
+            status: "pending",
+            syncing: false,
+          };
+          activeLoginSessions.set(session.sessionId, session);
+          sendResponseSafe(sendResponse, { ok: true });
+        } catch (error) {
+          sendResponseSafe(sendResponse, {
+            ok: false,
+            message: error instanceof Error ? error.message : "扩展清理平台登录态失败",
+          });
+        }
+      })();
       return true;
     }
 
     if (payload?.action === "START_PUBLISH") {
       void (async () => {
         try {
+          debugLog("publish", "start-publish-received", {
+            platform: payload.platform,
+            jobId: payload.session?.job?.id || "",
+            hasVideo: Boolean(payload.session?.job?.draftVideoUrl),
+          });
+          const accountAuthPayload = await resolveExtensionPublishAuthPayload(
+            payload.apiBaseUrl,
+            payload.session,
+          );
+
+          await clearPlatformCookies(payload.platform);
+          await applyPlatformAuthPayload(
+            payload.platform,
+            accountAuthPayload,
+            payload.session.job,
+          );
+
           const targetUrl = getPlatformPublishUrl(payload.platform, payload.session.job);
           const tab = await chrome.tabs.create({
             url: targetUrl,
             active: true,
+          });
+          debugLog("publish", "publish-tab-created", {
+            platform: payload.platform,
+            jobId: payload.session?.job?.id || "",
+            tabId: tab.id,
+            targetUrl,
           });
           activePublishSessions.set(payload.session.job.id, {
             sessionToken: payload.session.sessionToken,
@@ -283,6 +521,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             status: "pending",
             lastDispatchUrl: "",
             lastDispatchAt: 0,
+            dispatching: false,
           });
           sendResponseSafe(sendResponse, { ok: true });
         } catch (error) {
@@ -294,27 +533,75 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })();
       return true;
     }
+
+    if (payload?.action === "OPEN_ACCOUNT_HOME") {
+      void (async () => {
+        try {
+          if (!String(payload.authPayload || "").trim()) {
+            throw new Error("扩展未收到账号登录态，无法切换到指定账号");
+          }
+
+          await clearPlatformCookies(payload.platform);
+          await applyPlatformAuthPayload(payload.platform, payload.authPayload, null);
+          await chrome.tabs.create({
+            url: payload.loginUrl,
+            active: true,
+          });
+          sendResponseSafe(sendResponse, { ok: true });
+        } catch (error) {
+          sendResponseSafe(sendResponse, {
+            ok: false,
+            message: error instanceof Error ? error.message : "扩展打开指定账号页面失败",
+          });
+        }
+      })();
+      return true;
+    }
   }
 
   if (message?.type === "AI_SUPERWEB_PLATFORM_PAGE_READY" && message.payload?.platform) {
+    const loginSession = getActiveSessionByPlatform(message.payload.platform);
+    if (loginSession && sender.tab?.id) {
+      loginSession.loginTabId = sender.tab.id;
+    }
     scheduleSync(message.payload.platform, message.payload);
 
     const publishSession = sender.tab?.id ? getPublishSessionByTabId(sender.tab.id) : null;
     const readyUrl = String(message.payload.url || "");
     const isTerminal =
       publishSession?.status === "success" || publishSession?.status === "failed";
+    const isActivePublish =
+      publishSession?.status === "running" ||
+      publishSession?.status === "dispatching";
     const dispatchedRecently =
       publishSession &&
       publishSession.lastDispatchUrl === readyUrl &&
       Date.now() - Number(publishSession.lastDispatchAt || 0) < 15000;
+    debugLog("page-ready", "received", {
+      platform: message.payload.platform,
+      readyUrl,
+      tabId: sender.tab?.id,
+      hasPublishSession: Boolean(publishSession),
+      publishStatus: publishSession?.status || "",
+      dispatchedRecently: Boolean(dispatchedRecently),
+    });
     if (
       publishSession &&
       publishSession.platform === message.payload.platform &&
       !isTerminal &&
+      !isActivePublish &&
       !dispatchedRecently
     ) {
+      publishSession.status = "dispatching";
+      publishSession.dispatching = true;
       publishSession.lastDispatchUrl = readyUrl;
       publishSession.lastDispatchAt = Date.now();
+      debugLog("dispatch", "execute-publish-send", {
+        platform: publishSession.platform,
+        jobId: publishSession.job?.id || "",
+        tabId: sender.tab?.id,
+        readyUrl,
+      });
       chrome.tabs.sendMessage(
         sender.tab.id,
         {
@@ -328,13 +615,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           },
         },
         () => {
-          if (chrome.runtime.lastError) {
+          const runtimeMessage = chrome.runtime.lastError?.message || "";
+          if (
+            runtimeMessage &&
+            !runtimeMessage.includes("The message port closed before a response was received.")
+          ) {
+            debugLog("dispatch", "execute-publish-send-failed", {
+              platform: publishSession.platform,
+              jobId: publishSession.job?.id || "",
+              tabId: sender.tab?.id,
+              message: runtimeMessage,
+            });
+            publishSession.status = "pending";
+            publishSession.dispatching = false;
             publishSession.lastDispatchUrl = "";
             publishSession.lastDispatchAt = 0;
             notifyPublishError(publishSession, "扩展未能注入本地发布脚本");
+            return;
           }
+          debugLog("dispatch", "execute-publish-send-accepted", {
+            platform: publishSession.platform,
+            jobId: publishSession.job?.id || "",
+            tabId: sender.tab?.id,
+            message: runtimeMessage || "ok",
+          });
         },
       );
+    } else if (publishSession) {
+      debugLog("dispatch", "execute-publish-skipped", {
+        platform: publishSession.platform,
+        jobId: publishSession.job?.id || "",
+        readyUrl,
+        isTerminal,
+        isActivePublish,
+        dispatchedRecently,
+        status: publishSession.status,
+      });
     }
 
     sendResponseSafe(sendResponse, { ok: true });
@@ -346,8 +662,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (item) => item.sessionToken === message.payload.sessionToken,
     );
     if (publishSession) {
+      debugLog("publish-status", "received", {
+        platform: publishSession.platform,
+        jobId: publishSession.job?.id || "",
+        status: message.payload.status,
+        sourceUrl: message.payload.sourceUrl || "",
+        lastError: message.payload.lastError || "",
+      });
       if (message.payload.status === "running") {
         publishSession.status = "running";
+        publishSession.dispatching = false;
+      }
+      if (message.payload.status === "success" || message.payload.status === "failed") {
+        publishSession.dispatching = false;
       }
       void syncPublishResult(publishSession, message.payload);
     }

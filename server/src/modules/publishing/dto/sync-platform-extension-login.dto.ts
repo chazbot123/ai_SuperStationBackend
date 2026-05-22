@@ -22,6 +22,11 @@ export class SyncPlatformExtensionLoginDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(120)
+  externalAccountId?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(80)
   displayName?: string;
 
