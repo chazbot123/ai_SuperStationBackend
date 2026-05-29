@@ -1,0 +1,21 @@
+export interface BitBrowserHttpRequest<TBody = unknown> {
+  method: string;
+  path: string;
+  body?: TBody;
+}
+
+export interface BitBrowserHttpResponse<TBody = unknown> {
+  status: number;
+  body: TBody;
+  headers?: Record<string, string>;
+}
+
+export interface BitBrowserHttpSuccessResponse<TData = unknown> {
+  success: true;
+  data: TData;
+}
+
+export interface BitBrowserHttpErrorResponse {
+  success: false;
+  error: string;
+}

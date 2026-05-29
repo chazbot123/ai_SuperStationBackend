@@ -441,7 +441,7 @@ export default function Studio() {
                       <button 
                         type="button" 
                         onClick={() => fileInputRef.current?.click()} 
-                        className="absolute -bottom-3 -right-3 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform z-50 text-black"
+                        className="absolute -bottom-3 -right-3 w-7 h-7 bg-cyan-500 rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform z-50 text-white"
                         style={{ zIndex: imageAssets.length + 1 }}
                       >
                         <Plus className="h-4 w-4" />
@@ -554,7 +554,7 @@ export default function Studio() {
                 <span className="text-xs text-zinc-500">{userPrompt.trim().length}/4000</span>
                 <button
                   type="button"
-                  className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500 text-black hover:bg-cyan-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500 text-white hover:bg-cyan-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={() => void generate()}
                   disabled={isGenerating}
                   title="开始生成"

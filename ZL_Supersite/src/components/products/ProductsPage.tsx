@@ -15,6 +15,9 @@ interface Product {
   description?: string;
   priceText?: string;
   specialOfferEnabled?: boolean;
+  originalPriceText?: string;
+  specialPriceText?: string;
+  specialTag?: string;
   category?: string;
   images: string[];
   createdAt?: string;
@@ -56,6 +59,21 @@ function buildHomeUrl() {
   params.delete("view");
   const nextQuery = params.toString();
   return nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname;
+}
+
+function getProductDisplayPrice(product: Product) {
+  const currentPrice = product.specialOfferEnabled
+    ? product.specialPriceText || product.priceText || product.originalPriceText || ""
+    : product.priceText || product.specialPriceText || product.originalPriceText || "";
+  const originalPrice =
+    product.specialOfferEnabled && product.originalPriceText && product.originalPriceText !== currentPrice
+      ? product.originalPriceText
+      : "";
+
+  return {
+    currentPrice,
+    originalPrice,
+  };
 }
 
 export default function ProductsPage() {
@@ -397,6 +415,7 @@ export default function ProductsPage() {
                 filteredProducts.map((product, index) => {
                   const primaryImage = product.images?.[0] || "/assets/images/landing/img_8.jpeg";
                   const categoryLabel = String(product.category || "").trim();
+                  const { currentPrice, originalPrice } = getProductDisplayPrice(product);
 
                   return (
                     <article
@@ -428,7 +447,28 @@ export default function ProductsPage() {
                         <h3 className="products-card__title" style={{ fontSize: "20px" }}>
                           {product.name || `产品 ${index + 1}`}
                         </h3>
-                        {product.priceText ? <div className="products-card__price">{product.priceText}</div> : null}
+                        <div className="products-card__footer">
+                          <div className="products-card__price-block">
+                            <div className="products-card__price-label">
+                              {product.specialOfferEnabled ? product.specialTag || "限时特惠" : "参考价格"}
+                            </div>
+                            <div className="products-card__price">
+                              <span className="products-card__price-currency">¥</span>
+                              <span>{currentPrice || "0"}</span>
+                              {originalPrice ? <del>{`¥${originalPrice}`}</del> : null}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="products-card__buy-btn"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedProduct(product);
+                            }}
+                          >
+                            立即购买
+                          </button>
+                        </div>
                       </div>
                     </article>
                   );
@@ -438,53 +478,104 @@ export default function ProductsPage() {
           )}
         </section>
       </div>
-      {selectedProduct ? (
-        <div
-          className="products-detail-modal"
-          onClick={() => setSelectedProduct(null)}
-          role="presentation"
-        >
+      {selectedProduct ? (() => {
+        const currentPrice = selectedProduct.specialOfferEnabled
+          ? selectedProduct.specialPriceText || selectedProduct.priceText
+          : selectedProduct.priceText;
+        const originalPrice = selectedProduct.specialOfferEnabled
+          ? selectedProduct.originalPriceText || selectedProduct.priceText
+          : selectedProduct.originalPriceText;
+
+        return (
           <div
-            className="products-detail-modal__panel"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label={selectedProduct.name || "产品详情"}
+            className="project-overlay is-open"
+            style={{ opacity: 1, visibility: 'visible', pointerEvents: 'auto', zIndex: 9999 }}
+            role="presentation"
+            aria-hidden="false"
+            data-lenis-prevent
           >
-            <button
-              type="button"
-              className="products-detail-modal__close"
+            <div
+              className="project-overlay__backdrop"
+              data-close="true"
               onClick={() => setSelectedProduct(null)}
-              aria-label="关闭详情"
+            ></div>
+            <div
+              className="project-overlay__panel"
+              role="dialog"
+              aria-modal="true"
+              aria-label={selectedProduct.name || "产品详情"}
+              onClick={(event) => event.stopPropagation()}
+              style={{ transform: 'none', opacity: 1, animation: 'projectOverlayIn 0.55s cubic-bezier(0.2,0.8,0.2,1) forwards' }}
             >
-              ×
-            </button>
-            <div className="products-detail-modal__media">
-              <div
-                className="products-detail-modal__hero"
-                style={{
-                  backgroundImage: `url('${selectedProduct.images?.[0] || "/assets/images/landing/img_8.jpeg"}')`,
-                }}
-              ></div>
+              <button
+                className="project-overlay__close"
+                type="button"
+                aria-label="关闭详情"
+                onClick={() => setSelectedProduct(null)}
+              >
+                ×
+              </button>
+              <div className="project-overlay__grid">
+                <div className="project-overlay__media">
+                  <div
+                    className="project-overlay__image"
+                    style={{
+                      backgroundImage: `url('${selectedProduct.images?.[0] || "/assets/images/landing/img_8.jpeg"}')`,
+                    }}
+                  ></div>
+                  {selectedProduct.images && selectedProduct.images.length > 1 ? (
+                    <div className="project-overlay__media-nav">
+                      <button className="project-overlay__nav-btn" type="button" aria-label="上一张">←</button>
+                      <div className="project-overlay__count">1 / {selectedProduct.images.length}</div>
+                      <button className="project-overlay__nav-btn" type="button" aria-label="下一张">→</button>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="project-overlay__content" data-lenis-prevent>
+                  <div className="project-overlay__meta">
+                    {String(selectedProduct.category || "").trim() || "精选产品"}
+                  </div>
+                  <h2 className="project-overlay__title">{selectedProduct.name || "产品详情"}</h2>
+                  {selectedProduct.englishName ? (
+                    <div className="project-overlay__desc" style={{ marginBottom: 12 }}>
+                      {selectedProduct.englishName}
+                    </div>
+                  ) : null}
+                  <p className="project-overlay__desc">
+                    {selectedProduct.description || selectedProduct.summary || "暂无详情介绍"}
+                  </p>
+                  
+                  {currentPrice ? (
+                    <div className="project-overlay__specs">
+                      <div className="project-overlay__price">
+                        <div className="project-overlay__price-label">
+                          {selectedProduct.specialOfferEnabled ? selectedProduct.specialTag || "限时特惠" : "参考价格"}
+                        </div>
+                        <div 
+                          className="project-overlay__price-value" 
+                          dangerouslySetInnerHTML={{ 
+                            __html: `¥ ${currentPrice}${originalPrice ? ` <del>¥${originalPrice}</del>` : ''}` 
+                          }} 
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="project-overlay__cta">
+                    <button className="project-overlay__cta-btn" type="button">立即购买</button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="products-detail-modal__content">
-              <span className="products-detail-modal__tag">
-                {String(selectedProduct.category || "").trim() || "精选产品"}
-              </span>
-              <h3>{selectedProduct.name || "产品详情"}</h3>
-              {selectedProduct.englishName ? (
-                <div className="products-detail-modal__subhead">{selectedProduct.englishName}</div>
-              ) : null}
-              {selectedProduct.priceText ? (
-                <div className="products-detail-modal__price">{selectedProduct.priceText}</div>
-              ) : null}
-              <p className="products-detail-modal__description">
-                {selectedProduct.description || selectedProduct.summary || "暂无详情介绍"}
-              </p>
-            </div>
+            <style>{`
+              @keyframes projectOverlayIn {
+                from { transform: translate3d(0, 20px, 0) scale(0.985); opacity: 0; }
+                to { transform: none; opacity: 1; }
+              }
+            `}</style>
           </div>
-        </div>
-      ) : null}
+        );
+      })() : null}
       <style>{`
         .products-card {
           cursor: pointer;
@@ -561,138 +652,89 @@ export default function ProductsPage() {
           font-size: 20px;
           letter-spacing: -0.02em;
         }
-        .products-detail-modal {
-          position: fixed;
-          inset: 0;
-          z-index: 9999;
-          display: grid;
-          place-items: center;
-          padding: 32px;
-          background: rgba(23,18,15,0.42);
-          backdrop-filter: blur(10px);
-          -webkit-backdrop-filter: blur(10px);
+        .products-card__footer {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 16px;
+          margin-top: 8px;
+          padding-top: 16px;
+          border-top: 1px solid rgba(23, 18, 15, 0.08);
         }
-        .products-detail-modal__panel {
-          position: relative;
-          display: grid;
-          grid-template-columns: minmax(320px, 520px) minmax(320px, 480px);
-          width: min(1080px, calc(100vw - 64px));
-          max-height: calc(100vh - 64px);
-          overflow: auto;
-          border-radius: 32px;
-          background: linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(248,244,237,0.98) 100%);
-          border: 1px solid rgba(255,255,255,0.9);
-          box-shadow: 0 40px 120px rgba(0,0,0,0.18);
-        }
-        .products-detail-modal__close {
-          position: absolute;
-          top: 20px;
-          right: 20px;
-          width: 44px;
-          height: 44px;
-          border: none;
-          border-radius: 50%;
-          background: rgba(23,18,15,0.08);
-          color: var(--ink);
-          font-size: 26px;
-          line-height: 1;
-          cursor: pointer;
-          transition: transform 0.25s ease, background 0.25s ease;
-        }
-        .products-detail-modal__close:hover {
-          transform: scale(1.05);
-          background: rgba(23,18,15,0.14);
-        }
-        .products-detail-modal__media {
-          padding: 22px;
-          background: linear-gradient(180deg, rgba(231,223,210,0.46) 0%, rgba(248,244,237,0.1) 100%);
-        }
-        .products-detail-modal__hero {
-          width: 100%;
-          min-height: 100%;
-          border-radius: 24px;
-          background-size: cover;
-          background-position: center;
-          box-shadow: 0 28px 72px rgba(53,34,18,0.16);
-        }
-        .products-detail-modal__content {
+        .products-card__price-block {
+          min-width: 0;
           display: flex;
           flex-direction: column;
-          justify-content: center;
-          gap: 16px;
-          padding: 56px 42px 42px;
+          gap: 6px;
         }
-        .products-detail-modal__tag {
-          display: inline-flex;
-          align-items: center;
-          width: fit-content;
-          padding: 7px 12px;
-          border-radius: 999px;
-          background: rgba(166,83,63,0.08);
-          color: var(--accent);
-          font-size: 11px;
-          letter-spacing: 0.18em;
+        .products-card__price-label {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.22em;
           text-transform: uppercase;
-        }
-        .products-detail-modal__content h3 {
-          margin: 0;
-          font-size: 36px;
-          line-height: 1.15;
-          letter-spacing: -0.03em;
-        }
-        .products-detail-modal__subhead {
           color: var(--muted);
-          font-size: 14px;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
         }
-        .products-detail-modal__price {
-          font-size: 28px;
+        .products-card__price {
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          flex-wrap: wrap;
+          color: var(--accent);
           font-weight: 800;
-          color: var(--accent);
+          font-size: 26px;
           letter-spacing: -0.03em;
+          line-height: 1;
         }
-        .products-detail-modal__description {
-          margin: 0;
+        .products-card__price-currency {
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: 0;
+        }
+        .products-card__price del {
+          font-size: 13px;
           color: var(--muted);
-          font-size: 15px;
-          line-height: 1.9;
-          white-space: pre-wrap;
+          font-weight: 600;
+          text-decoration: line-through;
+          letter-spacing: 0;
+        }
+        .products-card__buy-btn {
+          flex-shrink: 0;
+          min-width: 122px;
+          padding: 13px 18px;
+          border-radius: 16px;
+          border: 1px solid rgba(122, 52, 36, 0.22);
+          background: linear-gradient(135deg, #8f3f2c 0%, #b9573e 48%, #e3a086 100%);
+          color: #fff;
+          font-size: 13px;
+          font-weight: 800;
+          letter-spacing: 0.12em;
+          cursor: pointer;
+          box-shadow: 0 12px 24px rgba(166, 83, 63, 0.22), inset 0 1px 0 rgba(255,255,255,0.28);
+          transition: transform 0.3s ease, box-shadow 0.3s ease, filter 0.3s ease;
+        }
+        .products-card__buy-btn:hover {
+          transform: translateY(-2px);
+          filter: brightness(1.02);
+          box-shadow: 0 18px 30px rgba(166, 83, 63, 0.28), inset 0 1px 0 rgba(255,255,255,0.32);
+        }
+        .products-card__buy-btn:active {
+          transform: translateY(0);
         }
         @media (max-width: 1180px) {
           .portfolio-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-          .products-detail-modal__panel {
-            grid-template-columns: 1fr;
-          }
-          .products-detail-modal__hero {
-            min-height: 360px;
           }
         }
         @media (max-width: 760px) {
           .portfolio-grid {
             grid-template-columns: 1fr !important;
           }
-          .products-detail-modal {
-            padding: 16px;
+          .products-card__footer {
+            flex-direction: column;
+            align-items: stretch;
           }
-          .products-detail-modal__panel {
-            width: min(100vw - 32px, 100%);
-            max-height: calc(100vh - 32px);
-            border-radius: 24px;
-          }
-          .products-detail-modal__media {
-            padding: 16px 16px 0;
-          }
-          .products-detail-modal__hero {
-            min-height: 280px;
-          }
-          .products-detail-modal__content {
-            padding: 24px 20px 28px;
-          }
-          .products-detail-modal__content h3 {
-            font-size: 28px;
+          .products-card__buy-btn {
+            width: 100%;
           }
         }
       `}</style>

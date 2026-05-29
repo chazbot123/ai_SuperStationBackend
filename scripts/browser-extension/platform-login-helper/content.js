@@ -2,11 +2,265 @@
   const PAGE_SOURCE = "ai-superweb-page";
   const EXTENSION_SOURCE = "ai-superweb-extension";
   const debugPrefix = "[ai-superweb-content]";
+  //#region debug-point douyin-home-network-session
+  const publishDebugSessionId = "douyin-home-network";
+  //#endregion
+  const bitBrowserPublishExecuteTimeoutMs = 180000;
+  const pendingBitBrowserPublishStorageKey = "AI_SUPERWEB_PENDING_BITBROWSER_PUBLISH";
   const publishExecutionState = {
     sessionToken: "",
     pageUrl: "",
     running: false,
   };
+  const runtimeBridgeState = {
+    runtimeSessionId: "",
+    apiBaseUrl: "",
+    extensionTickStarted: false,
+    currentCommandId: "",
+    missingRuntimeReported: false,
+    resolvedRuntimeReported: false,
+  };
+  const profileDebugState = {
+    douyinSignature: "",
+  };
+
+  function reportRuntimeDebug(hypothesisId, location, data) {
+    const apiBaseUrl = runtimeBridgeState.apiBaseUrl || "http://127.0.0.1:3001";
+    fetch(`${apiBaseUrl}/api/bitbrowser/debug/event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: publishDebugSessionId,
+        runId: "pre-fix",
+        hypothesisId,
+        location,
+        msg: `[DEBUG] ${location}`,
+        data,
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+
+  function reportPublishRuntimeDebug(hypothesisId, location, data) {
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: publishDebugSessionId,
+        runId: "pre-fix",
+        hypothesisId,
+        location,
+        msg: `[DEBUG] ${location}`,
+        data,
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+
+  //#region debug-point douyin-home-network-login-page-marker
+  function looksLikeDouyinLoginPage(url = window.location.href) {
+    const currentUrl = String(url || "").toLowerCase();
+    const pageText = String(document.body?.innerText || document.body?.textContent || "").toLowerCase();
+    return (
+      currentUrl.includes("login") ||
+      currentUrl.includes("passport") ||
+      pageText.includes("登录抖音") ||
+      pageText.includes("扫码登录") ||
+      pageText.includes("手机验证码登录") ||
+      pageText.includes("登录后即可发布")
+    );
+  }
+  //#endregion
+
+  function buildBitBrowserRuntimeStatusSender(runtimeSessionId, runtimeCommandId) {
+    return async (payload) => {
+      const profile = extractProfile(platform);
+      return new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            type: "AI_SUPERWEB_BITBROWSER_COMMAND_STATUS",
+            payload: {
+              runtimeSessionId,
+              runtimeCommandId,
+              status: payload?.status || "",
+              lastError: payload?.lastError || "",
+              message: payload?.message || "",
+              resultPayload: {
+                status: payload?.status || "",
+                draftUrl: payload?.draftUrl || "",
+                sourceUrl: payload?.sourceUrl || window.location.href,
+                lastError: payload?.lastError || "",
+                accountName: profile.accountName,
+                externalAccountId: profile.externalAccountId,
+                displayName: profile.displayName,
+                avatarUrl: profile.avatarUrl,
+                followerCount: profile.followerCount,
+              },
+            },
+          },
+          () => resolve(undefined),
+        );
+      });
+    };
+  }
+
+  function startBitBrowserPublishExecution({
+    runtimeSessionId,
+    runtimeCommandId,
+    session,
+    currentUrl,
+    launchSource,
+  }) {
+    if (
+      publishExecutionState.running &&
+      runtimeBridgeState.currentCommandId === runtimeCommandId &&
+      publishExecutionState.pageUrl === currentUrl
+    ) {
+      return false;
+    }
+
+    runtimeBridgeState.runtimeSessionId = runtimeSessionId;
+    runtimeBridgeState.currentCommandId = runtimeCommandId;
+    const previousRuntimeMeta =
+      session?.__aiSuperwebRuntimeMeta && typeof session.__aiSuperwebRuntimeMeta === "object"
+        ? session.__aiSuperwebRuntimeMeta
+        : {};
+    const sessionWithRuntimeMeta = {
+      ...session,
+      __aiSuperwebRuntimeMeta: {
+        ...previousRuntimeMeta,
+        lastUrl: currentUrl,
+        lastLaunchSource: launchSource,
+        updatedAt: Date.now(),
+        homeResumeCount:
+          launchSource === "page-resume-home-recovery"
+            ? Number(previousRuntimeMeta.homeResumeCount || 0) + 1
+            : Number(previousRuntimeMeta.homeResumeCount || 0),
+      },
+    };
+    publishExecutionState.sessionToken = String(sessionWithRuntimeMeta.sessionToken || runtimeSessionId);
+    publishExecutionState.pageUrl = currentUrl;
+    publishExecutionState.running = true;
+    persistPendingBitBrowserPublish({
+      runtimeSessionId,
+      runtimeCommandId,
+      session: sessionWithRuntimeMeta,
+    });
+
+    //#region debug-point douyin-home-network-resume-start
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H2",location:"scripts/browser-extension/platform-login-helper/content.js:startBitBrowserPublishExecution",msg:"[DEBUG] start bitbrowser publish execution",data:{runtimeSessionId,runtimeCommandId,currentUrl,launchSource,looksLikeLoginPage:looksLikeDouyinLoginPage(currentUrl),pageTextPreview:String(document.body?.innerText||document.body?.textContent||"").slice(0,160)},ts:Date.now()})}).catch(()=>{});
+    //#endregion
+
+    const sendRuntimeStatus = buildBitBrowserRuntimeStatusSender(runtimeSessionId, runtimeCommandId);
+
+    reportPublishRuntimeDebug(
+      "H4",
+      "scripts/browser-extension/platform-login-helper/content.js:AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND:starting",
+      {
+        runtimeSessionId,
+        runtimeCommandId,
+        platform,
+        currentUrl,
+        hasPublishAutomation:
+          typeof globalThis.AISuperWebPublishAutomation?.executePublishSession === "function",
+        launchSource,
+      },
+    );
+
+    void runWithTimeout(
+      () =>
+        globalThis.AISuperWebPublishAutomation.executePublishSession(
+          sessionWithRuntimeMeta,
+          sendRuntimeStatus,
+        ),
+      bitBrowserPublishExecuteTimeoutMs,
+      `BitBrowser 发布执行超时（${bitBrowserPublishExecuteTimeoutMs}ms）`,
+    )
+      .then(async () => {
+        clearPendingBitBrowserPublish();
+        await fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"post-fix",hypothesisId:"H2",location:"scripts/browser-extension/platform-login-helper/content.js:AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND:finished",msg:"[DEBUG] runtime publish automation finished",data:{runtimeSessionId,runtimeCommandId,platform,currentUrl:window.location.href,launchSource},ts:Date.now()})}).catch(()=>{});
+      })
+      .catch(async (error) => {
+        clearPendingBitBrowserPublish();
+        await fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"post-fix",hypothesisId:"H2",location:"scripts/browser-extension/platform-login-helper/content.js:AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND:failed",msg:"[DEBUG] runtime publish automation failed",data:{runtimeSessionId,runtimeCommandId,platform,currentUrl:window.location.href,message:error instanceof Error ? error.message : String(error),looksLikeLoginPage:looksLikeDouyinLoginPage(window.location.href),pageTextPreview:String(document.body?.innerText||document.body?.textContent||"").slice(0,160),launchSource},ts:Date.now()})}).catch(()=>{});
+        await sendRuntimeStatus({
+          status: "failed",
+          lastError: error instanceof Error ? error.message : "扩展本地发布失败",
+          sourceUrl: window.location.href,
+        });
+      })
+      .finally(() => {
+        publishExecutionState.running = false;
+        runtimeBridgeState.currentCommandId = "";
+      });
+
+    return true;
+  }
+
+  function maybeResumePendingBitBrowserPublish() {
+    const pendingPublish = readPendingBitBrowserPublish();
+    if (!pendingPublish) {
+      //#region debug-point douyin-home-return-resume-skip-missing
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:maybeResumePendingBitBrowserPublish:skip-missing",msg:"[DEBUG] resume skipped because pending publish missing",data:{currentUrl:window.location.href},ts:Date.now()})}).catch(()=>{});
+      //#endregion
+      return;
+    }
+    if (publishExecutionState.running) {
+      //#region debug-point douyin-home-return-resume-skip-running
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:maybeResumePendingBitBrowserPublish:skip-running",msg:"[DEBUG] resume skipped because execution already running",data:{currentUrl:window.location.href,runtimeSessionId:pendingPublish.runtimeSessionId,runtimeCommandId:pendingPublish.runtimeCommandId},ts:Date.now()})}).catch(()=>{});
+      //#endregion
+      return;
+    }
+    const currentUrl = window.location.href;
+    const runtimeMeta =
+      pendingPublish?.session?.__aiSuperwebRuntimeMeta &&
+      typeof pendingPublish.session.__aiSuperwebRuntimeMeta === "object"
+        ? pendingPublish.session.__aiSuperwebRuntimeMeta
+        : {};
+    const lastRuntimeUrl = String(runtimeMeta.lastUrl || "");
+    const homeResumeCount = Number(runtimeMeta.homeResumeCount || 0);
+    const isContentPage = currentUrl.includes("/creator-micro/content/");
+    const isHomePage = currentUrl.includes("/creator-micro/home");
+    const canRecoverOnHome =
+      isHomePage &&
+      homeResumeCount < 1 &&
+      (lastRuntimeUrl.includes("/creator-micro/content/upload") ||
+        lastRuntimeUrl.includes("/creator-micro/content/publish"));
+    const canResumeOnCurrentPage = isContentPage || canRecoverOnHome;
+    if (!canResumeOnCurrentPage) {
+      //#region debug-point douyin-home-return-resume-skip-page
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:maybeResumePendingBitBrowserPublish:skip-page",msg:"[DEBUG] resume skipped because page not supported",data:{currentUrl:window.location.href,runtimeSessionId:pendingPublish.runtimeSessionId,runtimeCommandId:pendingPublish.runtimeCommandId,lastRuntimeUrl,homeResumeCount},ts:Date.now()})}).catch(()=>{});
+      //#endregion
+      return;
+    }
+    //#region debug-point douyin-home-return-resume-start
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:maybeResumePendingBitBrowserPublish:start",msg:"[DEBUG] resume pending publish start",data:{currentUrl:window.location.href,runtimeSessionId:pendingPublish.runtimeSessionId,runtimeCommandId:pendingPublish.runtimeCommandId,lastRuntimeUrl,homeResumeCount,canRecoverOnHome},ts:Date.now()})}).catch(()=>{});
+    //#endregion
+    startBitBrowserPublishExecution({
+      runtimeSessionId: pendingPublish.runtimeSessionId,
+      runtimeCommandId: pendingPublish.runtimeCommandId,
+      session: pendingPublish.session,
+      currentUrl,
+      launchSource: canRecoverOnHome ? "page-resume-home-recovery" : "page-resume",
+    });
+  }
+
+  async function runWithTimeout(task, timeoutMs, timeoutMessage) {
+    let timeoutHandle = null;
+    try {
+      return await Promise.race([
+        task(),
+        new Promise((_, reject) => {
+          timeoutHandle = window.setTimeout(() => {
+            reject(new Error(timeoutMessage));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle !== null) {
+        window.clearTimeout(timeoutHandle);
+      }
+    }
+  }
 
   function debugLog(scope, detail, extra) {
     if (typeof extra === "undefined") {
@@ -22,6 +276,212 @@
     if (hostname.includes("channels.weixin.qq.com") || hostname.includes("weixin.qq.com")) return "wechat_mp";
     if (hostname.includes("kuaishou.com")) return "kuaishou";
     return null;
+  }
+
+  function readStorageValue(key) {
+    try {
+      const sessionValue = window.sessionStorage?.getItem?.(key);
+      if (sessionValue) {
+        return sessionValue;
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    try {
+      const localValue = window.localStorage?.getItem?.(key);
+      if (localValue) {
+        return localValue;
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    return "";
+  }
+
+  function writeStorageValue(key, value) {
+    try {
+      if (value) {
+        window.sessionStorage?.setItem?.(key, value);
+      } else {
+        window.sessionStorage?.removeItem?.(key);
+      }
+    } catch (_) {
+      // ignore
+    }
+    try {
+      if (value) {
+        window.localStorage?.setItem?.(key, value);
+      } else {
+        window.localStorage?.removeItem?.(key);
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  function persistPendingBitBrowserPublish(payload) {
+    try {
+      const serialized = JSON.stringify({
+        runtimeSessionId: String(payload?.runtimeSessionId || "").trim(),
+        runtimeCommandId: String(payload?.runtimeCommandId || "").trim(),
+        session: payload?.session || null,
+        storedAt: Date.now(),
+      });
+      writeStorageValue(
+        pendingBitBrowserPublishStorageKey,
+        serialized,
+      );
+      //#region debug-point douyin-home-return-persist-pending-success
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:persistPendingBitBrowserPublish:success",msg:"[DEBUG] persist pending publish success",data:{currentUrl:window.location.href,runtimeSessionId:String(payload?.runtimeSessionId||"").trim(),runtimeCommandId:String(payload?.runtimeCommandId||"").trim(),serializedLength:serialized.length},ts:Date.now()})}).catch(()=>{});
+      //#endregion
+    } catch (_) {
+      //#region debug-point douyin-home-return-persist-pending-failed
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:persistPendingBitBrowserPublish:failed",msg:"[DEBUG] persist pending publish failed",data:{currentUrl:window.location.href,runtimeSessionId:String(payload?.runtimeSessionId||"").trim(),runtimeCommandId:String(payload?.runtimeCommandId||"").trim()},ts:Date.now()})}).catch(()=>{});
+      //#endregion
+      // ignore
+    }
+  }
+
+  function readPendingBitBrowserPublish() {
+    const rawValue = readStorageValue(pendingBitBrowserPublishStorageKey);
+    if (!rawValue) {
+      //#region debug-point douyin-home-return-read-pending-empty
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:readPendingBitBrowserPublish:empty",msg:"[DEBUG] read pending publish empty",data:{currentUrl:window.location.href},ts:Date.now()})}).catch(()=>{});
+      //#endregion
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(rawValue);
+      if (!parsed?.runtimeSessionId || !parsed?.runtimeCommandId || !parsed?.session) {
+        //#region debug-point douyin-home-return-read-pending-invalid
+        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:readPendingBitBrowserPublish:invalid",msg:"[DEBUG] read pending publish invalid",data:{currentUrl:window.location.href,hasRuntimeSessionId:Boolean(parsed?.runtimeSessionId),hasRuntimeCommandId:Boolean(parsed?.runtimeCommandId),hasSession:Boolean(parsed?.session),rawLength:rawValue.length},ts:Date.now()})}).catch(()=>{});
+        //#endregion
+        return null;
+      }
+      //#region debug-point douyin-home-return-read-pending-success
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:readPendingBitBrowserPublish:success",msg:"[DEBUG] read pending publish success",data:{currentUrl:window.location.href,runtimeSessionId:String(parsed.runtimeSessionId||""),runtimeCommandId:String(parsed.runtimeCommandId||""),rawLength:rawValue.length},ts:Date.now()})}).catch(()=>{});
+      //#endregion
+      return parsed;
+    } catch (_) {
+      //#region debug-point douyin-home-return-read-pending-parse-failed
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:readPendingBitBrowserPublish:parse-failed",msg:"[DEBUG] read pending publish parse failed",data:{currentUrl:window.location.href,rawLength:rawValue.length},ts:Date.now()})}).catch(()=>{});
+      //#endregion
+      return null;
+    }
+  }
+
+  function clearPendingBitBrowserPublish() {
+    writeStorageValue(pendingBitBrowserPublishStorageKey, "");
+  }
+
+  function resolveRuntimeBridgeConfig() {
+    const params = new URLSearchParams(window.location.search || "");
+    const hashParams = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+    const runtimeSessionId = normalize(
+      params.get("ai_superweb_runtime_session_id") ||
+        params.get("runtimeSessionId") ||
+        hashParams.get("ai_superweb_runtime_session_id") ||
+        hashParams.get("runtimeSessionId") ||
+        readStorageValue("AI_SUPERWEB_RUNTIME_SESSION_ID") ||
+        readStorageValue("ai_superweb_runtime_session_id"),
+    );
+    const apiBaseUrl = normalize(
+      params.get("ai_superweb_bridge_base_url") ||
+        params.get("bridgeApiBaseUrl") ||
+        hashParams.get("ai_superweb_bridge_base_url") ||
+        hashParams.get("bridgeApiBaseUrl") ||
+        readStorageValue("AI_SUPERWEB_BRIDGE_API_BASE_URL") ||
+        readStorageValue("ai_superweb_bridge_base_url"),
+    );
+    return {
+      runtimeSessionId,
+      apiBaseUrl,
+    };
+  }
+
+  function syncRuntimeBridgeConfig() {
+    const resolved = resolveRuntimeBridgeConfig();
+    if (resolved.runtimeSessionId) {
+      runtimeBridgeState.runtimeSessionId = resolved.runtimeSessionId;
+      if (!runtimeBridgeState.resolvedRuntimeReported) {
+        runtimeBridgeState.resolvedRuntimeReported = true;
+        reportRuntimeDebug(
+          "H1",
+          "scripts/browser-extension/platform-login-helper/content.js:syncRuntimeBridgeConfig:resolved",
+          {
+            runtimeSessionId: resolved.runtimeSessionId,
+            apiBaseUrl: resolved.apiBaseUrl,
+            href: window.location.href,
+          },
+        );
+      }
+    }
+    if (resolved.apiBaseUrl) {
+      runtimeBridgeState.apiBaseUrl = resolved.apiBaseUrl;
+    }
+    if (!resolved.runtimeSessionId && !runtimeBridgeState.missingRuntimeReported) {
+      runtimeBridgeState.missingRuntimeReported = true;
+      reportRuntimeDebug(
+        "H1",
+        "scripts/browser-extension/platform-login-helper/content.js:syncRuntimeBridgeConfig:missing-runtime",
+        {
+          href: window.location.href,
+          search: window.location.search || "",
+          hash: window.location.hash || "",
+          hasSessionStorageRuntimeId: Boolean(readStorageValue("AI_SUPERWEB_RUNTIME_SESSION_ID")),
+          hasLocalStorageRuntimeId: Boolean(readStorageValue("ai_superweb_runtime_session_id")),
+          apiBaseUrl: resolved.apiBaseUrl,
+        },
+      );
+    }
+    return resolved;
+  }
+
+  function persistRuntimeBridgeConfig(runtimeSessionId, apiBaseUrl) {
+    const runtimeId = normalize(runtimeSessionId);
+    const bridgeBaseUrl = normalize(apiBaseUrl);
+    const writes = [
+      ["AI_SUPERWEB_RUNTIME_SESSION_ID", runtimeId],
+      ["ai_superweb_runtime_session_id", runtimeId],
+      ["AI_SUPERWEB_BRIDGE_API_BASE_URL", bridgeBaseUrl],
+      ["ai_superweb_bridge_base_url", bridgeBaseUrl],
+    ];
+    for (const [key, value] of writes) {
+      if (!value) {
+        continue;
+      }
+      try {
+        window.sessionStorage?.setItem?.(key, value);
+      } catch (_) {
+        // ignore
+      }
+      try {
+        window.localStorage?.setItem?.(key, value);
+      } catch (_) {
+        // ignore
+      }
+    }
+  }
+
+  function applyBoundRuntime(payload) {
+    const runtimeSessionId = normalize(payload?.runtimeSessionId);
+    const apiBaseUrl = normalize(
+      payload?.apiBaseUrl || runtimeBridgeState.apiBaseUrl || "http://127.0.0.1:3001",
+    );
+    if (!runtimeSessionId) {
+      return;
+    }
+
+    runtimeBridgeState.runtimeSessionId = runtimeSessionId;
+    runtimeBridgeState.apiBaseUrl = apiBaseUrl;
+    runtimeBridgeState.missingRuntimeReported = false;
+    runtimeBridgeState.resolvedRuntimeReported = false;
+    persistRuntimeBridgeConfig(runtimeSessionId, apiBaseUrl);
+    syncRuntimeBridgeConfig();
+    startRuntimeBridgeTicker();
+    setTimeout(sendRuntimeTick, 80);
   }
 
   function normalize(value) {
@@ -71,6 +531,24 @@
     for (const selector of selectors) {
       try {
         const node = document.querySelector(selector);
+        const src = normalize(node?.getAttribute?.("src") || node?.src || "");
+        if (src) {
+          return src;
+        }
+      } catch (_) {
+        // ignore invalid selector
+      }
+    }
+    return "";
+  }
+
+  function findFirstImageSrcWithin(root, selectors) {
+    if (!(root instanceof Element)) {
+      return "";
+    }
+    for (const selector of selectors) {
+      try {
+        const node = root.querySelector(selector);
         const src = normalize(node?.getAttribute?.("src") || node?.src || "");
         if (src) {
           return src;
@@ -202,7 +680,12 @@
   }
 
   function looksLikePlatformLabel(value, platform) {
-    const normalized = normalize(value).toLowerCase();
+    const normalizedValue = normalize(value);
+    const normalizedIdentity = normalizeIdentityText(normalizedValue, platform);
+    if (platform === "wechat_mp" && normalizedIdentity && normalizedIdentity !== normalizedValue) {
+      return false;
+    }
+    const normalized = normalizedValue.toLowerCase();
     const labels = {
       xiaohongshu: ["小红书", "xiaohongshu", "创作服务平台"],
       douyin: ["抖音", "douyin", "创作者平台"],
@@ -213,7 +696,7 @@
   }
 
   function isGenericPlatformText(value, platform) {
-    const normalized = normalize(value).toLowerCase();
+    const normalized = normalizeIdentityText(value, platform).toLowerCase();
     if (!normalized) return true;
     if (looksLikePlatformLabel(normalized, platform)) return true;
 
@@ -227,13 +710,25 @@
         "小红书专业号",
       ],
       douyin: ["创作者平台", "创作服务平台"],
-      wechat_mp: ["视频号助手", "视频号管理"],
+      wechat_mp: ["视频号助手", "视频号管理", "助手", "管理"],
       kuaishou: ["快手创作者服务平台"],
     };
 
     return (genericLabels[platform] || []).some((label) =>
       normalized.includes(String(label).toLowerCase()),
     );
+  }
+
+  function normalizeIdentityText(value, platform) {
+    const normalized = normalize(value);
+    if (!normalized) return "";
+    if (platform !== "wechat_mp") return normalized;
+    if (/^(?:微信)?视频号(?:名称|ID|Id)?\s*[:：]/i.test(normalized)) {
+      return normalized
+        .replace(/^(?:微信)?视频号(?:名称|ID|Id)?\s*[:：]\s*/i, "")
+        .trim();
+    }
+    return normalized;
   }
 
   function extractNameFromTitle(title, platform) {
@@ -259,7 +754,7 @@
 
   function extractProfileFromPageText(text, platform) {
     if (!text) {
-      return { accountName: null, displayName: null };
+      return { accountName: null, displayName: null, externalAccountId: null };
     }
 
     const compactText = normalize(text);
@@ -321,8 +816,10 @@
 
     for (const matcher of matchers[platform] || []) {
       const accountMatch = compactText.match(matcher.account);
-      const accountName = normalize(accountMatch?.[2] || accountMatch?.[1] || "");
-      const displayName = matcher.display ? normalize(compactText.match(matcher.display)?.[1] || "") : "";
+      const accountName = normalizeIdentityText(accountMatch?.[2] || accountMatch?.[1] || "", platform);
+      const displayName = matcher.display
+        ? normalizeIdentityText(compactText.match(matcher.display)?.[1] || "", platform)
+        : "";
       if (accountName || displayName) {
         return {
           accountName: accountName || null,
@@ -332,7 +829,7 @@
       }
     }
 
-    return { accountName: null, displayName: null };
+    return { accountName: null, displayName: null, externalAccountId: null };
   }
 
   function findAncestorTextBlock(node, anchor) {
@@ -340,11 +837,14 @@
     while (current) {
       const text = normalize(current.innerText || current.textContent || "");
       if (text.includes(String(anchor)) && text.length >= 8 && text.length <= 240) {
-        return text;
+        return {
+          text,
+          element: current,
+        };
       }
       current = current.parentElement;
     }
-    return "";
+    return null;
   }
 
   function findTextBlockByAnchors(anchors) {
@@ -353,8 +853,68 @@
       for (const node of nodes) {
         const text = normalize(node.innerText || node.textContent || "");
         if (!text || !text.includes(anchor)) continue;
-        const blockText = findAncestorTextBlock(node, anchor);
-        if (blockText) return blockText;
+        const blockMatch = findAncestorTextBlock(node, anchor);
+        if (blockMatch) return blockMatch;
+      }
+    }
+    return { text: "", element: null };
+  }
+
+  function collectAncestorElements(node, maxDepth = 5) {
+    const elements = [];
+    let current = node instanceof HTMLElement ? node : node?.parentElement;
+    let depth = 0;
+    while (current && depth < maxDepth) {
+      elements.push(current);
+      current = current.parentElement;
+      depth += 1;
+    }
+    return elements;
+  }
+
+  function findDouyinAvatarUrl(anchoredBlockElement) {
+    const avatarSelectors = [
+      "img.img-PeynF_",
+      "img[src*='aweme-avatar']",
+      "img[src*='douyinpic.com/aweme/']",
+    ];
+    const profileSelectors = [
+      "div.name-_lSSDc",
+      "[data-e2e*='user-name']",
+      "[class*='creator-name']",
+      "[class*='nickname']",
+      "[class*='user-name']",
+      "div.unique_id-EuH8eA",
+      "[class*='unique_id-']",
+      "[class*='unique-id']",
+      "[class*='douyin-id']",
+    ];
+    const containers = [];
+    const pushContainer = (node) => {
+      for (const element of collectAncestorElements(node, 5)) {
+        if (element instanceof HTMLElement && !containers.includes(element)) {
+          containers.push(element);
+        }
+      }
+    };
+
+    if (anchoredBlockElement) {
+      pushContainer(anchoredBlockElement);
+    }
+    for (const selector of profileSelectors) {
+      try {
+        const node = document.querySelector(selector);
+        if (node) {
+          pushContainer(node);
+        }
+      } catch (_) {
+        // ignore invalid selector
+      }
+    }
+    for (const container of containers) {
+      const src = findFirstImageSrcWithin(container, avatarSelectors);
+      if (src) {
+        return src;
       }
     }
     return "";
@@ -368,7 +928,9 @@
       wechat_mp: ["视频号ID", "视频号 Id", "视频号"],
       kuaishou: ["快手号"],
     };
-    const anchoredBlockText = findTextBlockByAnchors(anchors[platform] || []);
+    const anchoredBlock = findTextBlockByAnchors(anchors[platform] || []);
+    const anchoredBlockText = anchoredBlock.text || "";
+    const anchoredBlockElement = anchoredBlock.element || null;
     const anchoredText = anchoredBlockText || pageText;
 
     const directDisplayName =
@@ -392,6 +954,8 @@
           ],
           wechat_mp: [
             "h2.finder-nickname",
+            "#finder-uid-copy.finder-uniq-id",
+            ".finder-uniq-id",
             ".finder-nickname",
             "[class*='finder-nickname']",
             ".weui-desktop-account__info-name",
@@ -399,7 +963,6 @@
             ".account_meta_primary",
             "[class*='finder'] [class*='name']",
             "[class*='account'] [class*='name']",
-            "[class*='name']",
           ],
           kuaishou: [
             "div.user-info-name",
@@ -421,16 +984,21 @@
               "[class*='douyin-id']",
             ]),
           ) || null
+        : platform === "wechat_mp"
+          ? normalizeIdentityText(
+              findFirstText([
+                "#finder-uid-copy.finder-uniq-id",
+                "span.finder-uniq-id",
+                "[data-clipboard-text].finder-uniq-id",
+                "#finder-uid-copy",
+              ]),
+              platform,
+            ) || null
         : null;
 
-    const profileFromAnchoredText =
-      platform === "douyin" ? { accountName: null, displayName: null } : extractProfileFromPageText(anchoredText, platform);
-    const profileFromPageText =
-      platform === "douyin" ? { accountName: null, displayName: null } : extractProfileFromPageText(pageText, platform);
-    const titleFallback =
-      platform === "xiaohongshu" || platform === "douyin"
-        ? null
-        : extractNameFromTitle(document.title || "", platform);
+    const profileFromAnchoredText = extractProfileFromPageText(anchoredText, platform);
+    const profileFromPageText = extractProfileFromPageText(pageText, platform);
+    const titleFallback = extractNameFromTitle(document.title || "", platform);
     const displayName =
       directDisplayName ||
       profileFromAnchoredText.displayName ||
@@ -455,13 +1023,10 @@
             "[class*='user'] img",
           ]) || null
         : platform === "douyin"
-          ? findFirstImageSrc([
-              "img.img-PeynF_",
-              "img[src*='aweme-avatar']",
-              "img[src*='douyinpic.com/aweme/']",
-            ]) || null
+          ? findDouyinAvatarUrl(anchoredBlockElement) || null
         : platform === "wechat_mp"
           ? findFirstImageSrc([
+              "img.avatar[alt='视频号头像']",
               "img.avatar",
               "img[src*='wx.qlogo.cn/finderhead/']",
               "[class*='finder'] img.avatar",
@@ -471,7 +1036,15 @@
           : null;
     const followerCount =
       platform === "xiaohongshu" || platform === "wechat_mp"
-        ? findMetricCountByLabel("粉丝")
+        ? platform === "wechat_mp"
+          ? parseCountText(
+              findFirstText([
+                ".finder-info-num",
+                ".finder-fans .finder-info-num",
+                "[class*='fans'] .finder-info-num",
+              ]),
+            ) || findMetricCountByLabel("粉丝")
+          : findMetricCountByLabel("粉丝")
         : platform === "douyin"
           ? parseCountText(
               findFirstText([
@@ -484,11 +1057,48 @@
           : null;
 
     const normalizedDisplayName =
-      displayName && !isGenericPlatformText(displayName, platform) ? displayName : null;
+      displayName && !isGenericPlatformText(displayName, platform)
+        ? normalizeIdentityText(displayName, platform)
+        : null;
     const normalizedAccountName =
-      accountName && !isGenericPlatformText(accountName, platform) ? accountName : null;
+      accountName && !isGenericPlatformText(accountName, platform)
+        ? normalizeIdentityText(accountName, platform)
+        : null;
+    if (platform === "douyin") {
+      const debugPayload = {
+        href: window.location.href,
+        title: document.title || "",
+        directDisplayName,
+        directAccountName,
+        anchoredBlockText: anchoredBlockText ? anchoredBlockText.slice(0, 200) : "",
+        anchoredHasElement: Boolean(anchoredBlockElement),
+        normalizedAccountName,
+        normalizedDisplayName,
+        hasAvatar: Boolean(avatarUrl),
+        followerCount,
+      };
+      const signature = JSON.stringify(debugPayload);
+      if (profileDebugState.douyinSignature !== signature) {
+        profileDebugState.douyinSignature = signature;
+        // #region debug-point P1:douyin-profile-extract
+        fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          body: JSON.stringify({
+            sessionId: "douyin-profile-detect",
+            runId: "pre-fix",
+            hypothesisId: "H1",
+            location: "scripts/browser-extension/platform-login-helper/content.js:extractProfile:douyin",
+            msg: "[DEBUG] douyin profile extract result",
+            data: debugPayload,
+            ts: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      }
+    }
     return {
       accountName: normalizedAccountName || normalizedDisplayName,
+      externalAccountId: normalizedAccountName,
       displayName: normalizedDisplayName,
       avatarUrl,
       followerCount,
@@ -528,8 +1138,51 @@
     );
   });
 
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.source !== EXTENSION_SOURCE) {
+      return;
+    }
+
+    if (message.type === "AI_SUPERWEB_BITBROWSER_BIND_RUNTIME" && message.payload) {
+      applyBoundRuntime(message.payload);
+      return;
+    }
+
+    if (
+      message.type === "AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND" &&
+      message.payload?.runtimeSessionId &&
+      message.payload?.runtimeCommandId &&
+      message.payload?.session
+    ) {
+      const runtimeSessionId = String(message.payload.runtimeSessionId || "").trim();
+      const runtimeCommandId = String(message.payload.runtimeCommandId || "").trim();
+      const session = message.payload.session;
+      const currentUrl = window.location.href;
+      if (!runtimeSessionId || !runtimeCommandId) {
+        return;
+      }
+
+      try {
+        sendResponse({
+          ok: true,
+          received: true,
+          runtimeSessionId,
+          runtimeCommandId,
+          currentUrl,
+        });
+      } catch (_) {
+        // Ignore response channel failures and continue local execution.
+      }
+      // #region debug-point H4:publish-command-received
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H3",location:"scripts/browser-extension/platform-login-helper/content.js:AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND:received",msg:"[DEBUG] runtime publish command received by content script",data:{runtimeSessionId,runtimeCommandId,platform,currentUrl,sessionToken:String(session.sessionToken||"").slice(0,12),looksLikeLoginPage:looksLikeDouyinLoginPage(currentUrl),pageTextPreview:String(document.body?.innerText||document.body?.textContent||"").slice(0,160)},ts:Date.now()})}).catch(()=>{});
+      // #endregion
+      startBitBrowserPublishExecution({
+        runtimeSessionId,
+        runtimeCommandId,
+        session,
+        currentUrl,
+        launchSource: "command",
+      });
       return;
     }
 
@@ -572,6 +1225,7 @@
                 sessionToken: session.sessionToken,
                 ...payload,
                 accountName: profile.accountName,
+                externalAccountId: profile.externalAccountId,
                 displayName: profile.displayName,
               },
             },
@@ -610,8 +1264,52 @@
     return;
   }
 
-  const notifyPageReady = () => {
+  function sendRuntimeTick() {
+    syncRuntimeBridgeConfig();
+    if (!runtimeBridgeState.runtimeSessionId) {
+      return;
+    }
+
     const profile = extractProfile(platform);
+    chrome.runtime.sendMessage({
+      type: "AI_SUPERWEB_BITBROWSER_RUNTIME_TICK",
+      payload: {
+        runtimeSessionId: runtimeBridgeState.runtimeSessionId,
+        apiBaseUrl: runtimeBridgeState.apiBaseUrl,
+        platform,
+        url: window.location.href,
+        title: document.title || "",
+        accountName: profile.accountName,
+        externalAccountId: profile.externalAccountId,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
+        followerCount: profile.followerCount,
+      },
+    });
+    // #region debug-point H1:runtime-tick-sent
+    reportPublishRuntimeDebug(
+      "H1",
+      "scripts/browser-extension/platform-login-helper/content.js:sendRuntimeTick",
+      {
+        runtimeSessionId: runtimeBridgeState.runtimeSessionId,
+        apiBaseUrl: runtimeBridgeState.apiBaseUrl,
+        platform,
+        href: window.location.href,
+        title: document.title || "",
+      },
+    );
+    // #endregion
+  }
+
+  const notifyPageReady = () => {
+    syncRuntimeBridgeConfig();
+    const profile = extractProfile(platform);
+    const pendingPublish = readPendingBitBrowserPublish();
+    const runtimeMeta =
+      pendingPublish?.session?.__aiSuperwebRuntimeMeta &&
+      typeof pendingPublish.session.__aiSuperwebRuntimeMeta === "object"
+        ? pendingPublish.session.__aiSuperwebRuntimeMeta
+        : null;
     debugLog("page-ready", "send", {
       platform,
       url: window.location.href,
@@ -619,6 +1317,26 @@
       accountName: profile.accountName,
       displayName: profile.displayName,
     });
+    reportRuntimeDebug(
+      "H1",
+      "scripts/browser-extension/platform-login-helper/content.js:notifyPageReady",
+      {
+        platform,
+        href: window.location.href,
+        runtimeSessionId: runtimeBridgeState.runtimeSessionId,
+        apiBaseUrl: runtimeBridgeState.apiBaseUrl,
+        accountName: profile.accountName,
+        displayName: profile.displayName,
+        pendingPublishRuntimeSessionId: pendingPublish?.runtimeSessionId || "",
+        pendingPublishCommandId: pendingPublish?.runtimeCommandId || "",
+        lastRuntimeUrl: runtimeMeta?.lastUrl || "",
+        lastLaunchSource: runtimeMeta?.lastLaunchSource || "",
+        homeResumeCount:
+          runtimeMeta && Number.isFinite(Number(runtimeMeta.homeResumeCount))
+            ? Number(runtimeMeta.homeResumeCount)
+            : null,
+      },
+    );
     chrome.runtime.sendMessage({
       type: "AI_SUPERWEB_PLATFORM_PAGE_READY",
       payload: {
@@ -631,10 +1349,25 @@
         followerCount: profile.followerCount,
       },
     });
+    sendRuntimeTick();
   };
 
+  function startRuntimeBridgeTicker() {
+    syncRuntimeBridgeConfig();
+    if (!runtimeBridgeState.runtimeSessionId || runtimeBridgeState.extensionTickStarted) {
+      return;
+    }
+    runtimeBridgeState.extensionTickStarted = true;
+    setInterval(sendRuntimeTick, 1500);
+  }
+
+  startRuntimeBridgeTicker();
   notifyPageReady();
   window.addEventListener("load", notifyPageReady, { once: true });
-  setTimeout(notifyPageReady, 2500);
-  setTimeout(notifyPageReady, 6000);
+  setTimeout(notifyPageReady, 800);
+  setTimeout(notifyPageReady, 2000);
+  maybeResumePendingBitBrowserPublish();
+  setTimeout(maybeResumePendingBitBrowserPublish, 300);
+  setTimeout(maybeResumePendingBitBrowserPublish, 1200);
+  window.addEventListener("load", maybeResumePendingBitBrowserPublish, { once: true });
 })();

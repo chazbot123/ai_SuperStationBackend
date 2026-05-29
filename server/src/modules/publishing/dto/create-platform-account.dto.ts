@@ -29,4 +29,9 @@ export class CreatePlatformAccountDto {
   @IsString()
   @MaxLength(500)
   remark?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  externalGroupId?: string;
 }

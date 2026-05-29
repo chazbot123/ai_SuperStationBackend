@@ -3,14 +3,63 @@
 @tailwind utilities;
 
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
+  color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Refined Dark Theme */
+  --shell-base: #020617;
+  --main-bg: transparent;
+  --sidebar-bg: rgba(2, 6, 23, 0.4);
+  --topbar-bg: rgba(2, 6, 23, 0.6);
+  --shell-border: rgba(255, 255, 255, 0.08);
+  --shell-fg: #f8fafc;
+  --shell-muted: #94a3b8;
+  --sidebar-text: #cbd5e1;
+  
+  --card-bg: rgba(255, 255, 255, 0.03);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --topbar-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+  --panel-muted-bg: rgba(255, 255, 255, 0.02);
+  
+  --button-secondary-bg: rgba(255, 255, 255, 0.05);
+  --button-secondary-border: rgba(255, 255, 255, 0.1);
+  --button-secondary-text: #f1f5f9;
+  --button-ghost-bg: transparent;
+  --button-ghost-text: #e2e8f0;
+}
+
+html.light {
+  color-scheme: light;
+  
+  /* Refined Light Theme: Frosted Glass & Airy */
+  --shell-base: #f1f5f9;
+  --main-bg: transparent;
+  --sidebar-bg: rgba(255, 255, 255, 0.6);
+  --topbar-bg: rgba(255, 255, 255, 0.7);
+  --shell-border: rgba(15, 23, 42, 0.08);
+  --shell-fg: #0f172a;
+  --shell-muted: #64748b;
+  --sidebar-text: #334155;
+  
+  --card-bg: rgba(255, 255, 255, 0.75);
+  --card-border: rgba(15, 23, 42, 0.06);
+  --card-shadow: 0 12px 40px -8px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --topbar-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.03);
+  --panel-muted-bg: rgba(15, 23, 42, 0.03);
+  
+  /* All buttons in light mode must look bold with white text */
+  --button-secondary-bg: #1e293b;
+  --button-secondary-border: #0f172a;
+  --button-secondary-text: #ffffff;
+  --button-ghost-bg: rgba(15, 23, 42, 0.75);
+  --button-ghost-text: #ffffff;
 }
 
 html,
@@ -20,9 +69,137 @@ body,
 }
 
 body {
-  background-color: #020617; /* slate-950 */
-  background-image: 
-    radial-gradient(ellipse at top right, rgba(6, 182, 212, 0.15), transparent 50%),
-    radial-gradient(ellipse at bottom left, rgba(59, 130, 246, 0.15), transparent 50%);
-  color: #f8fafc; /* slate-50 */
+  background-color: var(--shell-base);
+  background-image:
+    radial-gradient(circle at top right, rgba(6, 182, 212, 0.12), transparent 45%),
+    radial-gradient(circle at bottom left, rgba(59, 130, 246, 0.12), transparent 45%);
+  color: var(--shell-fg);
+  transition: background-color 0.4s ease, color 0.4s ease;
+  background-attachment: fixed;
+}
+
+html.light body {
+  background-color: var(--shell-base);
+  background-image:
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 50%),
+    radial-gradient(circle at bottom left, rgba(249, 115, 22, 0.05), transparent 50%);
+}
+
+/* Elegant Light Mode Overrides for hardcoded dark classes */
+
+html.light .text-zinc-50,
+html.light .text-zinc-100 {
+  color: #0f172a !important;
+}
+
+html.light .text-zinc-200,
+html.light .text-zinc-300 {
+  color: #334155 !important;
+}
+
+html.light .text-zinc-400,
+html.light .text-zinc-500 {
+  color: #64748b !important;
+}
+
+html.light .text-amber-200 {
+  color: #b45309 !important;
+}
+
+html.light .border-white\/10,
+html.light .border-white\/8,
+html.light .border-white\/5 {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+html.light .divide-white\/10 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+html.light .ring-white\/10 {
+  --tw-ring-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+/* Fix subtle background utilities to look like soft shadows/glass in light mode */
+html.light .bg-white\/5 {
+  background-color: rgba(15, 23, 42, 0.03) !important;
+}
+
+html.light .bg-white\/10 {
+  background-color: rgba(15, 23, 42, 0.06) !important;
+}
+
+html.light .bg-black\/10,
+html.light .bg-black\/20,
+html.light .bg-zinc-900\/40,
+html.light .bg-black\/40 {
+  background-color: rgba(255, 255, 255, 0.65) !important;
+  box-shadow: inset 0 2px 8px rgba(15, 23, 42, 0.02);
+}
+
+html.light .bg-amber-500\/10 {
+  background-color: rgba(245, 158, 11, 0.1) !important;
+}
+
+html.light .hover\:bg-white\/5:hover {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+}
+
+html.light .hover\:bg-white\/10:hover {
+  background-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+html.light .hover\:text-zinc-100:hover,
+html.light .hover\:text-zinc-200:hover {
+  color: #0f172a !important;
+}
+
+html.light .bg-\[\#0b1220\]\/90,
+html.light .bg-\[\#091224\],
+html.light .bg-\[\#08111f\],
+html.light .bg-\[\#1a2235\],
+html.light .bg-\[\#1f1f22\],
+html.light .bg-\[\#121826\] {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+}
+
+/* Badge Overrides for Light Mode */
+html.light .bg-zinc-700 {
+  background-color: #e2e8f0 !important;
+  color: #334155 !important;
+  border-color: #cbd5e1 !important;
+}
+html.light .bg-orange-700 {
+  background-color: #ffedd5 !important;
+  color: #9a3412 !important;
+  border-color: #fdba74 !important;
+}
+html.light .bg-emerald-800 {
+  background-color: #d1fae5 !important;
+  color: #065f46 !important;
+  border-color: #6ee7b7 !important;
+}
+html.light .bg-red-800 {
+  background-color: #fee2e2 !important;
+  color: #991b1b !important;
+  border-color: #fca5a5 !important;
+}
+html.light .bg-orange-600 {
+  background-color: #f97316 !important;
+  color: #ffffff !important;
+}
+
+/* Universal Button Overrides in Light Mode */
+/* If a button contains dark text natively but should be white because of our theme rule */
+html.light button.bg-cyan-500 {
+  color: #ffffff !important;
+}
+
+/* Apply backdrop blur globally to elements that use these backgrounds */
+aside, header {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }

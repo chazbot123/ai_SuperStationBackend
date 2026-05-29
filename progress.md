@@ -226,3 +226,43 @@ pm run check，结果均通过。
 - [2026-05-22 00:00:00] 已恢复规划文件并确认新任务：将“图文视频设置”改为“图片视频设置”，并把超级站首页图片/视频配置从前台弹出替换模式改为后台页面内直接设置。
 - [2026-05-22 00:00:00] 已完成现状排查：后台 layout 页目前只维护 `superSiteBaseUrl`；首页图片部分已接 `siteImageSlots`，视频尚无独立配置字段，滚动图片区仍是静态 HTML 图片。
 - [2026-05-22 00:00:00] 下一步将补超级站配置字段、后台设置表单，以及前台首页读取新配置的运行时替换逻辑。
+- [2026-05-28 18:00:00] 已恢复规划文件并确认本轮新任务：只处理 `background -> tab/document` 生命周期和发消息时机，不改发布业务步骤。
+- [2026-05-28 18:00:00] 已定位 `Receiving end does not exist` 的高概率根因：tab 导航后上下文重建窗口里 `dispatchRuntimeCommandToTab()` 过早发消息。
+- [2026-05-28 18:00:00] 已在 `scripts/browser-extension/platform-login-helper/background.js` 增加 tab 生命周期跟踪、导航时 runtime ready 重置、以及 `page-ready + 短暂稳定窗口` 后再允许发布命令下发。
+- [2026-05-28 18:00:00] 已执行 `GetDiagnostics`，`background.js` 诊断为 0。
+- [2026-05-29 00:00:00] 已恢复规划文件并确认新任务：输出一版“后台每个模块的用户操作手册”。
+- [2026-05-29 00:00:00] 已确认后台主模块应以 `src/App.tsx` 路由和导航文案为准，而不是按后端 controller 直接组织。
+- [2026-05-29 00:00:00] 已完成首轮页面梳理：`仪表盘 / 图片文案生成 / AI获客 / 产品管理 / 知识库管理 / 客户管理 / 视频生成 / AI客服 / 超级站配置中心 / 模型配置 / 审核中心 / 用户角色权限`。
+- [2026-05-29 00:00:00] 已完成文档 `docs/backend-module-user-manual.md`，覆盖角色说明、模块入口、典型操作步骤、常见使用顺序与常见问题。
+- [2026-05-29 00:00:00] 已执行文档诊断，结果为 `0`，并核对文件真实存在于 `docs/` 目录。
+- [2026-05-29 00:00:00] 已恢复规划文件并确认新任务：把发布链路彻底切到“一个平台账号独享一个 BitBrowser 窗口/profile”。
+- [2026-05-29 00:00:00] 已确认主 bug：`startPublishRuntime()` 虽传入 `platformAccountId`，但底层 `prepareOwnerRuntime()` 查专属 binding 时错误使用本地 `platformAccounts.id(account_*)`，导致发布 runtime 回落到 owner 共享 profile。
+- [2026-05-29 00:00:00] 已确认当前专属 binding 还可能与共享 binding 共用同一个底层 `profileId`，这会让“专属绑定”名义成立但窗口仍不独立。
+- [2026-05-29 00:00:00] 已在 `server/src/modules/publishing/publishing-bitbrowser.service.ts` 增加发布前专属 profile 保障：若当前平台账号尚无真实独立 profile，或专属 binding 仍指向共享 `profileId`，则发布前自动新建独立 profile 并重绑平台账号。
+- [2026-05-29 00:00:00] 已在 `server/src/modules/bitbrowser/bitbrowser.service.ts` 修正 runtime 选 binding 口径：改为按平台账号真实 `accountId(cmp*)` 查专属 binding，并禁止 `publish` 场景静默回退到 owner 共享 profile。
+- [2026-05-29 00:00:00] 已执行 `GetDiagnostics`，`publishing-bitbrowser.service.ts / bitbrowser.service.ts` 诊断均为 `0`。
+- [2026-05-29 00:00:00] 已执行后端 `npm run build`，构建通过。
+- [2026-05-29 00:00:00] 已继续按用户要求清理“共享窗口”残留：`publishing-bitbrowser.service.ts` 中专属 profile 创建不再依赖 owner 共享 binding，账号绑定时也不再尝试回落共享 binding。
+- [2026-05-29 00:00:00] 已在 `server/src/modules/bitbrowser/bitbrowser.service.ts` 收紧 runtime 解析：凡是带 `platformAccountId` 的登录/发布 runtime，都只允许使用账号专属 binding，不再因 `login` 场景回退 owner 共享 binding。
+- [2026-05-29 00:00:00] 已在 `scripts/browser-extension/platform-login-helper/content.js` 修正抖音头像提取：新增资料块作用域取图逻辑，只从当前抖音号/昵称附近容器查头像，不再全页拿第一个头像图。
+- [2026-05-29 00:00:00] 已执行 `GetDiagnostics`，`publishing-bitbrowser.service.ts / bitbrowser.service.ts / content.js` 诊断均为 `0`。
+- [2026-05-29 00:00:00] 已再次执行后端 `npm run build`，构建通过。
+- [2026-05-29 00:00:00] 已继续修正专属窗口命名：登录成功后的 `renameDedicatedProfile()` 现优先使用 `displayName`，不再优先用平台账号 ID 类 `accountName` 命名。
+- [2026-05-29 00:00:00] 已修正重命名目标定位：带 `platformAccountId` 时优先按专属 binding 查目标 profile，不再先按 owner 绑定查找。
+- [2026-05-29 00:00:00] 已对 `publishing.service.ts / publishing-bitbrowser.service.ts` 执行 `GetDiagnostics` 与后端 `npm run build`，结果通过。
+- [2026-05-29 00:00:00] 已恢复规划文件并确认新任务：彻底清理共享窗口功能，统一收口到“1个平台账号 = 1个独立 BitBrowser profile/window”。
+- [2026-05-29 00:00:00] 已移除共享 profile 对外入口：删除 `/api/bitbrowser/profiles` 桥接路由和对应 controller/http-api 暴露，不再保留共享窗口创建接口。
+- [2026-05-29 00:00:00] 已将 `bitbrowser` 主链路收口为账号专属 profile：runtime 现在强制要求 `platformAccountId`，不再允许 owner 级共享 binding 参与登录/发布。
+- [2026-05-29 00:00:00] 已将 `publishing-bitbrowser.service.ts` 删除账号的清理逻辑改为仅清当前 `profileId` 对应资源，不再按 owner 整组清理，避免误伤同组其他平台账号。
+- [2026-05-29 00:00:00] 已同步清理平台登录页共享环境文案，统一改成“账号专属 profile”表述。
+- [2026-05-29 00:00:00] 已执行 `GetDiagnostics`，`bitbrowser.service.ts / publishing-bitbrowser.service.ts / bitbrowser.bootstrap.ts / PublishingPlatformLogin.tsx` 诊断均为 `0`。
+- [2026-05-29 00:00:00] 已执行后端 `npm run build` 与前端 `npm run check`，结果均通过。
+- [2026-05-29 00:00:00] 已继续按用户要求彻底删除底层 shared 兼容结构：移除 `shared_by_owner` 类型定义、`getProfileBindingByOwnerId()` 仓储接口与实现、owner 级锁回退逻辑。
+- [2026-05-29 00:00:00] 已同步收窄 `bitbrowser.memory-store.ts / bitbrowser.file-store.ts` 的 bindingMode 生成逻辑，现统一只保留 `dedicated_by_account`。
+- [2026-05-29 00:00:00] 已再次执行共享残留搜索，`server/src` 中已搜不到 `shared_by_owner / getProfileBindingByOwnerId / PROFILE_BINDING_MODE_SHARED_BY_OWNER`。
+- [2026-05-29 00:00:00] 已再次执行后端 `npm run build` 与前端 `npm run check`，结果均通过。
+- [2026-05-29 00:00:00] 已定位“视频号未进入平台列表”问题：根因不在前端筛选，而在后端与扩展侧对 `wechat_mp` 身份文本的清洗过严。
+- [2026-05-29 00:00:00] 已修改 `server/src/modules/publishing/publishing.service.ts`，视频号账号文本会先剥离 `视频号ID / 视频号名称 / 微信视频号` 前缀，再进行关键字过滤。
+- [2026-05-29 00:00:00] 已修改 `scripts/browser-extension/platform-login-helper/content.js`，视频号资料提取与平台标签判定共享同一套前缀剥离逻辑。
+- [2026-05-29 00:00:00] 已新增 `publishing.service.spec.ts` 中的视频号回归测试，定向 `Wechat Channels` 测试通过。
+- [2026-05-29 00:00:00] 已执行后端 `npm run build`，结果通过；全量 `publishing.service.spec.ts` 仍有 2 条历史失败用例，与本次修复无关。

@@ -49,4 +49,14 @@ export class SyncPlatformExtensionLoginDto {
   @IsNumber()
   @Min(0)
   followerCount?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  runtimeSessionId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200000)
+  cookiePayload?: string;
 }

@@ -40,4 +40,9 @@ export class SyncExtensionPublishJobDto {
   @IsString()
   @MaxLength(1000)
   sourceUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  runtimeSessionId?: string;
 }

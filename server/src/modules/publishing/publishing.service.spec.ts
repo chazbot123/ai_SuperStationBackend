@@ -41,6 +41,48 @@ describe('PublishingService draft payloads', () => {
     ).toBe(true);
   });
 
+  it('keeps Wechat Channels account id after stripping 视频号前缀', () => {
+    expect(
+      (service as never)['sanitizeExtensionResolvedAccountText'](
+        LeadPublishPlatform.wechat_mp,
+        '视频号ID：gh_abc123',
+      ),
+    ).toBe('gh_abc123');
+  });
+
+  it('does not strip 视频号助手 into 助手', () => {
+    expect(
+      (service as never)['sanitizeExtensionResolvedAccountText'](
+        LeadPublishPlatform.wechat_mp,
+        '视频号助手',
+      ),
+    ).toBeNull();
+  });
+
+  it('keeps Wechat Channels nickname without stripping plain 视频号 text', () => {
+    expect(
+      (service as never)['sanitizeExtensionResolvedAccountText'](
+        LeadPublishPlatform.wechat_mp,
+        '杰Chaz',
+      ),
+    ).toBe('杰Chaz');
+  });
+
+  it('resolves Wechat Channels account name from stripped identity text', () => {
+    expect(
+      (service as never)['resolveExtensionAccountName']({
+        platform: LeadPublishPlatform.wechat_mp,
+        authPayload: 'cookie=value',
+        accountName: (service as never)['sanitizeExtensionResolvedAccountText'](
+          LeadPublishPlatform.wechat_mp,
+          '微信视频号：gh_abc123',
+        ),
+        externalAccountId: null,
+        displayName: null,
+      }),
+    ).toBe('gh_abc123');
+  });
+
   it('builds Bilibili official OAuth url with gourl callback', () => {
     service = new PublishingService(
       {} as never,

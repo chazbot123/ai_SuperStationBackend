@@ -211,3 +211,50 @@
 - 首页横向滚动图片区当前写死在 `ZL_Supersite/src/components/landing/legacy-home-body.html`，还没有纳入后台配置字段
 - 首页视频节点 `brandVideo` 当前只有静态 `poster="/assets/images/landing/img_17.png"`，仓库里未发现后台视频地址配置字段
 - 最小实现路径应为：保留 `siteImageSlots` 作为图片配置来源，补充滚动图片区固定槽位；同时新增独立视频配置字段给首页视频地址和封面地址使用
+
+## 2026-05-28 抖音 runtime 上下文补充
+- `Receiving end does not exist` 本轮主因更偏向 `background.js` 在 tab 导航后的上下文重建窗口里过早 `sendMessage`，不是 `manifest` 缺失或 content script 永远没注入
+- 扩展当前确实有两条分发链：`runtime tick -> dispatchRuntimeCommandToTab()` 和 `page-ready -> AI_SUPERWEB_EXTENSION_EXECUTE_PUBLISH`
+- `runtime_5qh5qmsj` 失败时已握手到新的抖音图片编辑页 URL，但 `cmd_4e30kum6` 仍因接收端不存在失败，说明问题出在页面上下文切换时机
+- `background.js` 原先没有 `tabs.onUpdated/onRemoved` 这类 tab/document 生命周期对齐逻辑，容易拿着过期的 tab 状态直接发消息
+- 本轮最小修复方案是：记录 tab `loading/complete/url` 状态、导航时重置 runtime ready 状态、只在当前 URL 已 `page-ready` 且短暂稳定后再下发 `PUBLISH_EXECUTE`
+
+## 2026-05-29 后台用户手册梳理补充
+- 后台前端主路由集中在 `src/App.tsx`，当前用户可见模块按页面路径主要分为：`dashboard / studio / publishing / products / assets / customer-management / videos / support / personalization / rules / reviews / rbac`
+- `reviews` 实际分成 `materials` 与 `products` 两个审核子页；`rbac` 实际分成 `users / roles / permissions` 三个子页
+- `publishing` 额外包含 `store-search` 与 `platform-login` 两个子页，适合在手册中拆成“发布管理 / 门店搜索 / 平台账号登录”
+- `studio` 实际分为 `drafts / social / product-images`；`videos` 分为 `drafts / avatar-ads / product-build`
+- 文档更适合按“登录与首页 -> 内容生成 -> 发布与商品 -> 客户与客服 -> 超级站配置 -> 审核与权限”组织，而不是按后端 controller 名称列接口
+
+## 2026-05-29 发布独享窗口修复补充
+- 当前发布主链路此前虽然带了 `platformAccountId`，但 `prepareOwnerRuntime()` 查专属 binding 时错误传入了本地 `platformAccounts.id(account_*)`，而专属 binding 存的是平台账号真实 `accountId(cmp*)`，导致查找失败后回落到 owner 共享 profile
+- 当前已确认专属 binding 可能与共享 binding 指向同一个底层 `profileId`；这会让“看起来是专属 binding，实际还是同一个窗口”继续串号
+- 扩展发布前会在 `background.js` 中先清平台 Cookie，再注入 `accountAuthPayload/accountCookiePayload`，因此发布前可以安全切到新的专属 BitBrowser profile，而不依赖旧共享 profile 持久登录态
+- 本轮修复后，发布入口会先确保当前平台账号拥有真实独立的 BitBrowser profile；若现有专属 binding 仍指向共享 `profileId`，则会新建独立 profile 并重绑平台账号
+- `publish` 场景的 runtime 现在找不到专属 binding 时会直接报错，不再静默回退到 owner 共享 profile
+
+## 2026-05-29 登录独享与抖音头像补充
+- 当前登录主链路虽然已切到专属 profile 入口，但 `ensureDedicatedProfileBindingForAccount()` 之前仍会先创建/读取 owner 共享 binding，再以此作为专属 profile 的来源配置，等于共享概念还残留在主链路里
+- 当前 `bitbrowser.service.ts` 的 runtime 上下文解析里，只要是 `login` 且带 `platformAccountId`，此前仍可能继续回退到 `getProfileBindingByOwnerId()`；这与“1 账号 1 窗口”目标不一致
+- 本轮已将登录/发布主链路进一步收口：带 `platformAccountId` 的 runtime 只认账号专属 binding，不再按 reason 区分是否允许回退 owner 共享 binding
+- 当前抖音头像误识别的主因不是后端 fallback，而是 `content.js` 之前直接全页 `findFirstImageSrc()` 抓第一个头像图，容易命中页面其他账号头像
+- 本轮已将抖音头像提取改为围绕“抖音号/昵称”资料块和其祖先容器就近找头像，不再直接用全页第一个命中的 `img`
+- 当前专属窗口命名仍可能显示成“平台名 + 平台 ID”，原因是登录成功后的 `renameDedicatedProfile()` 仍优先用 `accountName`，而不是优先使用页面提取到的 `displayName`
+- 本轮已将登录成功后的专属窗口重命名口径改为优先使用 `displayName`，并让重命名目标优先按 `platformAccountId` 查询专属 binding，而不是先按 owner 绑定查找
+
+## 2026-05-29 共享窗口清理补充
+- 主仓运行代码中的 `/api/bitbrowser/profiles` 共享 profile 创建入口当前没有其他调用点，可直接移除
+- `bitbrowser.service.ts` 现已强制 `PrepareOwnerRuntimeInput.platformAccountId` 非空；未绑定具体平台账号的 runtime 会直接报错，不再允许共享窗口模式进入登录/发布
+- `publishing-bitbrowser.service.ts` 删除平台账号时此前还会按 `externalGroupId -> owner` 清整组资源，这与“1账号1profile”模型冲突；本轮已改为只删除当前 `profileId` 对应 binding/runtime/account 资源
+- `PublishingPlatformLogin.tsx` 中“小红书 / 抖音 / 微信视频号”的登录说明文案此前仍写“共享环境”；本轮已统一改成“账号专属 profile”
+- 当前后端底层仓储仍保留 owner 与 legacy binding 兼容结构，但这些结构已不再暴露共享窗口入口，也不再参与平台登录/发布主链路
+- 本轮继续向下清理后，`server/src` 内已不再存在 `shared_by_owner`、`PROFILE_BINDING_MODE_SHARED_BY_OWNER`、`getProfileBindingByOwnerId()`、owner 级锁回退逻辑
+- `bitbrowser.memory-store.ts` 与 `bitbrowser.file-store.ts` 现统一只生成 `dedicated_by_account` 绑定，获取锁时也必须显式提供 `profileBindingId`
+- 当前若再搜到“共享”相关文本，主要会落在规划/调研文档或历史备份目录，不再是主仓运行代码实现
+
+## 2026-05-29 视频号未入列表修复
+- 前端列表本身支持 `wechat_mp` 平台筛选与轮询刷新，问题不在列表页过滤
+- 后端 `sanitizeExtensionResolvedAccountText()` 之前对 `wechat_mp` 使用了过宽的关键字拦截，包含 `视频号 / wechat / channels` 的文本都会被判空
+- 扩展端 `content.js` 也存在同类风险：若识别结果带有 `视频号ID：` 前缀，`isGenericPlatformText()` 会把整串文本误判成平台标签
+- 本轮修复后，后端与扩展侧都先剥离 `视频号ID / 视频号名称 / 微信视频号` 这类前缀，再进入平台标签过滤
+- 新增后端定向回归测试后，`Wechat Channels` 相关测试通过，后端构建通过

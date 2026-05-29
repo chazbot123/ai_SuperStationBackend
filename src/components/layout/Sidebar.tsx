@@ -199,16 +199,16 @@ export default function Sidebar() {
   }, []);
 
   return (
-    <aside className="hidden h-full w-[260px] shrink-0 border-r border-white/10 bg-[#020617] md:block">
-      <div className="flex h-14 items-center gap-3 border-b border-white/10 px-4">
+    <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[var(--shell-border)] bg-[var(--sidebar-bg)] text-[var(--sidebar-text)] transition-colors md:flex">
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--shell-border)] px-4">
         <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-300 to-amber-600" />
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-zinc-100">{navLabels.appTitle}</div>
-          <div className="text-xs text-zinc-400">{roleName}</div>
+          <div className="truncate text-sm font-semibold text-[var(--shell-fg)]">{navLabels.appTitle}</div>
+          <div className="text-xs text-[var(--shell-muted)]">{roleName}</div>
         </div>
       </div>
 
-      <nav className="px-2 py-3">
+      <nav className="flex-1 overflow-y-auto px-2 py-3 custom-scrollbar">
         {!initialized ? <NoticeBox>{navLabels.loadingMenu}</NoticeBox> : null}
         {initialized && !loading && !matrix[roleKey] ? (
           <NoticeBox tone="amber">{navLabels.syncingPermissions}</NoticeBox>
@@ -282,7 +282,7 @@ export default function Sidebar() {
                 )}
               >
                 <div className="overflow-hidden">
-                  <div className="mb-2 ml-6 space-y-1 border-l border-white/10 pl-3">
+                  <div className="mb-2 ml-6 space-y-1 border-l border-[var(--shell-border)] pl-3">
                     {item.children?.map((child) => (
                       <SubNavItem
                         key={child.to}
@@ -324,7 +324,7 @@ function NoticeBox(props: { children: string; tone?: "default" | "amber" | "red"
       ? "border-amber-500/20 bg-amber-500/10 text-amber-100"
       : props.tone === "red"
         ? "border-red-500/20 bg-red-500/10 text-red-200"
-        : "border-white/10 bg-white/5 text-zinc-400";
+        : "border-[var(--shell-border)] bg-[var(--panel-muted-bg)] text-[var(--shell-muted)]";
 
   return <div className={cn("mt-2 rounded-md border px-3 py-2 text-xs", toneClass)}>{props.children}</div>;
 }

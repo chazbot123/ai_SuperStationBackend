@@ -1,6 +1,59 @@
 const activeLoginSessions = new Map();
 const activePublishSessions = new Map();
+const activeRuntimeSessions = new Map();
+const trackedTabStates = new Map();
 const debugPrefix = "[ai-superweb-background]";
+const defaultBitBrowserApiBaseUrl = "http://127.0.0.1:3001";
+const runtimeDispatchReadyDelayMs = 250;
+//#region debug-point douyin-home-network-session
+const publishDebugSessionId = "douyin-home-network";
+//#endregion
+const runtimeTickPullCooldownMs = 700;
+const loginSyncScheduleCooldownMs = 800;
+const loginSyncRetryDelaysMs = [250, 900, 1800];
+
+function reportRuntimeDebug(hypothesisId, location, data) {
+  fetch(`${defaultBitBrowserApiBaseUrl}/api/bitbrowser/debug/event`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "douyin-handshake-fail",
+      runId: "pre-fix",
+      hypothesisId,
+      location,
+      msg: `[DEBUG] ${location}`,
+      data,
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+}
+
+function reportPublishRuntimeDebug(hypothesisId, location, data) {
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: publishDebugSessionId,
+      runId: "pre-fix",
+      hypothesisId,
+      location,
+      msg: `[DEBUG] ${location}`,
+      data,
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+}
+
+//#region debug-point douyin-home-network-login-page-marker
+function looksLikeDouyinLoginPage(url) {
+  const value = String(url || "").toLowerCase();
+  return (
+    value.includes("login") ||
+    value.includes("passport") ||
+    value.includes("sso") ||
+    value.includes("auth")
+  );
+}
+//#endregion
 
 const platformCookieDomains = {
   xiaohongshu: ["creator.xiaohongshu.com", ".xiaohongshu.com"],
@@ -9,12 +62,728 @@ const platformCookieDomains = {
   kuaishou: ["cp.kuaishou.com", "passport.kuaishou.com", ".kuaishou.com"],
 };
 
+function normalizePlatform(platform) {
+  const normalized = String(platform || "").trim().toLowerCase();
+  if (normalized === "wechat_video") {
+    return "wechat_mp";
+  }
+  return normalized;
+}
+
+function normalizeRuntimeAwareUrl(url) {
+  const rawValue = String(url || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+  try {
+    const parsed = new URL(rawValue);
+    parsed.searchParams.delete("ai_superweb_runtime_session_id");
+    parsed.searchParams.delete("runtimeSessionId");
+    parsed.searchParams.delete("aiSuperwebRuntimeSessionId");
+    parsed.searchParams.delete("ai_superweb_api_base_url");
+    parsed.searchParams.delete("apiBaseUrl");
+    const normalizedHash = String(parsed.hash || "").replace(/^#/, "").trim();
+    if (normalizedHash) {
+      const hashParams = new URLSearchParams(normalizedHash);
+      hashParams.delete("ai_superweb_runtime_session_id");
+      hashParams.delete("runtimeSessionId");
+      hashParams.delete("aiSuperwebRuntimeSessionId");
+      hashParams.delete("ai_superweb_api_base_url");
+      hashParams.delete("apiBaseUrl");
+      const nextHash = hashParams.toString();
+      parsed.hash = nextHash ? `#${nextHash}` : "";
+    }
+    return parsed.toString();
+  } catch (_) {
+    return rawValue;
+  }
+}
+
+function shouldSkipLoginRetarget(currentUrl, targetUrl) {
+  if (!currentUrl || !targetUrl) {
+    return false;
+  }
+  return normalizeRuntimeAwareUrl(currentUrl) === normalizeRuntimeAwareUrl(targetUrl);
+}
+
+function getExtensionInstanceId() {
+  try {
+    if (globalThis.crypto?.randomUUID) {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch (_) {
+    // ignore
+  }
+  return `runtime-extension-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function getRuntimeSessionState(runtimeSessionId) {
+  const id = String(runtimeSessionId || "").trim();
+  if (!id) {
+    return null;
+  }
+  let session = activeRuntimeSessions.get(id);
+  if (!session) {
+    session = {
+      runtimeSessionId: id,
+      extensionInstanceId: getExtensionInstanceId(),
+      apiBaseUrl: defaultBitBrowserApiBaseUrl,
+      platform: "",
+      tabId: null,
+      pageUrl: "",
+      readyRegistered: false,
+      lastReadyAt: 0,
+      lastReadyUrl: "",
+      lastHeartbeatAt: 0,
+      lastPulledAt: 0,
+      pendingCommand: null,
+      pendingCommandId: "",
+      commandAcked: false,
+    };
+    activeRuntimeSessions.set(id, session);
+  }
+  return session;
+}
+
+function getTrackedTabState(tabId) {
+  if (!Number.isInteger(tabId) || tabId <= 0) {
+    return null;
+  }
+  let state = trackedTabStates.get(tabId);
+  if (!state) {
+    state = {
+      url: "",
+      status: "",
+      updatedAt: 0,
+    };
+    trackedTabStates.set(tabId, state);
+  }
+  return state;
+}
+
+function resetRuntimeSessionReadyState(session, nextUrl = "") {
+  if (!session) {
+    return;
+  }
+  session.readyRegistered = false;
+  session.lastReadyAt = 0;
+  session.lastReadyUrl = "";
+  if (nextUrl) {
+    session.pageUrl = nextUrl;
+  }
+  if (session.pendingCommand && ["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(String(session.pendingCommand.type || "").trim())) {
+    session.pendingCommand.dispatched = false;
+  }
+}
+
+function syncRuntimeSessionTabLifecycle(tabId, nextUrl = "", nextStatus = "") {
+  if (!Number.isInteger(tabId) || tabId <= 0) {
+    return;
+  }
+  const normalizedNextUrl = String(nextUrl || "").trim();
+  const normalizedStatus = String(nextStatus || "").trim().toLowerCase();
+  for (const session of activeRuntimeSessions.values()) {
+    if (!session || session.tabId !== tabId) {
+      continue;
+    }
+    const currentUrl = String(session.pageUrl || "").trim();
+    const urlChanged = Boolean(normalizedNextUrl && currentUrl && normalizedNextUrl !== currentUrl);
+    if (normalizedStatus === "loading" || urlChanged) {
+      resetRuntimeSessionReadyState(session, normalizedNextUrl || currentUrl);
+    }
+  }
+}
+
+async function isRuntimeSessionReadyForDispatch(session) {
+  if (!session || !Number.isInteger(session.tabId) || session.tabId <= 0) {
+    return false;
+  }
+  const tab = await getAliveTab(session.tabId);
+  if (!tab) {
+    return false;
+  }
+  const trackedState = getTrackedTabState(session.tabId);
+  if (trackedState) {
+    trackedState.url = String(tab.url || trackedState.url || "").trim();
+    trackedState.status = String(tab.status || trackedState.status || "").trim().toLowerCase();
+    trackedState.updatedAt = Date.now();
+  }
+  const currentUrl = String(session.pageUrl || tab.url || trackedState?.url || "").trim();
+  const readyUrl = String(session.lastReadyUrl || "").trim();
+  const tabStatus = String(tab.status || trackedState?.status || "").trim().toLowerCase();
+  if (!session.readyRegistered || !readyUrl || !currentUrl) {
+    return false;
+  }
+  if (readyUrl !== currentUrl) {
+    return false;
+  }
+  if (tabStatus === "loading") {
+    return false;
+  }
+  return Date.now() - Number(session.lastReadyAt || 0) >= runtimeDispatchReadyDelayMs;
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const trackedState = getTrackedTabState(tabId);
+  if (!trackedState) {
+    return;
+  }
+  const nextUrl = String(changeInfo.url || tab?.url || trackedState.url || "").trim();
+  const nextStatus = String(changeInfo.status || tab?.status || trackedState.status || "").trim().toLowerCase();
+  trackedState.url = nextUrl;
+  trackedState.status = nextStatus;
+  trackedState.updatedAt = Date.now();
+  syncRuntimeSessionTabLifecycle(tabId, nextUrl, nextStatus);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  trackedTabStates.delete(tabId);
+  for (const session of activeRuntimeSessions.values()) {
+    if (!session || session.tabId !== tabId) {
+      continue;
+    }
+    resetRuntimeSessionReadyState(session);
+    session.tabId = null;
+  }
+});
+
+async function postBitBrowserApi(apiBaseUrl, path, body) {
+  const response = await fetch(`${String(apiBaseUrl || "").replace(/\/$/, "")}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success) {
+    throw new Error(payload?.error || `BitBrowser 扩展桥调用失败: ${path}`);
+  }
+  return payload.data ?? null;
+}
+
+function resolveRuntimeTargetUrl(platform, commandPayload) {
+  const payload = commandPayload && typeof commandPayload === "object" ? commandPayload : {};
+  const explicitTargetUrl = String(
+    payload.targetUrl || payload.pageUrl || payload.publishUrl || payload.loginUrl || "",
+  ).trim();
+  if (explicitTargetUrl) {
+    return explicitTargetUrl;
+  }
+
+  if (payload.job && typeof payload.job === "object") {
+    return getPlatformPublishUrl(platform, payload.job);
+  }
+
+  return "";
+}
+
+function buildRuntimePublishDispatchSession(runtimeSessionId, runtimeCommand, platform) {
+  const payload =
+    runtimeCommand?.payload && typeof runtimeCommand.payload === "object"
+      ? runtimeCommand.payload
+      : {};
+  const session =
+    payload.session && typeof payload.session === "object" ? { ...payload.session } : {};
+  const job =
+    session.job && typeof session.job === "object"
+      ? session.job
+      : payload.job && typeof payload.job === "object"
+        ? payload.job
+        : null;
+
+  if (!job) {
+    throw new Error("发布命令缺少 job 数据，无法执行");
+  }
+
+  return {
+    sessionToken:
+      String(session.sessionToken || payload.sessionToken || runtimeSessionId).trim() ||
+      runtimeSessionId,
+    job: {
+      id: String(job.id || runtimeCommand.id || "").trim() || runtimeCommand.id,
+      ...job,
+    },
+    runtimeSessionId,
+    runtimeCommandId: runtimeCommand.id,
+    platform,
+  };
+}
+
+function buildRuntimeLoginDispatchSession(
+  runtimeSessionId,
+  runtimeCommand,
+  platform,
+  apiBaseUrl,
+  tabId,
+) {
+  const payload =
+    runtimeCommand?.payload && typeof runtimeCommand.payload === "object"
+      ? runtimeCommand.payload
+      : {};
+  const sessionId = String(payload.sessionId || "").trim();
+  const sessionToken = String(payload.sessionToken || "").trim();
+  const normalizedPlatform = normalizePlatform(payload.platform || platform);
+
+  if (!sessionId || !sessionToken || !normalizedPlatform) {
+    throw new Error("登录命令缺少必要会话数据，无法执行");
+  }
+
+  return {
+    sessionId,
+    sessionToken,
+    platform: normalizedPlatform,
+    apiBaseUrl:
+      String(payload.apiBaseUrl || apiBaseUrl || defaultBitBrowserApiBaseUrl).trim() ||
+      defaultBitBrowserApiBaseUrl,
+    appTabId: null,
+    loginTabId: Number.isInteger(tabId) && tabId > 0 ? tabId : null,
+    status: "pending",
+    syncing: false,
+    runtimeSessionId,
+    runtimeCommandId: runtimeCommand.id,
+  };
+}
+
+async function ackRuntimeCommand(session) {
+  if (!session?.pendingCommandId || session.commandAcked) {
+    return;
+  }
+  await postBitBrowserApi(session.apiBaseUrl, "/api/bitbrowser/extension/ack-command", {
+    runtimeSessionId: session.runtimeSessionId,
+    runtimeCommandId: session.pendingCommandId,
+  });
+  session.commandAcked = true;
+}
+
+async function completeRuntimeCommand(session, resultPayload) {
+  if (!session?.pendingCommandId) {
+    return;
+  }
+  await postBitBrowserApi(session.apiBaseUrl, "/api/bitbrowser/extension/complete-command", {
+    runtimeSessionId: session.runtimeSessionId,
+    runtimeCommandId: session.pendingCommandId,
+    resultPayload: resultPayload || null,
+  });
+  session.pendingCommand = null;
+  session.pendingCommandId = "";
+  session.commandAcked = false;
+}
+
+async function failRuntimeCommand(session, errorMessage) {
+  if (!session?.pendingCommandId) {
+    return;
+  }
+  await postBitBrowserApi(session.apiBaseUrl, "/api/bitbrowser/extension/fail-command", {
+    runtimeSessionId: session.runtimeSessionId,
+    runtimeCommandId: session.pendingCommandId,
+    errorMessage: String(errorMessage || "扩展执行失败"),
+  });
+  session.pendingCommand = null;
+  session.pendingCommandId = "";
+  session.commandAcked = false;
+}
+
+async function dispatchRuntimeCommandToTab(session, tabId) {
+  if (!session?.pendingCommand || !Number.isInteger(tabId) || tabId <= 0) {
+    return;
+  }
+  if (session.pendingCommand.dispatched) {
+    return;
+  }
+
+  const pendingCommand = session.pendingCommand;
+  const pendingCommandType = String(pendingCommand.type || "");
+  if (pendingCommandType === "LOGIN_EXECUTE") {
+    // #region debug-point C:login-command-dispatch
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"douyin-login-no-reaction",runId:"pre-fix",hypothesisId:"C",location:"scripts/browser-extension/platform-login-helper/background.js:dispatchRuntimeCommandToTab:LOGIN_EXECUTE",msg:"[DEBUG] runtime login command dispatch",data:{runtimeSessionId:session.runtimeSessionId,tabId,targetUrl:String(pendingCommand.targetUrl||""),platform:session.platform},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+    const loginSession = buildRuntimeLoginDispatchSession(
+      session.runtimeSessionId,
+      pendingCommand,
+      session.platform,
+      session.apiBaseUrl,
+      tabId,
+    );
+    activeLoginSessions.set(loginSession.sessionId, loginSession);
+    pendingCommand.dispatched = true;
+    // Keep LOGIN_EXECUTE unacked until syncLoginResult completes successfully.
+    // If the extension reloads mid-login, the runtime can still pull the command again.
+    return;
+  }
+
+  if (!["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(pendingCommandType)) {
+    await failRuntimeCommand(session, `暂不支持命令类型: ${pendingCommand.type}`);
+    return;
+  }
+  // #region debug-point H2:publish-command-dispatch
+  fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H3",location:"scripts/browser-extension/platform-login-helper/background.js:dispatchRuntimeCommandToTab:PUBLISH_EXECUTE",msg:"[DEBUG] runtime publish command dispatch",data:{runtimeSessionId:session.runtimeSessionId,runtimeCommandId:String(pendingCommand.id||""),tabId,platform:session.platform,targetUrl:String(pendingCommand.targetUrl||""),pageUrl:String(session.pageUrl||""),pendingCommandType,looksLikeLoginPage:looksLikeDouyinLoginPage(session.pageUrl),extensionInstanceId:session.extensionInstanceId||""},ts:Date.now()})}).catch(()=>{});
+  // #endregion
+
+  const dispatchSession = buildRuntimePublishDispatchSession(
+    session.runtimeSessionId,
+    pendingCommand,
+    session.platform,
+  );
+
+  chrome.tabs.sendMessage(
+    tabId,
+    {
+      source: "ai-superweb-extension",
+      type: "AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND",
+      payload: {
+        runtimeSessionId: session.runtimeSessionId,
+        runtimeCommandId: pendingCommand.id,
+        command: pendingCommand,
+        session: dispatchSession,
+      },
+    },
+    (response) => {
+      const runtimeMessage = chrome.runtime.lastError?.message || "";
+      if (
+        runtimeMessage &&
+        !runtimeMessage.includes("The message port closed before a response was received.")
+      ) {
+        // #region debug-point H3:publish-command-send-failed
+        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H3",location:"scripts/browser-extension/platform-login-helper/background.js:dispatchRuntimeCommandToTab:sendMessage-error",msg:"[DEBUG] runtime publish command send failed",data:{runtimeSessionId:session.runtimeSessionId,runtimeCommandId:String(pendingCommand.id||""),tabId,platform:session.platform,runtimeMessage,pageUrl:String(session.pageUrl||""),looksLikeLoginPage:looksLikeDouyinLoginPage(session.pageUrl),extensionInstanceId:session.extensionInstanceId||""},ts:Date.now()})}).catch(()=>{});
+        // #endregion
+        void failRuntimeCommand(session, runtimeMessage);
+        return;
+      }
+      if (!response || response.ok !== true || response.received !== true) {
+        // #region debug-point H3:publish-command-no-ack
+        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H3",location:"scripts/browser-extension/platform-login-helper/background.js:dispatchRuntimeCommandToTab:no-response-ack",msg:"[DEBUG] runtime publish command missing explicit content ack",data:{runtimeSessionId:session.runtimeSessionId,runtimeCommandId:String(pendingCommand.id||""),tabId,platform:session.platform,targetUrl:String(pendingCommand.targetUrl||""),pageUrl:String(session.pageUrl||""),runtimeMessage,response:response||null,looksLikeLoginPage:looksLikeDouyinLoginPage(session.pageUrl),extensionInstanceId:session.extensionInstanceId||""},ts:Date.now()})}).catch(()=>{});
+        // #endregion
+        pendingCommand.dispatched = false;
+        return;
+      }
+      // #region debug-point H3:publish-command-send-succeeded
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H3",location:"scripts/browser-extension/platform-login-helper/background.js:dispatchRuntimeCommandToTab:sendMessage-ok",msg:"[DEBUG] runtime publish command send ok",data:{runtimeSessionId:session.runtimeSessionId,runtimeCommandId:String(pendingCommand.id||""),tabId,platform:session.platform,targetUrl:String(pendingCommand.targetUrl||""),pageUrl:String(session.pageUrl||""),response,looksLikeLoginPage:looksLikeDouyinLoginPage(session.pageUrl),extensionInstanceId:session.extensionInstanceId||""},ts:Date.now()})}).catch(()=>{});
+      // #endregion
+      pendingCommand.dispatched = true;
+      void ackRuntimeCommand(session).catch((error) => {
+        void failRuntimeCommand(
+          session,
+          error instanceof Error ? error.message : "扩展命令确认失败",
+        );
+      });
+    },
+  );
+}
+
+async function ensureRuntimeCommandDispatched(session) {
+  if (!session?.pendingCommand || !Number.isInteger(session.tabId) || session.tabId <= 0) {
+    return;
+  }
+
+  const pendingCommandType = String(session.pendingCommand.type || "").trim();
+  if (pendingCommandType === "LOGIN_EXECUTE" && session.pendingCommand.dispatched) {
+    return;
+  }
+
+  const targetUrl = String(session.pendingCommand.targetUrl || "").trim();
+  const shouldKeepCurrentPage =
+    normalizePlatform(session.platform) === "douyin" &&
+    ["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(pendingCommandType) &&
+    isDouyinContentPublishUrl(session.pageUrl) &&
+    targetUrl.includes("creator.douyin.com/creator-micro/home");
+  const shouldSkipLoginNavigation =
+    pendingCommandType === "LOGIN_EXECUTE" && shouldSkipLoginRetarget(session.pageUrl, targetUrl);
+  if (
+    targetUrl &&
+    session.pageUrl &&
+    session.pageUrl !== targetUrl &&
+    !shouldKeepCurrentPage &&
+    !shouldSkipLoginNavigation
+  ) {
+    resetRuntimeSessionReadyState(session, targetUrl);
+    await chrome.tabs.update(session.tabId, { url: targetUrl });
+    return;
+  }
+
+  if (["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(pendingCommandType)) {
+    const readyForDispatch = await isRuntimeSessionReadyForDispatch(session);
+    if (!readyForDispatch) {
+      return;
+    }
+  }
+
+  await dispatchRuntimeCommandToTab(session, session.tabId);
+}
+
+async function applyRuntimeCommand(session, runtimeCommand) {
+  const payload =
+    runtimeCommand?.payload && typeof runtimeCommand.payload === "object"
+      ? runtimeCommand.payload
+      : {};
+  const targetUrl = resolveRuntimeTargetUrl(session.platform, payload);
+  const runtimeCommandType = String(runtimeCommand?.type || "").trim();
+
+  if (payload.accountAuthPayload) {
+    await clearPlatformCookies(session.platform);
+    await applyPlatformAuthPayload(session.platform, payload.accountAuthPayload, payload.job || null);
+  }
+
+  session.pendingCommand = {
+    ...runtimeCommand,
+    targetUrl,
+    dispatched: false,
+  };
+  session.pendingCommandId = runtimeCommand.id;
+  session.commandAcked = false;
+  // #region debug-point H1:runtime-command-applied
+  if (["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(runtimeCommandType)) {
+    reportPublishRuntimeDebug(
+      "H1",
+      "scripts/browser-extension/platform-login-helper/background.js:applyRuntimeCommand:applied",
+      {
+        runtimeSessionId: session.runtimeSessionId,
+        runtimeCommandId: String(runtimeCommand.id || ""),
+        runtimeCommandType,
+        platform: session.platform,
+        tabId: session.tabId,
+        targetUrl,
+        pageUrl: String(session.pageUrl || ""),
+      },
+    );
+  }
+  // #endregion
+
+  await ensureRuntimeCommandDispatched(session);
+}
+
+async function syncRuntimeBridgeSession(message, sender) {
+  const payload = message?.payload;
+  const runtimeSessionId = String(payload?.runtimeSessionId || "").trim();
+  if (!runtimeSessionId) {
+    return { ok: false, message: "缺少 runtimeSessionId" };
+  }
+
+  const session = getRuntimeSessionState(runtimeSessionId);
+  if (!session) {
+    return { ok: false, message: "无法初始化运行时会话" };
+  }
+
+  session.apiBaseUrl = String(payload?.apiBaseUrl || session.apiBaseUrl || defaultBitBrowserApiBaseUrl).trim() || defaultBitBrowserApiBaseUrl;
+  session.platform = normalizePlatform(payload?.platform || session.platform);
+  session.tabId = sender.tab?.id ?? session.tabId;
+  const nextPageUrl = String(payload?.url || payload?.pageUrl || sender.tab?.url || session.pageUrl || "").trim();
+  const previousPageUrl = String(session.pageUrl || "").trim();
+  if (previousPageUrl && nextPageUrl && previousPageUrl !== nextPageUrl) {
+    resetRuntimeSessionReadyState(session, nextPageUrl);
+  }
+  session.pageUrl = nextPageUrl;
+  const trackedState = getTrackedTabState(session.tabId);
+  if (trackedState) {
+    trackedState.url = nextPageUrl || trackedState.url;
+    trackedState.status = String(sender.tab?.status || trackedState.status || "").trim().toLowerCase();
+    trackedState.updatedAt = Date.now();
+  }
+  scheduleSyncFromRuntimeTick(session, payload);
+  // #region debug-point H1:runtime-tick-received-publish
+  if (session.platform === "douyin") {
+    reportPublishRuntimeDebug(
+      "H1",
+      "scripts/browser-extension/platform-login-helper/background.js:syncRuntimeBridgeSession:tick",
+      {
+        runtimeSessionId,
+        tabId: session.tabId,
+        pageUrl: session.pageUrl,
+        platform: session.platform,
+        readyRegistered: session.readyRegistered,
+        hasPendingCommand: Boolean(session.pendingCommandId),
+      },
+    );
+  }
+  // #endregion
+  // #region debug-point C:runtime-tick-received
+  fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"douyin-login-no-reaction",runId:"pre-fix",hypothesisId:"C",location:"scripts/browser-extension/platform-login-helper/background.js:syncRuntimeBridgeSession:tick",msg:"[DEBUG] runtime tick received",data:{runtimeSessionId,tabId:session.tabId,pageUrl:session.pageUrl,platform:session.platform,readyRegistered:session.readyRegistered},ts:Date.now()})}).catch(()=>{});
+  // #endregion
+
+  const now = Date.now();
+  if (!session.readyRegistered) {
+    await postBitBrowserApi(session.apiBaseUrl, "/api/bitbrowser/extension/ready", {
+      runtimeSessionId,
+      extensionInstanceId: session.extensionInstanceId,
+      tabId: sender.tab?.id ?? 0,
+      pageUrl: session.pageUrl,
+      extensionVersion: "0.1.0",
+    });
+    session.readyRegistered = true;
+    session.lastReadyAt = now;
+    session.lastReadyUrl = session.pageUrl;
+    // #region debug-point H1:runtime-ready-posted-publish
+    if (session.platform === "douyin") {
+      reportPublishRuntimeDebug(
+        "H1",
+        "scripts/browser-extension/platform-login-helper/background.js:syncRuntimeBridgeSession:ready-posted",
+        {
+          runtimeSessionId,
+          tabId: session.tabId,
+          pageUrl: session.pageUrl,
+          platform: session.platform,
+        },
+      );
+    }
+    // #endregion
+    // #region debug-point C:runtime-ready-posted
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"douyin-login-no-reaction",runId:"pre-fix",hypothesisId:"C",location:"scripts/browser-extension/platform-login-helper/background.js:syncRuntimeBridgeSession:ready-posted",msg:"[DEBUG] runtime ready posted",data:{runtimeSessionId,tabId:session.tabId,pageUrl:session.pageUrl},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+  } else if (now - session.lastHeartbeatAt >= 5000) {
+    await postBitBrowserApi(session.apiBaseUrl, "/api/bitbrowser/extension/heartbeat", {
+      runtimeSessionId,
+      pageUrl: session.pageUrl,
+    });
+    session.lastHeartbeatAt = now;
+  }
+
+  await ensureRuntimeCommandDispatched(session);
+
+  if (
+    !session.pendingCommand &&
+    now - session.lastPulledAt >= runtimeTickPullCooldownMs
+  ) {
+    session.lastPulledAt = now;
+    const envelope = await postBitBrowserApi(
+      session.apiBaseUrl,
+      "/api/bitbrowser/extension/pull-command",
+      {
+        runtimeSessionId,
+      },
+    );
+
+    if (envelope?.command) {
+      const envelopeCommandType = String(envelope.command.type || "").trim();
+      // #region debug-point H1:runtime-command-pulled-publish
+      if (["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(envelopeCommandType)) {
+        reportPublishRuntimeDebug(
+          "H1",
+          "scripts/browser-extension/platform-login-helper/background.js:syncRuntimeBridgeSession:command-pulled",
+          {
+            runtimeSessionId,
+            commandId: envelope.command.id,
+            commandType: envelopeCommandType,
+            targetUrl: String(envelope.command?.payload?.targetUrl || ""),
+            pageUrl: session.pageUrl,
+            tabId: session.tabId,
+          },
+        );
+      }
+      // #endregion
+      // #region debug-point C:runtime-command-pulled
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"douyin-login-no-reaction",runId:"pre-fix",hypothesisId:"C",location:"scripts/browser-extension/platform-login-helper/background.js:syncRuntimeBridgeSession:command-pulled",msg:"[DEBUG] runtime command pulled",data:{runtimeSessionId,commandId:envelope.command.id,commandType:envelope.command.type,targetUrl:String(envelope.command?.payload?.targetUrl||"")},ts:Date.now()})}).catch(()=>{});
+      // #endregion
+      await applyRuntimeCommand(session, envelope.command);
+    }
+  }
+
+  return {
+    ok: true,
+    runtimeSessionId,
+    hasPendingCommand: Boolean(session.pendingCommandId),
+  };
+}
+
 function sendResponseSafe(sendResponse, payload) {
   try {
     sendResponse(payload);
   } catch (_) {
     // Ignore closed message channels.
   }
+}
+
+function findRuntimeSessionByTabId(tabId, platform) {
+  if (!Number.isInteger(tabId) || tabId <= 0) {
+    return null;
+  }
+  const normalizedPlatform = normalizePlatform(platform);
+  for (const session of activeRuntimeSessions.values()) {
+    if (
+      session.tabId === tabId &&
+      (!normalizedPlatform || normalizePlatform(session.platform) === normalizedPlatform)
+    ) {
+      return session;
+    }
+  }
+  return null;
+}
+
+async function pushRuntimeBindingToTab(tabId, runtimeSessionId, apiBaseUrl) {
+  if (!Number.isInteger(tabId) || tabId <= 0) {
+    return false;
+  }
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(
+      tabId,
+      {
+        source: "ai-superweb-extension",
+        type: "AI_SUPERWEB_BITBROWSER_BIND_RUNTIME",
+        payload: {
+          runtimeSessionId,
+          apiBaseUrl,
+        },
+      },
+      () => {
+        void chrome.runtime.lastError;
+        resolve(true);
+      },
+    );
+  });
+}
+
+async function ensureRuntimeBoundFromPageReady(message, sender) {
+  const tabId = sender.tab?.id ?? null;
+  const platform = normalizePlatform(message?.payload?.platform || "");
+  const pageUrl = String(message?.payload?.url || sender.tab?.url || "").trim();
+  if (!Number.isInteger(tabId) || tabId <= 0 || !platform || !pageUrl) {
+    return null;
+  }
+
+  const existingSession = findRuntimeSessionByTabId(tabId, platform);
+  if (existingSession?.runtimeSessionId) {
+    existingSession.pageUrl = pageUrl || existingSession.pageUrl;
+    existingSession.readyRegistered = true;
+    existingSession.lastReadyAt = Date.now();
+    existingSession.lastReadyUrl = existingSession.pageUrl;
+    await pushRuntimeBindingToTab(
+      tabId,
+      existingSession.runtimeSessionId,
+      existingSession.apiBaseUrl || defaultBitBrowserApiBaseUrl,
+    );
+    return existingSession.runtimeSessionId;
+  }
+
+  const extensionInstanceId = getExtensionInstanceId();
+  const bindResult = await postBitBrowserApi(
+    defaultBitBrowserApiBaseUrl,
+    "/api/bitbrowser/extension/page-ready-bind",
+    {
+      platform,
+      tabId,
+      pageUrl,
+      extensionInstanceId,
+      extensionVersion: "0.1.0",
+      accountName: String(message?.payload?.accountName || "").trim() || null,
+      displayName: String(message?.payload?.displayName || "").trim() || null,
+    },
+  );
+
+  const runtimeSessionId = String(bindResult?.runtimeSessionId || "").trim();
+  if (!runtimeSessionId) {
+    return null;
+  }
+
+  const runtimeSession = getRuntimeSessionState(runtimeSessionId);
+  runtimeSession.extensionInstanceId = extensionInstanceId;
+  runtimeSession.apiBaseUrl = defaultBitBrowserApiBaseUrl;
+  runtimeSession.platform = platform;
+  runtimeSession.tabId = tabId;
+  runtimeSession.pageUrl = pageUrl;
+  runtimeSession.readyRegistered = true;
+  runtimeSession.lastReadyAt = Date.now();
+  runtimeSession.lastReadyUrl = pageUrl;
+  await pushRuntimeBindingToTab(tabId, runtimeSessionId, runtimeSession.apiBaseUrl);
+  return runtimeSessionId;
 }
 
 function notifyApp(session, message) {
@@ -84,6 +853,35 @@ async function collectPlatformCookies(platform) {
     .join("; ");
 }
 
+async function collectPlatformCookiePayload(platform) {
+  const domains = platformCookieDomains[platform] ?? [];
+  const cookieMap = new Map();
+
+  for (const domain of domains) {
+    const cookies = await getCookiesByDomain(domain);
+    for (const cookie of cookies) {
+      const key = `${cookie.storeId || ""}|${cookie.domain}|${cookie.path}|${cookie.name}`;
+      if (!cookieMap.has(key)) {
+        cookieMap.set(key, {
+          name: cookie.name,
+          value: cookie.value,
+          domain: cookie.domain,
+          path: cookie.path || "/",
+          secure: Boolean(cookie.secure),
+          httpOnly: Boolean(cookie.httpOnly),
+          sameSite: cookie.sameSite || undefined,
+          expirationDate:
+            typeof cookie.expirationDate === "number" && Number.isFinite(cookie.expirationDate)
+              ? cookie.expirationDate
+              : undefined,
+        });
+      }
+    }
+  }
+
+  return JSON.stringify(Array.from(cookieMap.values()));
+}
+
 function buildCookieRemovalUrls(cookie) {
   const normalizedDomain = String(cookie?.domain || "").trim().replace(/^\./, "");
   const normalizedPath = String(cookie?.path || "/").trim() || "/";
@@ -149,6 +947,45 @@ function parseCookieHeader(authPayload) {
       return { name, value };
     })
     .filter(Boolean);
+}
+
+function parseCookiePayload(cookiePayload) {
+  const raw = String(cookiePayload || "").trim();
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const cookie = item;
+        const name = String(cookie.name || "").trim();
+        const value = String(cookie.value || "").trim();
+        if (!name || !value) {
+          return null;
+        }
+        return {
+          name,
+          value,
+          domain: String(cookie.domain || "").trim() || undefined,
+          path: String(cookie.path || "/").trim() || "/",
+          secure: Boolean(cookie.secure),
+          httpOnly: Boolean(cookie.httpOnly),
+          sameSite: String(cookie.sameSite || "").trim() || undefined,
+          expirationDate:
+            typeof cookie.expirationDate === "number" && Number.isFinite(cookie.expirationDate)
+              ? cookie.expirationDate
+              : undefined,
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function getPlatformCookieSetUrls(platform, job) {
@@ -233,6 +1070,47 @@ async function applyPlatformAuthPayload(platform, authPayload, job) {
   }
 }
 
+async function applyPlatformCookiePayload(platform, cookiePayload, job) {
+  const parsedCookies = parseCookiePayload(cookiePayload);
+  if (parsedCookies.length === 0) {
+    await applyPlatformAuthPayload(platform, cookiePayload, job);
+    return;
+  }
+
+  const writes = [];
+  const targetUrls = getPlatformCookieSetUrls(platform, job);
+  for (const cookie of parsedCookies) {
+    for (const targetUrl of targetUrls) {
+      const host = new URL(targetUrl).hostname;
+      const normalizedDomain = String(cookie.domain || "").trim().replace(/^\./, "");
+      if (normalizedDomain && !host.endsWith(normalizedDomain)) {
+        continue;
+      }
+      writes.push(
+        chrome.cookies
+          .set({
+            url: targetUrl,
+            name: cookie.name,
+            value: cookie.value,
+            path: cookie.path || "/",
+            domain: cookie.domain,
+            secure: cookie.secure,
+            httpOnly: cookie.httpOnly,
+            sameSite: cookie.sameSite,
+            expirationDate: cookie.expirationDate,
+          })
+          .then((result) => Boolean(result))
+          .catch(() => false),
+      );
+    }
+  }
+
+  const results = await Promise.all(writes);
+  if (!results.some(Boolean)) {
+    throw new Error("所选账号原始 Cookie 注入失败，请重新登录该账号后再试");
+  }
+}
+
 async function resolveExtensionPublishAuthPayload(apiBaseUrl, session) {
   const directAuthPayload = String(session?.accountAuthPayload || "").trim();
   if (directAuthPayload) {
@@ -263,29 +1141,73 @@ async function resolveExtensionPublishAuthPayload(apiBaseUrl, session) {
 }
 
 async function syncLoginResult(session, context) {
-  if (!session || session.syncing || session.status === "completed") {
+  if (!session || session.status === "completed") {
+    return;
+  }
+  if (session.syncing) {
+    session.pendingSyncContext = pickBetterLoginContext(
+      session.pendingSyncContext || null,
+      context,
+      session.platform,
+    );
     return;
   }
 
   session.syncing = true;
+  session.pendingSyncContext = null;
   try {
     const authPayload = await collectPlatformCookies(session.platform);
+    const cookiePayload = await collectPlatformCookiePayload(session.platform);
     if (!authPayload || authPayload.length < 20) {
       throw new Error("当前页面还没有可用的登录 Cookie，请先完成平台登录。");
     }
 
     const accountName = String(context?.accountName || "").trim();
+    const externalAccountId = String(context?.externalAccountId || "").trim();
     const displayName = String(context?.displayName || "").trim();
     const avatarUrl = String(context?.avatarUrl || "").trim();
     const followerCount =
       typeof context?.followerCount === "number" && Number.isFinite(context.followerCount)
         ? Math.max(0, Math.round(context.followerCount))
         : null;
-    const hasResolvedProfile =
-      session.platform === "douyin"
-        ? Boolean(accountName && displayName && avatarUrl && followerCount !== null)
-        : Boolean(accountName || displayName || avatarUrl || followerCount !== null);
-    if (!hasResolvedProfile) {
+    const sourceUrl = String(context?.url || "").trim();
+    const hasResolvedProfile = Boolean(
+      accountName || externalAccountId || displayName || avatarUrl || followerCount !== null,
+    );
+    // #region debug-point P2:sync-login-context
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "douyin-profile-detect",
+        runId: "pre-fix",
+        hypothesisId: "H2",
+        location: "scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:context",
+        msg: "[DEBUG] syncLoginResult context",
+        data: {
+          platform: session.platform,
+          sessionId: session.sessionId,
+          runtimeSessionId: session.runtimeSessionId || "",
+          sourceUrl,
+          accountName,
+          externalAccountId,
+          displayName,
+          hasAvatar: Boolean(avatarUrl),
+          followerCount,
+          hasResolvedProfile,
+        },
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    // #region debug-point H4:sync-login-start
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"multi-platform-login",runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:start",msg:"[DEBUG] syncLoginResult start",data:{platform:session.platform,sessionId:session.sessionId,runtimeSessionId:session.runtimeSessionId||"",accountName,externalAccountId,displayName,hasAvatar:Boolean(avatarUrl),followerCount,hasResolvedProfile,authPayloadLength:authPayload.length,sourceUrl},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    const shouldDeferWechatLoginSync =
+      session.platform === "wechat_mp" &&
+      !hasResolvedProfile &&
+      /channels\.weixin\.qq\.com\/login(?:\.html)?/i.test(sourceUrl);
+    if (shouldDeferWechatLoginSync) {
       return;
     }
 
@@ -299,19 +1221,48 @@ async function syncLoginResult(session, context) {
         authType: "cookie",
         authPayload,
         accountName,
+        externalAccountId,
         displayName,
-        sourceUrl: context?.url || "",
+        sourceUrl,
         avatarUrl,
         followerCount,
+        runtimeSessionId: session.runtimeSessionId || undefined,
+        cookiePayload,
       }),
     });
 
     const payload = await response.json().catch(() => null);
+    // #region debug-point H2:sync-login-response
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"multi-platform-login",runId:"pre-fix",hypothesisId:"H2",location:"scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:response",msg:"[DEBUG] syncLoginResult response",data:{platform:session.platform,sessionId:session.sessionId,status:response.status,ok:response.ok,accountId:String(payload?.account?.id||""),accountName:String(payload?.account?.accountName||""),message:String(payload?.message||"")},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     if (!response.ok) {
       throw new Error(payload?.message || "扩展回传登录信息失败");
     }
 
+    if (!session.accountId && String(payload?.account?.id || "").trim()) {
+      session.accountId = String(payload.account.id).trim();
+    }
+    const hasServerResolvedProfile = hasMeaningfulResolvedIdentity(
+      payload?.account || null,
+      session.platform,
+    );
+    if (!hasResolvedProfile && !hasServerResolvedProfile) {
+      return;
+    }
+
     session.status = "completed";
+    if (session.runtimeSessionId) {
+      const runtimeSession = getRuntimeSessionState(session.runtimeSessionId);
+      if (runtimeSession?.pendingCommandId) {
+        await completeRuntimeCommand(runtimeSession, {
+          account: payload?.account || null,
+          sourceUrl,
+        });
+      }
+      activeRuntimeSessions.delete(session.runtimeSessionId);
+      session.runtimeSessionId = null;
+      session.runtimeCommandId = "";
+    }
     notifyApp(session, {
       source: "ai-superweb-extension",
       type: "AI_SUPERWEB_EXTENSION_LOGIN_SYNCED",
@@ -323,6 +1274,9 @@ async function syncLoginResult(session, context) {
     });
     await closeLoginTabIfNeeded(session);
   } catch (error) {
+    // #region debug-point H5:sync-login-error
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"multi-platform-login",runId:"pre-fix",hypothesisId:"H5",location:"scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:error",msg:"[DEBUG] syncLoginResult error",data:{platform:session?.platform||"",sessionId:session?.sessionId||"",runtimeSessionId:session?.runtimeSessionId||"",message:error instanceof Error ? error.message : String(error),sourceUrl:String(context?.url||"")},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     notifyApp(session, {
       source: "ai-superweb-extension",
       type: "AI_SUPERWEB_EXTENSION_LOGIN_ERROR",
@@ -334,6 +1288,13 @@ async function syncLoginResult(session, context) {
     });
   } finally {
     session.syncing = false;
+    if (session.status !== "completed" && session.pendingSyncContext) {
+      const nextContext = session.pendingSyncContext;
+      session.pendingSyncContext = null;
+      setTimeout(() => {
+        void syncLoginResult(session, nextContext);
+      }, 0);
+    }
   }
 }
 
@@ -346,22 +1307,147 @@ function getActiveSessionByPlatform(platform) {
   return null;
 }
 
+function hasMeaningfulResolvedIdentity(account, platform) {
+  const normalizedPlatform = normalizePlatform(platform);
+  const accountName = String(account?.accountName || "").trim();
+  const displayName = String(account?.displayName || "").trim();
+  const externalAccountId = String(account?.externalAccountId || "").trim();
+  const avatarUrl = String(account?.avatarUrl || "").trim();
+  const followerCount =
+    typeof account?.followerCount === "number" && Number.isFinite(account.followerCount)
+      ? Math.max(0, Math.round(account.followerCount))
+      : null;
+
+  const isAutoGeneratedAccountName =
+    Boolean(accountName) &&
+    accountName.toLowerCase().startsWith(`auto_${normalizedPlatform}_`);
+
+  return Boolean(
+    displayName ||
+      externalAccountId ||
+      (!isAutoGeneratedAccountName && accountName) ||
+      avatarUrl ||
+      followerCount !== null,
+  );
+}
+
+function getResolvedIdentityScore(account, platform) {
+  const normalizedPlatform = normalizePlatform(platform);
+  const accountName = String(account?.accountName || "").trim();
+  const displayName = String(account?.displayName || "").trim();
+  const externalAccountId = String(account?.externalAccountId || "").trim();
+  const avatarUrl = String(account?.avatarUrl || "").trim();
+  const followerCount =
+    typeof account?.followerCount === "number" && Number.isFinite(account.followerCount)
+      ? Math.max(0, Math.round(account.followerCount))
+      : null;
+  const isAutoGeneratedAccountName =
+    Boolean(accountName) &&
+    accountName.toLowerCase().startsWith(`auto_${normalizedPlatform}_`);
+
+  let score = 0;
+  if (displayName) score += 2;
+  if (externalAccountId) score += 3;
+  if (accountName && !isAutoGeneratedAccountName) score += 2;
+  if (avatarUrl) score += 1;
+  if (followerCount !== null) score += 1;
+  return score;
+}
+
+function pickBetterLoginContext(currentContext, nextContext, platform) {
+  if (!currentContext) {
+    return nextContext || null;
+  }
+  if (!nextContext) {
+    return currentContext;
+  }
+  const currentScore = getResolvedIdentityScore(currentContext, platform);
+  const nextScore = getResolvedIdentityScore(nextContext, platform);
+  if (nextScore > currentScore) {
+    return nextContext;
+  }
+  return currentContext;
+}
+
 function scheduleSync(platform, context) {
   const session = getActiveSessionByPlatform(platform);
   if (!session) {
     return;
   }
 
+  session.pendingSyncContext = pickBetterLoginContext(
+    session.pendingSyncContext || null,
+    context,
+    platform,
+  );
+
+  const now = Date.now();
+  const lastScheduledAt = Number(session.lastSyncScheduledAt || 0);
+  if (lastScheduledAt && now - lastScheduledAt < loginSyncScheduleCooldownMs) {
+    return;
+  }
+  session.lastSyncScheduledAt = now;
+
   void syncLoginResult(session, context);
-  setTimeout(() => {
-    void syncLoginResult(session, context);
-  }, 2500);
-  setTimeout(() => {
-    void syncLoginResult(session, context);
-  }, 6500);
-  setTimeout(() => {
-    void syncLoginResult(session, context);
-  }, 12000);
+  for (const delay of loginSyncRetryDelaysMs) {
+    setTimeout(() => {
+      void syncLoginResult(session, context);
+    }, delay);
+  }
+}
+
+function scheduleSyncFromRuntimeTick(runtimeSession, payload) {
+  const session = getActiveSessionByPlatform(runtimeSession?.platform);
+  if (!session) {
+    return;
+  }
+  if (
+    session.runtimeSessionId &&
+    runtimeSession?.runtimeSessionId &&
+    session.runtimeSessionId !== runtimeSession.runtimeSessionId
+  ) {
+    return;
+  }
+
+  const context = {
+    platform: runtimeSession.platform,
+    url: String(payload?.url || runtimeSession.pageUrl || ""),
+    accountName: String(payload?.accountName || ""),
+    externalAccountId: String(payload?.externalAccountId || ""),
+    displayName: String(payload?.displayName || ""),
+    avatarUrl: String(payload?.avatarUrl || ""),
+    followerCount:
+      typeof payload?.followerCount === "number" && Number.isFinite(payload.followerCount)
+        ? payload.followerCount
+        : null,
+  };
+  // #region debug-point P3:runtime-tick-context
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: "douyin-profile-detect",
+      runId: "pre-fix",
+      hypothesisId: "H2",
+      location: "scripts/browser-extension/platform-login-helper/background.js:scheduleSyncFromRuntimeTick",
+      msg: "[DEBUG] runtime tick to login context",
+      data: {
+        platform: runtimeSession.platform,
+        runtimeSessionId: runtimeSession?.runtimeSessionId || "",
+        pageUrl: String(runtimeSession?.pageUrl || ""),
+        payloadAccountName: String(payload?.accountName || ""),
+        payloadExternalAccountId: String(payload?.externalAccountId || ""),
+        payloadDisplayName: String(payload?.displayName || ""),
+        context,
+      },
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  if (!hasMeaningfulResolvedIdentity(context, runtimeSession.platform)) {
+    return;
+  }
+
+  scheduleSync(runtimeSession.platform, context);
 }
 
 function getPlatformPublishUrl(platform, job) {
@@ -381,6 +1467,87 @@ function getPlatformPublishUrl(platform, job) {
     return "https://cp.kuaishou.com/profile";
   }
   return "https://www.google.com/";
+}
+
+function isDouyinContentPublishUrl(url) {
+  const value = String(url || "").trim().toLowerCase();
+  return (
+    value.includes("creator.douyin.com/creator-micro/content/upload") ||
+    value.includes("creator.douyin.com/creator-micro/content/publish")
+  );
+}
+
+function isPublishSessionTerminal(session) {
+  const status = String(session?.status || "").trim();
+  return status === "success" || status === "failed";
+}
+
+async function getAliveTab(tabId) {
+  if (!Number.isInteger(tabId) || tabId <= 0) {
+    return null;
+  }
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return tab?.id ? tab : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function isPublishSessionReadyForDirectDispatch(session, readyUrl) {
+  if (!session || !Number.isInteger(session.tabId) || session.tabId <= 0) {
+    return false;
+  }
+  const normalizedReadyUrl = String(readyUrl || "").trim();
+  if (!normalizedReadyUrl) {
+    return false;
+  }
+  const tab = await getAliveTab(session.tabId);
+  if (!tab) {
+    return false;
+  }
+  const trackedState = getTrackedTabState(session.tabId);
+  if (trackedState) {
+    trackedState.url = String(tab.url || trackedState.url || "").trim();
+    trackedState.status = String(tab.status || trackedState.status || "").trim().toLowerCase();
+    trackedState.updatedAt = Date.now();
+  }
+  const currentUrl = String(tab.url || trackedState?.url || "").trim();
+  const tabStatus = String(tab.status || trackedState?.status || "").trim().toLowerCase();
+  if (!currentUrl || currentUrl !== normalizedReadyUrl || tabStatus === "loading") {
+    session.lastPageReadyUrl = "";
+    session.lastPageReadyAt = 0;
+    return false;
+  }
+  if (String(session.lastPageReadyUrl || "").trim() !== normalizedReadyUrl) {
+    session.lastPageReadyUrl = normalizedReadyUrl;
+    session.lastPageReadyAt = Date.now();
+    return false;
+  }
+  return Date.now() - Number(session.lastPageReadyAt || 0) >= runtimeDispatchReadyDelayMs;
+}
+
+function findReusablePublishSession(platform, sessionToken, jobId) {
+  const normalizedPlatform = normalizePlatform(platform);
+  const normalizedSessionToken = String(sessionToken || "").trim();
+  const normalizedJobId = String(jobId || "").trim();
+  for (const session of activePublishSessions.values()) {
+    if (!session || normalizePlatform(session.platform) !== normalizedPlatform) {
+      continue;
+    }
+    if (isPublishSessionTerminal(session)) {
+      continue;
+    }
+    const sessionJobId = String(session.job?.id || "").trim();
+    const sessionTokenValue = String(session.sessionToken || "").trim();
+    if (
+      (normalizedJobId && sessionJobId === normalizedJobId) ||
+      (normalizedSessionToken && sessionTokenValue === normalizedSessionToken)
+    ) {
+      return session;
+    }
+  }
+  return null;
 }
 
 function getPublishSessionByTabId(tabId) {
@@ -494,13 +1661,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           );
 
           await clearPlatformCookies(payload.platform);
-          await applyPlatformAuthPayload(
-            payload.platform,
-            accountAuthPayload,
-            payload.session.job,
-          );
+          const accountCookiePayload = String(payload.session?.accountCookiePayload || "").trim();
+          if (accountCookiePayload) {
+            await applyPlatformCookiePayload(
+              payload.platform,
+              accountCookiePayload,
+              payload.session.job,
+            );
+          } else {
+            await applyPlatformAuthPayload(
+              payload.platform,
+              accountAuthPayload,
+              payload.session.job,
+            );
+          }
 
           const targetUrl = getPlatformPublishUrl(payload.platform, payload.session.job);
+          const jobId = String(payload.session?.job?.id || "").trim();
+          const sessionToken = String(payload.session?.sessionToken || "").trim();
+          const reusableSession = findReusablePublishSession(payload.platform, sessionToken, jobId);
+          const reusableTab = await getAliveTab(reusableSession?.tabId ?? null);
+          if (reusableSession && reusableTab) {
+            reusableSession.sessionToken = sessionToken;
+            reusableSession.apiBaseUrl = payload.apiBaseUrl;
+            reusableSession.appTabId = sender.tab?.id;
+            reusableSession.job = payload.session.job;
+            reusableSession.status = "pending";
+            reusableSession.dispatching = false;
+            reusableSession.lastDispatchAt = 0;
+            reusableSession.lastDispatchUrl = "";
+            reusableSession.lastPageReadyUrl = "";
+            reusableSession.lastPageReadyAt = 0;
+            const currentTabUrl = String(reusableTab.url || "").trim();
+            if (
+              normalizePlatform(payload.platform) === "douyin" &&
+              isDouyinContentPublishUrl(currentTabUrl)
+            ) {
+              await chrome.tabs.update(reusableTab.id, { active: true });
+            } else {
+              await chrome.tabs.update(reusableTab.id, {
+                url: targetUrl,
+                active: true,
+              });
+            }
+            debugLog("publish", "publish-tab-reused", {
+              platform: payload.platform,
+              jobId,
+              tabId: reusableTab.id,
+              targetUrl,
+              currentTabUrl,
+            });
+            sendResponseSafe(sendResponse, { ok: true });
+            return;
+          }
+          if (reusableSession) {
+            activePublishSessions.delete(String(reusableSession.job?.id || "").trim());
+          }
           const tab = await chrome.tabs.create({
             url: targetUrl,
             active: true,
@@ -522,6 +1738,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             lastDispatchUrl: "",
             lastDispatchAt: 0,
             dispatching: false,
+            lastPageReadyUrl: "",
+            lastPageReadyAt: 0,
           });
           sendResponseSafe(sendResponse, { ok: true });
         } catch (error) {
@@ -559,101 +1777,264 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   }
 
-  if (message?.type === "AI_SUPERWEB_PLATFORM_PAGE_READY" && message.payload?.platform) {
-    const loginSession = getActiveSessionByPlatform(message.payload.platform);
-    if (loginSession && sender.tab?.id) {
-      loginSession.loginTabId = sender.tab.id;
-    }
-    scheduleSync(message.payload.platform, message.payload);
-
-    const publishSession = sender.tab?.id ? getPublishSessionByTabId(sender.tab.id) : null;
-    const readyUrl = String(message.payload.url || "");
-    const isTerminal =
-      publishSession?.status === "success" || publishSession?.status === "failed";
-    const isActivePublish =
-      publishSession?.status === "running" ||
-      publishSession?.status === "dispatching";
-    const dispatchedRecently =
-      publishSession &&
-      publishSession.lastDispatchUrl === readyUrl &&
-      Date.now() - Number(publishSession.lastDispatchAt || 0) < 15000;
-    debugLog("page-ready", "received", {
-      platform: message.payload.platform,
-      readyUrl,
-      tabId: sender.tab?.id,
-      hasPublishSession: Boolean(publishSession),
-      publishStatus: publishSession?.status || "",
-      dispatchedRecently: Boolean(dispatchedRecently),
-    });
-    if (
-      publishSession &&
-      publishSession.platform === message.payload.platform &&
-      !isTerminal &&
-      !isActivePublish &&
-      !dispatchedRecently
-    ) {
-      publishSession.status = "dispatching";
-      publishSession.dispatching = true;
-      publishSession.lastDispatchUrl = readyUrl;
-      publishSession.lastDispatchAt = Date.now();
-      debugLog("dispatch", "execute-publish-send", {
-        platform: publishSession.platform,
-        jobId: publishSession.job?.id || "",
-        tabId: sender.tab?.id,
-        readyUrl,
-      });
-      chrome.tabs.sendMessage(
-        sender.tab.id,
-        {
-          source: "ai-superweb-extension",
-          type: "AI_SUPERWEB_EXTENSION_EXECUTE_PUBLISH",
-          payload: {
-            session: {
-              sessionToken: publishSession.sessionToken,
-              job: publishSession.job,
-            },
+  if (message?.type === "AI_SUPERWEB_BITBROWSER_RUNTIME_TICK") {
+    reportRuntimeDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/background.js:onMessage:runtime-tick",
+      {
+        runtimeSessionId: String(message.payload?.runtimeSessionId || ""),
+        tabId: sender.tab?.id ?? null,
+        url: String(message.payload?.url || sender.tab?.url || ""),
+        platform: String(message.payload?.platform || ""),
+      },
+    );
+    void (async () => {
+      try {
+        const result = await syncRuntimeBridgeSession(message, sender);
+        sendResponseSafe(sendResponse, result);
+      } catch (error) {
+        reportRuntimeDebug(
+          "H3",
+          "scripts/browser-extension/platform-login-helper/background.js:onMessage:runtime-tick-error",
+          {
+            runtimeSessionId: String(message.payload?.runtimeSessionId || ""),
+            tabId: sender.tab?.id ?? null,
+            error: error instanceof Error ? error.message : String(error),
           },
-        },
-        () => {
-          const runtimeMessage = chrome.runtime.lastError?.message || "";
-          if (
-            runtimeMessage &&
-            !runtimeMessage.includes("The message port closed before a response was received.")
-          ) {
-            debugLog("dispatch", "execute-publish-send-failed", {
+        );
+        sendResponseSafe(sendResponse, {
+          ok: false,
+          message: error instanceof Error ? error.message : "BitBrowser 运行时桥接失败",
+        });
+      }
+    })();
+    return true;
+  }
+
+  if (message?.type === "AI_SUPERWEB_PLATFORM_PAGE_READY" && message.payload?.platform) {
+    void (async () => {
+      try {
+        reportRuntimeDebug(
+          "H2",
+          "scripts/browser-extension/platform-login-helper/background.js:onMessage:page-ready",
+          {
+            platform: String(message.payload.platform || ""),
+            tabId: sender.tab?.id ?? null,
+            readyUrl: String(message.payload.url || ""),
+            accountName: String(message.payload.accountName || ""),
+            displayName: String(message.payload.displayName || ""),
+          },
+        );
+        const loginSession = getActiveSessionByPlatform(message.payload.platform);
+        if (loginSession && sender.tab?.id) {
+          loginSession.loginTabId = sender.tab.id;
+        }
+        scheduleSync(message.payload.platform, message.payload);
+
+        try {
+          const boundRuntimeSessionId = await ensureRuntimeBoundFromPageReady(
+            message,
+            sender,
+          );
+          if (boundRuntimeSessionId) {
+            reportRuntimeDebug(
+              "H2",
+              "scripts/browser-extension/platform-login-helper/background.js:onMessage:page-ready-bind-success",
+              {
+                runtimeSessionId: boundRuntimeSessionId,
+                tabId: sender.tab?.id ?? null,
+                readyUrl: String(message.payload.url || ""),
+                platform: String(message.payload.platform || ""),
+              },
+            );
+          }
+        } catch (error) {
+          reportRuntimeDebug(
+            "H3",
+            "scripts/browser-extension/platform-login-helper/background.js:onMessage:page-ready-bind-error",
+            {
+              tabId: sender.tab?.id ?? null,
+              readyUrl: String(message.payload.url || ""),
+              platform: String(message.payload.platform || ""),
+              error: error instanceof Error ? error.message : String(error),
+            },
+          );
+        }
+
+        const publishSession = sender.tab?.id ? getPublishSessionByTabId(sender.tab.id) : null;
+        const readyUrl = String(message.payload.url || "");
+        const isTerminal =
+          publishSession?.status === "success" || publishSession?.status === "failed";
+        const isActivePublish =
+          publishSession?.status === "running" ||
+          publishSession?.status === "dispatching";
+        const dispatchedRecently =
+          publishSession &&
+          publishSession.lastDispatchUrl === readyUrl &&
+          Date.now() - Number(publishSession.lastDispatchAt || 0) < 15000;
+        const readyForDirectDispatch =
+          publishSession &&
+          publishSession.platform === message.payload.platform &&
+          !isTerminal &&
+          !isActivePublish &&
+          !dispatchedRecently
+            ? await isPublishSessionReadyForDirectDispatch(publishSession, readyUrl)
+            : false;
+        debugLog("page-ready", "received", {
+          platform: message.payload.platform,
+          readyUrl,
+          tabId: sender.tab?.id,
+          hasPublishSession: Boolean(publishSession),
+          publishStatus: publishSession?.status || "",
+          dispatchedRecently: Boolean(dispatchedRecently),
+          readyForDirectDispatch,
+        });
+        if (publishSession && publishSession.platform === message.payload.platform) {
+          reportPublishRuntimeDebug(
+            "H2",
+            "scripts/browser-extension/platform-login-helper/background.js:onMessage:page-ready-direct-dispatch-check",
+            {
               platform: publishSession.platform,
               jobId: publishSession.job?.id || "",
-              tabId: sender.tab?.id,
-              message: runtimeMessage,
-            });
-            publishSession.status = "pending";
-            publishSession.dispatching = false;
-            publishSession.lastDispatchUrl = "";
-            publishSession.lastDispatchAt = 0;
-            notifyPublishError(publishSession, "扩展未能注入本地发布脚本");
-            return;
-          }
-          debugLog("dispatch", "execute-publish-send-accepted", {
+              tabId: sender.tab?.id ?? null,
+              readyUrl,
+              status: publishSession.status,
+              isTerminal,
+              isActivePublish,
+              dispatchedRecently,
+              readyForDirectDispatch,
+              lastPageReadyUrl: String(publishSession.lastPageReadyUrl || ""),
+              lastPageReadyAt: Number(publishSession.lastPageReadyAt || 0),
+            },
+          );
+        }
+        if (
+          publishSession &&
+          publishSession.platform === message.payload.platform &&
+          !isTerminal &&
+          !isActivePublish &&
+          !dispatchedRecently &&
+          readyForDirectDispatch
+        ) {
+          publishSession.status = "dispatching";
+          publishSession.dispatching = true;
+          publishSession.lastDispatchUrl = readyUrl;
+          publishSession.lastDispatchAt = Date.now();
+          debugLog("dispatch", "execute-publish-send", {
             platform: publishSession.platform,
             jobId: publishSession.job?.id || "",
             tabId: sender.tab?.id,
-            message: runtimeMessage || "ok",
+            readyUrl,
           });
-        },
-      );
-    } else if (publishSession) {
-      debugLog("dispatch", "execute-publish-skipped", {
-        platform: publishSession.platform,
-        jobId: publishSession.job?.id || "",
-        readyUrl,
-        isTerminal,
-        isActivePublish,
-        dispatchedRecently,
-        status: publishSession.status,
-      });
-    }
+          reportPublishRuntimeDebug(
+            "H2",
+            "scripts/browser-extension/platform-login-helper/background.js:onMessage:page-ready-direct-dispatch-send",
+            {
+              platform: publishSession.platform,
+              jobId: publishSession.job?.id || "",
+              tabId: sender.tab?.id ?? null,
+              readyUrl,
+            },
+          );
+          chrome.tabs.sendMessage(
+            sender.tab.id,
+            {
+              source: "ai-superweb-extension",
+              type: "AI_SUPERWEB_EXTENSION_EXECUTE_PUBLISH",
+              payload: {
+                session: {
+                  sessionToken: publishSession.sessionToken,
+                  job: publishSession.job,
+                },
+              },
+            },
+            () => {
+              const runtimeMessage = chrome.runtime.lastError?.message || "";
+              if (
+                runtimeMessage &&
+                !runtimeMessage.includes("The message port closed before a response was received.")
+              ) {
+                debugLog("dispatch", "execute-publish-send-failed", {
+                  platform: publishSession.platform,
+                  jobId: publishSession.job?.id || "",
+                  tabId: sender.tab?.id,
+                  message: runtimeMessage,
+                });
+                reportPublishRuntimeDebug(
+                  "H3",
+                  "scripts/browser-extension/platform-login-helper/background.js:onMessage:page-ready-direct-dispatch-send-failed",
+                  {
+                    platform: publishSession.platform,
+                    jobId: publishSession.job?.id || "",
+                    tabId: sender.tab?.id ?? null,
+                    readyUrl,
+                    runtimeMessage,
+                  },
+                );
+                publishSession.status = "pending";
+                publishSession.dispatching = false;
+                publishSession.lastDispatchUrl = "";
+                publishSession.lastDispatchAt = 0;
+                notifyPublishError(publishSession, "扩展未能注入本地发布脚本");
+                return;
+              }
+              debugLog("dispatch", "execute-publish-send-accepted", {
+                platform: publishSession.platform,
+                jobId: publishSession.job?.id || "",
+                tabId: sender.tab?.id,
+                message: runtimeMessage || "ok",
+              });
+              reportPublishRuntimeDebug(
+                "H2",
+                "scripts/browser-extension/platform-login-helper/background.js:onMessage:page-ready-direct-dispatch-send-accepted",
+                {
+                  platform: publishSession.platform,
+                  jobId: publishSession.job?.id || "",
+                  tabId: sender.tab?.id ?? null,
+                  readyUrl,
+                  message: runtimeMessage || "ok",
+                },
+              );
+            },
+          );
+        } else if (publishSession) {
+          debugLog("dispatch", "execute-publish-skipped", {
+            platform: publishSession.platform,
+            jobId: publishSession.job?.id || "",
+            readyUrl,
+            isTerminal,
+            isActivePublish,
+            dispatchedRecently,
+            status: publishSession.status,
+            readyForDirectDispatch,
+          });
+          reportPublishRuntimeDebug(
+            "H2",
+            "scripts/browser-extension/platform-login-helper/background.js:onMessage:page-ready-direct-dispatch-skipped",
+            {
+              platform: publishSession.platform,
+              jobId: publishSession.job?.id || "",
+              tabId: sender.tab?.id ?? null,
+              readyUrl,
+              isTerminal,
+              isActivePublish,
+              dispatchedRecently,
+              status: publishSession.status,
+              readyForDirectDispatch,
+              lastPageReadyUrl: String(publishSession.lastPageReadyUrl || ""),
+              lastPageReadyAt: Number(publishSession.lastPageReadyAt || 0),
+            },
+          );
+        }
 
-    sendResponseSafe(sendResponse, { ok: true });
+        sendResponseSafe(sendResponse, { ok: true });
+      } catch (error) {
+        sendResponseSafe(sendResponse, {
+          ok: false,
+          message: error instanceof Error ? error.message : "page-ready 处理失败",
+        });
+      }
+    })();
     return true;
   }
 
@@ -679,6 +2060,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       void syncPublishResult(publishSession, message.payload);
     }
     sendResponseSafe(sendResponse, { ok: true });
+    return true;
+  }
+
+  if (message?.type === "AI_SUPERWEB_BITBROWSER_COMMAND_STATUS" && message.payload?.runtimeSessionId) {
+    void (async () => {
+      const runtimeSession = getRuntimeSessionState(message.payload.runtimeSessionId);
+      if (!runtimeSession || runtimeSession.pendingCommandId !== message.payload.runtimeCommandId) {
+        sendResponseSafe(sendResponse, { ok: true });
+        return;
+      }
+
+      try {
+        const status = String(message.payload.status || "").trim();
+        if (status === "running") {
+          await ackRuntimeCommand(runtimeSession);
+        } else if (status === "success") {
+          await completeRuntimeCommand(runtimeSession, message.payload.resultPayload || {});
+        } else if (status === "failed") {
+          await failRuntimeCommand(
+            runtimeSession,
+            message.payload.lastError || message.payload.message || "扩展本地发布失败",
+          );
+        }
+        sendResponseSafe(sendResponse, { ok: true });
+      } catch (error) {
+        sendResponseSafe(sendResponse, {
+          ok: false,
+          message: error instanceof Error ? error.message : "扩展命令状态同步失败",
+        });
+      }
+    })();
     return true;
   }
 

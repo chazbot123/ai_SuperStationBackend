@@ -6,6 +6,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { ProductsModule } from '../products/products.module';
 import { PublishingCleanupService } from './publishing-cleanup.service';
 import { PublishingController } from './publishing.controller';
+import { PublishingBitBrowserController } from './publishing-bitbrowser.controller';
 import { PublishingExtensionController } from './publishing-extension.controller';
 import { PublishingOauthController } from './publishing-oauth.controller';
 import { PublishingStoreSearchService } from './publishing-store-search.service';
@@ -14,6 +15,7 @@ import { DouyinShareSchemaService } from './douyin-share-schema.service';
 import { KuaishouOpenApiService } from './kuaishou-open-api.service';
 import { WechatOfficialPublishService } from './wechat-official-publish.service';
 import { BilibiliOpenApiService } from './bilibili-open-api.service';
+import { PublishingBitBrowserService } from './publishing-bitbrowser.service';
 import { PublishingService } from './publishing.service';
 
 @Module({
@@ -33,7 +35,12 @@ import { PublishingService } from './publishing.service';
     PrismaModule,
     ProductsModule,
   ],
-  controllers: [PublishingController, PublishingExtensionController, PublishingOauthController],
+  controllers: [
+    PublishingController,
+    PublishingExtensionController,
+    PublishingOauthController,
+    PublishingBitBrowserController,
+  ],
   providers: [
     PublishingService,
     PlatformLoginBrowserService,
@@ -41,6 +48,7 @@ import { PublishingService } from './publishing.service';
     KuaishouOpenApiService,
     WechatOfficialPublishService,
     BilibiliOpenApiService,
+    PublishingBitBrowserService,
     PublishingCleanupService,
     PublishingStoreSearchService,
   ],

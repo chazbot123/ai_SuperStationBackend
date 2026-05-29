@@ -99,6 +99,22 @@
 - [pending] 阶段 190：在后台“图片视频设置”页实现首页图片与视频配置表单
 - [pending] 阶段 191：让超级站前台首页读取新的图片与视频配置并替换默认素材
 - [pending] 阶段 192：执行前后端构建、诊断与最小回归验证
+- [completed] 阶段 193：梳理后台实际模块、路由与页面分组，确定用户手册目录
+- [completed] 阶段 194：按模块整理后台用户操作手册初稿
+- [completed] 阶段 195：复核文档结构、术语和路径后落到 `docs/`
+- [completed] 阶段 196：确认发布链路未走平台账号专属 BitBrowser profile 的根因
+- [completed] 阶段 197：将发布 runtime 改为强制使用平台账号专属 profile 并补真实独立 profile 创建
+- [completed] 阶段 198：修正 runtime 选 binding 口径并执行后端构建验证
+- [completed] 阶段 199：将登录 runtime 也收口到平台账号专属 profile 闭环
+- [completed] 阶段 200：去除带平台账号 ID 的 runtime 对 owner 共享 profile 的回退
+- [completed] 阶段 201：修正抖音头像提取为绑定当前账号资料块并执行诊断验证
+- [completed] 阶段 202：梳理共享窗口残留入口并确定“1账号1profile”清理边界
+- [completed] 阶段 203：移除后端共享 profile 创建与 owner 级回退主链路
+- [completed] 阶段 204：同步清理前端共享窗口文案与对外接口命名残留
+- [completed] 阶段 205：执行诊断与最小构建验证，确认登录/发布只走账号专属 profile
+- [completed] 阶段 206：删除 `shared_by_owner`、owner 级 binding 查询与锁回退等底层兼容结构
+- [completed] 阶段 207：执行共享结构删除后的二次诊断与构建验证
+- [completed] 阶段 208：修复视频号登录识别未入平台列表的问题
 
 ## 当前决定
 - 保留现有 `personalization` 路由与权限键，优先改展示文案，避免扩大 RBAC 影响面
@@ -167,6 +183,11 @@
 - 图片配置优先复用现有 `siteImageSlots`，扩展为后台可直接维护的固定槽位表单，不再依赖内容池弹窗选图
 - 视频配置以最小可交付为主，新增独立配置字段承接首页视频地址与视频封面地址
 - “图文视频设置”文案按用户最新要求统一改成“图片视频设置”
+- 发布链路必须按平台账号专属 BitBrowser profile 执行；owner 共享 profile 只保留给未完成账号绑定前的引导场景
+- 用户最新目标已明确调整为“1个平台账号 = 1个独立 BitBrowser profile/window”，登录、Cookie 存储、页面驱动和一键发布全部绑定该账号自己的 profile，不再保留共享窗口功能
+- 本轮对外能力边界调整为：BitBrowser runtime 必须绑定具体平台账号；不再保留共享 profile 创建入口，也不再允许 owner 级共享 binding 参与登录/发布主链路
+- 本轮进一步删除底层 legacy shared 结构：`ProfileBindingMode` 仅保留 `dedicated_by_account`，仓储接口不再提供 owner 级 profile binding 查询和 owner 级锁回退
+- 视频号登录链路当前新增约束：后端与扩展侧都会先剥离 `视频号ID/视频号名称/微信视频号` 前缀，再做平台标签过滤，避免把真实账号文本误判为空
 
 ## 风险
 - 当前 `Personalization` 仍同时承载布局、运营指标、行业招商，继续加逻辑仍可能变重，需要适度拆分
@@ -201,6 +222,15 @@
 - `origin/main` 与当前 `master` 的差异不仅是增量业务代码，还包含删除浏览器扩展脚本、部署脚本调整、超级站资源变化；若不分模块筛选，容易把本地已验证链路替换掉
 - 超级站首页当前滚动图片区默认是静态 HTML；若要改为后台可配置，需同时补后台槽位定义和前台运行时替换逻辑，避免只改后台不生效
 - 视频配置当前仓库没有现成独立字段；本轮新增后需同步 Prisma、DTO、服务合并逻辑和公开接口返回，否则后台能存但前台拿不到
+- 后台页面较多，若只按后端接口名写手册会偏技术视角；需要以用户可见菜单和页面路径为主组织文档
+- 平台登录与发布当前应统一遵循“1 平台账号 = 1 独享 BitBrowser profile/window”；带 `platformAccountId` 的 runtime 不再允许回退到 owner 级共享 profile
+- 已完成共享窗口主链路清理：运行时代码现在强制要求 `platformAccountId`，平台登录页文案已统一改为“账号专属 profile”，删除平台账号时也只清理当前账号对应 profile 资源，不再按 owner 整组清理
+- 已完成共享底层结构清理：内存仓储、文件仓储和类型定义都已去掉 owner 级共享 binding 模式，二次诊断和前后端最小构建均通过
+- 已完成视频号识别修复：新增 `wechat_mp` 身份前缀剥离逻辑，定向回归测试通过，后端构建通过
+- BitBrowser 模块当前仍有 owner 级 binding、共享 profile API 与少量共享命名残留；若清理不完整，后续仍可能出现误用旧接口或旧数据兼容回退
+- BitBrowser 仓储层仍保留少量 owner / legacy binding 兼容结构用于读取历史数据；后续若要彻底删除历史结构，需要补存量 `.runtime/bitbrowser.store.json` 数据迁移
+- 当前主仓运行代码已不再保留 `shared_by_owner`、`getProfileBindingByOwnerId()`、`/api/bitbrowser/profiles` 这类共享实现；剩余 owner 结构主要用于账号归属分组，不再表示共享窗口能力
+- 视频号此前“未进入平台列表”的高风险原因是身份清洗过严：包含 `视频号` 前缀的真实账号文本会在后端或扩展端被直接过滤，导致识别结果不稳定
 
 ## 完成结果
 - 前端“超级站配置中心”与“运营指标”第一版已完成
@@ -238,6 +268,7 @@
 - 本轮代码已通过 Prisma 同步、前后端构建/检查与诊断校验
 - 登录页已删除“快捷进入预设账号”与预置账号说明，改为手动输入账号密码
 - 登录页已新增“同意并阅读用户协议”勾选校验，并新增匿名可访问的 `/user-agreement` 阅读页
+- 已新增后台模块用户操作手册 `docs/backend-module-user-manual.md`，覆盖登录、仪表盘、图片文案生成、AI获客、产品、知识库、客户、视频、客服、超级站配置、模型配置、审核中心、用户角色权限
 - 用户协议文档已落到 `docs/user-agreement.md`
 - 一键发布已改为后台异步执行，前端不再同步等待浏览器自动发布完成
 - 发布记录页已增加 `queued/running` 状态自动轮询

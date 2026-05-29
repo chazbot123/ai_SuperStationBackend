@@ -30,11 +30,11 @@ export default function AppShell() {
   ]);
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full transition-colors">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
-        <main className="min-w-0 flex-1 overflow-auto p-4 text-zinc-100 md:p-6">
+        <main className="min-w-0 flex-1 overflow-auto bg-[var(--main-bg)] p-4 text-[var(--shell-fg)] transition-colors md:p-6">
           <div className="mx-auto w-full max-w-[1200px]">
             <Outlet />
           </div>

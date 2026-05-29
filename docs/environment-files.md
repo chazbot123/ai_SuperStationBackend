@@ -11,19 +11,27 @@
 - `server/.env.example`
   - 负责后端服务运行变量。
   - 主要覆盖 `PORT`、`CORS_ORIGIN`、`JWT`、`DATABASE_URL`、`REDIS_URL`、`MINIO_*`。
+  - BitBrowser 只保留 `BITBROWSER_LOCAL_API_BASE_URL` 这类后端连接变量。
+- 根目录 `.env.frontend.example`
+  - 负责前端 Vite 变量示例。
+  - 当前覆盖 `VITE_LOCAL_AGENT_BASE_URL`。
 
 ## 本地开发
 1. 复制根目录 `.env.example` 为根目录 `.env`
 2. 复制 `server/.env.example` 为 `server/.env`
-3. 按本机环境修改密码、地址和第三方密钥
+3. 如需前端下载本地客户端，复制 `.env.frontend.example` 为根目录 `.env.local`
+4. 按本机环境修改密码、地址和第三方密钥
 
 ## 文件职责
 - 根目录 `.env`
   - 只给 `docker-compose.yml` 和基础设施使用
 - `server/.env`
   - 只给 Nest 后端使用
-- 前端当前没有独立 `.env.example`
-  - 如后续新增 Vite 环境变量，统一采用 `VITE_*` 命名，并再单独补前端示例文件
+  - 不再存放本地扩展目录这类仅属于本地 Agent 的路径
+- `.env.local`
+  - 给前端 Vite 使用
+  - 变量统一采用 `VITE_*` 命名
+  - 本地 Agent 地址默认是 `http://127.0.0.1:3210`
 
 ## 安全规则
 - `JWT_SECRET`、`MINIO_ROOT_PASSWORD`、数据库密码必须替换默认占位值后再用于正式环境。
@@ -35,3 +43,4 @@
 - 不要把同一变量同时写到根目录和 `server/` 两处。
 - 如果变量只服务于后端，不要写到根目录 `.env.example`。
 - 如果变量只服务于基础设施，不要写到 `server/.env.example`。
+- 如果变量只服务于前端，不要写到 `server/.env.example`，统一补到 `.env.frontend.example`。

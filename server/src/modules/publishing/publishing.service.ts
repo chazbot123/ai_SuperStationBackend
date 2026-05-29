@@ -45,6 +45,7 @@ import { KuaishouOpenApiService } from './kuaishou-open-api.service';
 import { PlatformLoginBrowserService } from './platform-login-browser.service';
 import { WechatOfficialPublishService } from './wechat-official-publish.service';
 import { BilibiliOpenApiService } from './bilibili-open-api.service';
+import { PublishingBitBrowserService } from './publishing-bitbrowser.service';
 
 const leadContentInclude = {
   creator: {
@@ -93,6 +94,7 @@ const leadPublishJobInclude = {
       browserSessionPath: true,
       externalAccountId: true,
       externalGroupId: true,
+      externalMeta: true,
       status: true,
       loginStatus: true,
     },
@@ -137,6 +139,17 @@ const FORCE_EXTENSION_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
   LeadPublishPlatform.xiaohongshu,
   LeadPublishPlatform.wechat_mp,
 ]);
+const BITBROWSER_EXTENSION_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
+  LeadPublishPlatform.douyin,
+  LeadPublishPlatform.xiaohongshu,
+  LeadPublishPlatform.wechat_mp,
+]);
+const BITBROWSER_SHARED_PROFILE_PLATFORMS = new Set<LeadPublishPlatform>([
+  LeadPublishPlatform.douyin,
+  LeadPublishPlatform.xiaohongshu,
+  LeadPublishPlatform.wechat_mp,
+  LeadPublishPlatform.kuaishou,
+]);
 const SUPPORTED_OFFICIAL_OAUTH_PLATFORMS = new Set<LeadPublishPlatform>([
   LeadPublishPlatform.douyin,
   LeadPublishPlatform.kuaishou,
@@ -149,9 +162,12 @@ type ExtensionLoginSession = {
   userId: string;
   platform: LeadPublishPlatform;
   accountId: string | null;
+  externalGroupId: string | null;
+  profileId: string | null;
   expiresAt: number;
   status: 'pending' | 'completed';
   syncedAccountId: string | null;
+  runtimeSessionId: string | null;
 };
 
 type ExtensionLoginTokenPayload = {
@@ -201,6 +217,7 @@ export class PublishingService {
     private readonly kuaishouOpenApiService: KuaishouOpenApiService,
     private readonly wechatOfficialPublishService: WechatOfficialPublishService,
     private readonly bilibiliOpenApiService: BilibiliOpenApiService,
+    private readonly publishingBitBrowserService: PublishingBitBrowserService,
   ) {}
 
   async listContents(user: SessionUser, query: ListPublishingContentsQueryDto) {
@@ -420,7 +437,11 @@ export class PublishingService {
         .join(',')}`,
     );
 
-    if (dto.executionMode !== 'extension') {
+    if (dto.executionMode === 'extension') {
+      for (const job of createdJobs) {
+        await this.startBitBrowserPublishJob(job.id);
+      }
+    } else {
       this.triggerPublishJobs(createdJobs.map((job) => job.id));
     }
 
@@ -442,46 +463,7 @@ export class PublishingService {
 
   async startExtensionPublishJob(user: SessionUser, dto: StartExtensionPublishJobDto) {
     const job = await this.findAccessibleLeadPublishJob(user, dto.jobId.trim());
-    const accountAuthPayload = this.getValidatedExtensionPublishAuthPayload(job);
-    const platformAccount = job.platformAccount;
-    if (!platformAccount) {
-      throw new NotFoundException('未找到发布账号');
-    }
-
-    const sessionToken = await this.jwtService.signAsync(
-      {
-        purpose: EXTENSION_PUBLISH_TOKEN_PURPOSE,
-        jid: job.id,
-        uid: user.userId,
-        platform: job.platform,
-        aid: platformAccount.id,
-      } satisfies ExtensionPublishTokenPayload,
-      {
-        expiresIn: `${EXTENSION_PUBLISH_TTL_SECONDS}s`,
-      },
-    );
-
-    const running =
-      job.status === LeadPublishStatus.running
-        ? job
-        : await this.prisma.leadPublishJob.update({
-            where: { id: job.id },
-            data: {
-              status: LeadPublishStatus.running,
-              lastError: null,
-            },
-            include: leadPublishJobInclude,
-          });
-
-    return {
-      sessionToken,
-      expiresAt: new Date(Date.now() + EXTENSION_PUBLISH_TTL_SECONDS * 1000).toISOString(),
-      job: this.serializePublishJob(running),
-      accountAuthPayload,
-      platformAccountId: platformAccount.id,
-      platformAccountName: platformAccount.accountName,
-      platformAccountDisplayName: platformAccount.displayName,
-    };
+    return this.prepareExtensionPublishSession(job, user.userId);
   }
 
   async getExtensionPublishAuth(sessionToken: string) {
@@ -499,9 +481,11 @@ export class PublishingService {
     }
 
     const accountAuthPayload = this.getValidatedExtensionPublishAuthPayload(job);
+    const accountCookiePayload = this.getExtensionAccountCookiePayload(job.platformAccount);
     return {
       sessionToken: sessionToken.trim(),
       accountAuthPayload,
+      accountCookiePayload,
       platform: job.platform,
       platformAccountId: job.platformAccount!.id,
     };
@@ -511,11 +495,11 @@ export class PublishingService {
     const account = await this.findAccessiblePlatformAccount(user, accountId.trim());
 
     if (account.provider !== PlatformAccountProvider.extension) {
-      throw new ConflictException('当前仅支持扩展登录账号的一键切号打开');
+      throw new ConflictException('当前仅支持扩展登录账号在 BitBrowser 中打开');
     }
 
     if (account.authType !== PlatformAccountAuthType.cookie) {
-      throw new ConflictException('当前账号不是 Cookie 登录态，无法在扩展中切号打开');
+      throw new ConflictException('当前账号不是 Cookie 登录态，无法在 BitBrowser 中打开');
     }
 
     const authPayload = this.decryptAuthPayload(account.authPayloadEncrypted).trim();
@@ -528,10 +512,19 @@ export class PublishingService {
       throw new ConflictException(validation.lastError ?? '当前账号 Cookie 不可用，请重新登录后再试');
     }
 
+    const externalGroupId = this.requireExternalGroupId(account, account.platform);
+    const opened = await this.publishingBitBrowserService.openPlatformAccountHome({
+      creatorId: account.creatorId,
+      platform: account.platform,
+      accountId: account.id,
+      accountName: account.accountName,
+      externalGroupId,
+    });
+
     return {
       platform: account.platform,
-      loginUrl: this.getPlatformAccountOpenUrl(account.platform),
-      authPayload,
+      loginUrl: opened.loginUrl,
+      profileId: opened.profileId,
     };
   }
 
@@ -577,6 +570,7 @@ export class PublishingService {
         : dto.status === 'success'
           ? LeadPublishStatus.success
           : LeadPublishStatus.failed;
+    const runtimeSessionId = dto.runtimeSessionId?.trim() || null;
 
     const updated = await this.prisma.leadPublishJob.update({
       where: { id: job.id },
@@ -598,6 +592,13 @@ export class PublishingService {
       await this.markPlatformAccountAuthExpiredIfNeeded(
         updated.platformAccountId,
         updated.lastError || '',
+      );
+    }
+
+    if (nextStatus === LeadPublishStatus.success || nextStatus === LeadPublishStatus.failed) {
+      await this.publishingBitBrowserService.closeRuntimeSession(
+        runtimeSessionId,
+        nextStatus === LeadPublishStatus.success ? 'completed' : 'failed',
       );
     }
 
@@ -653,7 +654,11 @@ export class PublishingService {
       },
       include: leadPublishJobInclude,
     });
-    this.triggerPublishJobs([updated.id]);
+    if (this.shouldUseBitBrowserPublish(updated)) {
+      await this.startBitBrowserPublishJob(updated.id);
+    } else {
+      this.triggerPublishJobs([updated.id]);
+    }
     return this.serializePublishJob(updated);
   }
 
@@ -715,6 +720,7 @@ export class PublishingService {
     const authPayload = dto.authPayload.trim();
     const displayName = dto.displayName?.trim() || null;
     const remark = dto.remark?.trim() || null;
+    const externalGroupId = dto.externalGroupId?.trim() || null;
 
     if (!accountName) {
       throw new ConflictException('账号名称不能为空');
@@ -736,6 +742,7 @@ export class PublishingService {
           authPayloadPreview: this.maskAuthPayload(authPayload),
           status: PlatformAccountStatus.saved,
           remark,
+          externalGroupId,
         },
         include: leadPlatformAccountInclude,
       });
@@ -777,14 +784,63 @@ export class PublishingService {
     this.cleanupExpiredExtensionLoginSessions();
 
     const platform = dto.platform as LeadPublishPlatform;
-    const accountId = dto.accountId?.trim() || null;
+    const requestedAccountId = dto.accountId?.trim() || null;
+    // #region debug-point A:extension-login-entry
+    this.reportDebugEvent('A', 'pre-fix', 'publishing.service:startPlatformExtensionLogin:entry', {
+      userId: user.userId,
+      platform,
+      accountId: requestedAccountId,
+      requestedGroupId: dto.externalGroupId?.trim() || null,
+    });
+    // #endregion
+    let currentAccount: LeadPlatformAccountWithRelations | null = null;
 
-    if (accountId) {
-      const current = await this.findAccessiblePlatformAccount(user, accountId);
-      if (current.platform !== platform) {
+    if (requestedAccountId) {
+      currentAccount = await this.findAccessiblePlatformAccount(user, requestedAccountId);
+      if (currentAccount.platform !== platform) {
         throw new ConflictException('平台与所选账号不匹配');
       }
     }
+
+    const externalGroupId = await this.resolvePlatformLoginGroupId({
+      userId: user.userId,
+      platform,
+      currentAccount,
+      requestedGroupId: dto.externalGroupId?.trim() || null,
+    });
+    // #region debug-point A:group-resolved
+    this.reportDebugEvent('A', 'pre-fix', 'publishing.service:startPlatformExtensionLogin:group-resolved', {
+      userId: user.userId,
+      platform,
+      accountId: requestedAccountId,
+      externalGroupId,
+      currentAccountId: currentAccount?.id || null,
+    });
+    // #endregion
+
+    if (!currentAccount) {
+      const pendingAccountName = `pending_${platform}_${externalGroupId}_${Date.now().toString(36)}`;
+      try {
+        currentAccount = await this.prisma.leadPlatformAccount.create({
+          data: {
+            creatorId: user.userId,
+            platform,
+            authType: PlatformAccountAuthType.cookie,
+            accountName: pendingAccountName,
+            displayName: null,
+            authPayloadEncrypted: this.encryptAuthPayload(PENDING_LOGIN_PLACEHOLDER),
+            authPayloadPreview: PENDING_LOGIN_PREVIEW,
+            status: PlatformAccountStatus.saved,
+            externalGroupId,
+          },
+          include: leadPlatformAccountInclude,
+        });
+      } catch (error) {
+        this.handlePlatformAccountWriteError(error);
+      }
+    }
+
+    const accountId = currentAccount.id;
 
     const sessionId = randomBytes(16).toString('hex');
     const expiresAt = Date.now() + EXTENSION_LOGIN_TTL_SECONDS * 1000;
@@ -806,20 +862,112 @@ export class PublishingService {
       userId: user.userId,
       platform,
       accountId,
+      externalGroupId,
+      profileId: null,
       expiresAt,
       status: 'pending',
       syncedAccountId: null,
+      runtimeSessionId: null,
     });
+
+    let runtime;
+    try {
+      runtime = await this.publishingBitBrowserService.startLoginRuntime({
+        creatorId: user.userId,
+        platform,
+        accountId,
+        accountName: currentAccount.accountName,
+        externalGroupId,
+        sessionId,
+        sessionToken,
+        forceFreshLogin: Boolean(requestedAccountId),
+      });
+    } catch (error) {
+      this.extensionLoginSessions.delete(sessionId);
+      throw error;
+    }
+    // #region debug-point A:runtime-created
+    this.reportDebugEvent('A', 'pre-fix', 'publishing.service:startPlatformExtensionLogin:runtime-created', {
+      sessionId,
+      runtimeSessionId: runtime.runtimeSessionId,
+      profileId: runtime.profileId,
+      externalGroupId,
+      loginUrl: runtime.loginUrl,
+    });
+    // #endregion
+
+    if (currentAccount) {
+      await this.prisma.leadPlatformAccount.update({
+        where: { id: currentAccount.id },
+        data: {
+          loginStatus: PlatformAccountLoginStatus.pending,
+          lastLoginStartedAt: new Date(),
+          loginUrl: runtime.loginUrl,
+          lastError: null,
+          externalGroupId,
+        },
+      });
+    }
+
+    const storedSession = this.extensionLoginSessions.get(sessionId);
+    if (storedSession) {
+      storedSession.runtimeSessionId = runtime.runtimeSessionId;
+      storedSession.profileId = runtime.profileId;
+    }
+
+    if (runtime.fallbackLoginResult) {
+      await this.syncPlatformExtensionLogin({
+        sessionToken,
+        authType: runtime.fallbackLoginResult.authType,
+        authPayload: runtime.fallbackLoginResult.authPayload,
+        accountName: runtime.fallbackLoginResult.accountName || undefined,
+        externalAccountId: runtime.fallbackLoginResult.externalAccountId || undefined,
+        displayName: runtime.fallbackLoginResult.displayName || undefined,
+        avatarUrl: runtime.fallbackLoginResult.avatarUrl || undefined,
+        followerCount: runtime.fallbackLoginResult.followerCount ?? undefined,
+        sourceUrl: runtime.fallbackLoginResult.sourceUrl || undefined,
+        runtimeSessionId: runtime.runtimeSessionId,
+      });
+    }
 
     return {
       sessionId,
       sessionToken,
       platform,
       accountId,
+      externalGroupId,
       expiresAt: new Date(expiresAt).toISOString(),
-      loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(platform),
+      loginUrl: runtime.loginUrl,
+      runtimeSessionId: runtime.runtimeSessionId,
+      profileId: runtime.profileId,
+      ownerId: runtime.ownerId,
+      bridgeBaseUrl: runtime.bridgeBaseUrl,
     };
   }
+
+  // #region debug-point A:report-debug-event
+  private reportDebugEvent(
+    hypothesisId: string,
+    runId: string,
+    location: string,
+    data: Record<string, unknown>,
+  ) {
+    const payload = {
+      sessionId: 'douyin-login-no-reaction',
+      runId,
+      hypothesisId,
+      location,
+      msg: `[DEBUG] ${location}`,
+      data,
+      ts: Date.now(),
+    };
+    void fetch('http://127.0.0.1:7777/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => undefined);
+  }
+  // #endregion
 
   async startMcpPlatformLogin(_user: SessionUser, dto: StartMcpPlatformLoginDto) {
     const platform = dto.platform as LeadPublishPlatform;
@@ -978,141 +1126,371 @@ export class PublishingService {
       throw new UnauthorizedException('扩展登录会话已过期');
     }
 
-    const authPayload = dto.authPayload.trim();
-    if (!authPayload) {
-      throw new ConflictException('Cookie / Token 不能为空');
-    }
+    const runtimeSessionId = dto.runtimeSessionId?.trim() || session.runtimeSessionId;
 
-    const validation = this.validateAuthPayload(dto.authType as PlatformAccountAuthType, authPayload);
-    if (validation.status !== PlatformAccountStatus.valid) {
-      throw new ConflictException(validation.lastError ?? '登录信息校验未通过');
-    }
+    try {
+      const authPayload = dto.authPayload.trim();
+      const cookiePayload = this.normalizeExtensionCookiePayload(dto.cookiePayload);
+      if (!authPayload) {
+        throw new ConflictException('Cookie / Token 不能为空');
+      }
 
-    const requestedAccountName = this.sanitizeExtensionResolvedAccountText(
-      session.platform,
-      dto.accountName?.trim() || '',
-    );
-    const externalAccountId = this.sanitizeExtensionResolvedAccountText(
-      session.platform,
-      dto.externalAccountId?.trim() || null,
-    );
-    const displayName = this.sanitizeExtensionResolvedAccountText(
-      session.platform,
-      dto.displayName?.trim() || null,
-    );
-    const remark = dto.remark?.trim() || null;
-    const avatarUrl = dto.avatarUrl?.trim() || null;
-    const followerCount =
-      typeof dto.followerCount === 'number' && Number.isFinite(dto.followerCount)
-        ? Math.max(0, Math.round(dto.followerCount))
-        : null;
+      const validation = this.validateAuthPayload(dto.authType as PlatformAccountAuthType, authPayload);
+      if (validation.status !== PlatformAccountStatus.valid) {
+        throw new ConflictException(validation.lastError ?? '登录信息校验未通过');
+      }
 
-    if (
-      session.platform === LeadPublishPlatform.xiaohongshu &&
-      !requestedAccountName &&
-      !externalAccountId &&
-      !displayName
-    ) {
-      throw new ConflictException('未识别到真实小红书账号，请进入账号主页后再同步');
-    }
+      const requestedAccountName = this.sanitizeExtensionResolvedAccountText(
+        session.platform,
+        dto.accountName?.trim() || '',
+      );
+      const externalAccountId = this.sanitizeExtensionResolvedAccountText(
+        session.platform,
+        dto.externalAccountId?.trim() || null,
+      );
+      const displayName = this.sanitizeExtensionResolvedAccountText(
+        session.platform,
+        dto.displayName?.trim() || null,
+      );
+      const remark = dto.remark?.trim() || null;
+      const avatarUrl = dto.avatarUrl?.trim() || null;
+      const followerCount =
+        typeof dto.followerCount === 'number' && Number.isFinite(dto.followerCount)
+          ? Math.max(0, Math.round(dto.followerCount))
+          : null;
 
-    const resolvedAccountName = this.resolveExtensionAccountName({
-      platform: session.platform,
-      authPayload,
-      accountName: requestedAccountName,
-      externalAccountId,
-      displayName,
-    });
+      let fallbackProfile:
+        | {
+            accountName: string | null;
+            externalAccountId: string | null;
+            displayName: string | null;
+            avatarUrl: string | null;
+            followerCount: number | null;
+            sourceUrl: string | null;
+          }
+        | null = null;
+      if (
+        runtimeSessionId &&
+        session.platform !== LeadPublishPlatform.douyin &&
+        !(requestedAccountName || externalAccountId || displayName || avatarUrl || followerCount !== null)
+      ) {
+        const collected = await this.publishingBitBrowserService.collectLoginProfileFallback({
+          runtimeSessionId,
+          platform: session.platform,
+        });
+        if (collected) {
+          fallbackProfile = {
+            accountName: this.sanitizeExtensionResolvedAccountText(
+              session.platform,
+              collected.accountName || '',
+            ),
+            externalAccountId: this.sanitizeExtensionResolvedAccountText(
+              session.platform,
+              collected.externalAccountId || null,
+            ),
+            displayName: this.sanitizeExtensionResolvedAccountText(
+              session.platform,
+              collected.displayName || null,
+            ),
+            avatarUrl: collected.avatarUrl || null,
+            followerCount:
+              typeof collected.followerCount === 'number' && Number.isFinite(collected.followerCount)
+                ? Math.max(0, Math.round(collected.followerCount))
+                : null,
+            sourceUrl: collected.sourceUrl || null,
+          };
+        }
+      }
 
-    let saved: LeadPlatformAccountWithRelations;
-    const current = session.accountId
-      ? await this.prisma.leadPlatformAccount.findFirst({
-          where: {
-            id: session.accountId,
-            creatorId: session.userId,
+      const finalAccountName = requestedAccountName || fallbackProfile?.accountName || '';
+      const finalExternalAccountId = externalAccountId || fallbackProfile?.externalAccountId || null;
+      const finalDisplayName = displayName || fallbackProfile?.displayName || null;
+      const finalAvatarUrl = avatarUrl || fallbackProfile?.avatarUrl || null;
+      const finalFollowerCount =
+        followerCount !== null ? followerCount : fallbackProfile?.followerCount ?? null;
+      const finalSourceUrl = dto.sourceUrl?.trim() || fallbackProfile?.sourceUrl || null;
+      // #region debug-point P4:extension-login-input
+      void fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'douyin-profile-detect',
+          runId: 'pre-fix',
+          hypothesisId: 'H3',
+          location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:input',
+          msg: '[DEBUG] syncPlatformExtensionLogin input',
+          data: {
+            sessionId: session.sessionId,
+            platform: session.platform,
+            runtimeSessionId,
+            dtoAccountName: dto.accountName?.trim() || '',
+            dtoExternalAccountId: dto.externalAccountId?.trim() || '',
+            dtoDisplayName: dto.displayName?.trim() || '',
+            dtoAvatarUrl: dto.avatarUrl?.trim() || '',
+            dtoFollowerCount:
+              typeof dto.followerCount === 'number' && Number.isFinite(dto.followerCount)
+                ? dto.followerCount
+                : null,
+            requestedAccountName,
+            externalAccountId,
+            displayName,
+            finalAccountName,
+            finalExternalAccountId,
+            finalDisplayName,
+            finalAvatarUrl,
+            finalFollowerCount,
+            finalSourceUrl,
           },
-          include: leadPlatformAccountInclude,
-        })
-      : externalAccountId
+          ts: Date.now(),
+        }),
+      }).catch(() => undefined);
+      // #endregion
+
+      const resolvedAccountName = this.resolveExtensionAccountName({
+        platform: session.platform,
+        authPayload,
+        accountName: finalAccountName,
+        externalAccountId: finalExternalAccountId,
+        displayName: finalDisplayName,
+      });
+      const hasResolvedIdentity = Boolean(
+        finalAccountName || finalExternalAccountId || finalDisplayName,
+      );
+      // #region debug-point P5:extension-login-resolved-name
+      void fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'douyin-profile-detect',
+          runId: 'pre-fix',
+          hypothesisId: 'H3',
+          location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:resolved-name',
+          msg: '[DEBUG] syncPlatformExtensionLogin resolved name',
+          data: {
+            sessionId: session.sessionId,
+            platform: session.platform,
+            resolvedAccountName,
+            hasResolvedIdentity,
+            finalAccountName,
+            finalExternalAccountId,
+            finalDisplayName,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => undefined);
+      // #endregion
+
+      let saved: LeadPlatformAccountWithRelations;
+      const current = session.accountId
         ? await this.prisma.leadPlatformAccount.findFirst({
             where: {
+              id: session.accountId,
               creatorId: session.userId,
-              platform: session.platform,
-              provider: PlatformAccountProvider.extension,
-              externalAccountId,
             },
             include: leadPlatformAccountInclude,
           })
-        : null;
+        : finalExternalAccountId
+          ? await this.prisma.leadPlatformAccount.findFirst({
+              where: {
+                creatorId: session.userId,
+                platform: session.platform,
+                provider: PlatformAccountProvider.extension,
+                externalAccountId: finalExternalAccountId,
+              },
+              include: leadPlatformAccountInclude,
+            })
+          : null;
 
-    if (current) {
-      if (!current) {
-        throw new NotFoundException('平台登录账号不存在');
-      }
-
-      saved = await this.prisma.leadPlatformAccount.update({
-        where: { id: current.id },
-        data: {
-          authType: dto.authType as PlatformAccountAuthType,
-          accountName: resolvedAccountName || current.accountName,
-          displayName,
-          authPayloadEncrypted: this.encryptAuthPayload(authPayload),
-          authPayloadPreview: this.maskAuthPayload(authPayload),
-          loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(session.platform),
-          status: PlatformAccountStatus.valid,
-          loginStatus: PlatformAccountLoginStatus.authenticated,
-          externalAccountId,
-          lastLoginCompletedAt: new Date(),
-          lastValidatedAt: new Date(),
-          lastError: null,
-          externalMeta: {
-            ...(current.externalMeta && typeof current.externalMeta === 'object' ? (current.externalMeta as Record<string, unknown>) : {}),
-            ...(avatarUrl ? { avatarUrl } : {}),
-            ...(followerCount !== null ? { followerCount } : {}),
-          } as Prisma.InputJsonValue,
-          ...(remark !== null ? { remark } : {}),
-        },
-        include: leadPlatformAccountInclude,
-      });
-    } else {
-      try {
-        saved = await this.prisma.leadPlatformAccount.create({
+      if (current) {
+        saved = await this.prisma.leadPlatformAccount.update({
+          where: { id: current.id },
           data: {
-            creatorId: session.userId,
-            platform: session.platform,
+            provider: PlatformAccountProvider.extension,
             authType: dto.authType as PlatformAccountAuthType,
-            accountName: resolvedAccountName,
-            displayName,
+            accountName: resolvedAccountName || current.accountName,
+            displayName: finalDisplayName,
             authPayloadEncrypted: this.encryptAuthPayload(authPayload),
             authPayloadPreview: this.maskAuthPayload(authPayload),
             loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(session.platform),
             status: PlatformAccountStatus.valid,
             loginStatus: PlatformAccountLoginStatus.authenticated,
-            externalAccountId,
+            externalAccountId: finalExternalAccountId,
+            externalGroupId: session.externalGroupId,
             lastLoginCompletedAt: new Date(),
             lastValidatedAt: new Date(),
             lastError: null,
-            remark,
             externalMeta: {
-              ...(avatarUrl ? { avatarUrl } : {}),
-              ...(followerCount !== null ? { followerCount } : {}),
+              ...(current.externalMeta && typeof current.externalMeta === 'object'
+                ? (current.externalMeta as Record<string, unknown>)
+                : {}),
+              ...(session.profileId ? { profileId: session.profileId } : {}),
+              ...(finalAvatarUrl ? { avatarUrl: finalAvatarUrl } : {}),
+              ...(finalFollowerCount !== null ? { followerCount: finalFollowerCount } : {}),
+              ...(cookiePayload ? { cookiePayload } : {}),
             } as Prisma.InputJsonValue,
+            ...(remark !== null ? { remark } : {}),
           },
           include: leadPlatformAccountInclude,
         });
-      } catch (error) {
-        this.handlePlatformAccountWriteError(error);
+      } else {
+        try {
+          saved = await this.prisma.leadPlatformAccount.create({
+            data: {
+              creatorId: session.userId,
+              platform: session.platform,
+              authType: dto.authType as PlatformAccountAuthType,
+              accountName: resolvedAccountName,
+              displayName: finalDisplayName,
+              authPayloadEncrypted: this.encryptAuthPayload(authPayload),
+              authPayloadPreview: this.maskAuthPayload(authPayload),
+              loginUrl: this.platformLoginBrowserService.getPlatformLoginUrl(session.platform),
+              status: PlatformAccountStatus.valid,
+              loginStatus: PlatformAccountLoginStatus.authenticated,
+              externalAccountId: finalExternalAccountId,
+              externalGroupId: session.externalGroupId,
+              lastLoginCompletedAt: new Date(),
+              lastValidatedAt: new Date(),
+              lastError: null,
+              remark,
+              externalMeta: {
+                ...(session.profileId ? { profileId: session.profileId } : {}),
+                ...(finalAvatarUrl ? { avatarUrl: finalAvatarUrl } : {}),
+                ...(finalFollowerCount !== null ? { followerCount: finalFollowerCount } : {}),
+                ...(cookiePayload ? { cookiePayload } : {}),
+              } as Prisma.InputJsonValue,
+            },
+            include: leadPlatformAccountInclude,
+          });
+        } catch (error) {
+          this.handlePlatformAccountWriteError(error);
+        }
       }
+
+      session.accountId = saved.id;
+      session.syncedAccountId = saved.id;
+      // #region debug-point P6:extension-login-saved
+      void fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'douyin-profile-detect',
+          runId: 'pre-fix',
+          hypothesisId: 'H3',
+          location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:saved',
+          msg: '[DEBUG] syncPlatformExtensionLogin saved account',
+          data: {
+            sessionId: session.sessionId,
+            platform: session.platform,
+            accountId: saved.id,
+            accountName: saved.accountName,
+            displayName: saved.displayName,
+            externalAccountId: saved.externalAccountId,
+            avatarUrl:
+              saved.externalMeta &&
+              typeof saved.externalMeta === 'object' &&
+              !Array.isArray(saved.externalMeta)
+                ? String((saved.externalMeta as Record<string, unknown>).avatarUrl || '')
+                : '',
+            followerCount:
+              saved.externalMeta &&
+              typeof saved.externalMeta === 'object' &&
+              !Array.isArray(saved.externalMeta) &&
+              typeof (saved.externalMeta as Record<string, unknown>).followerCount === 'number'
+                ? (saved.externalMeta as Record<string, unknown>).followerCount
+                : null,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => undefined);
+      // #endregion
+      if (!hasResolvedIdentity) {
+        // #region debug-point H2:partial-sync-return
+        this.reportDebugEvent('H2', 'pre-fix', 'publishing.service:syncPlatformExtensionLogin:partial-sync-return', {
+          sessionId: session.sessionId,
+          platform: session.platform,
+          runtimeSessionId,
+          accountId: saved.id,
+          accountName: saved.accountName,
+          sourceUrl: finalSourceUrl,
+        });
+        // #endregion
+        return {
+          sessionId: session.sessionId,
+          account: this.serializePlatformAccount(saved),
+          sourceUrl: finalSourceUrl,
+        };
+      }
+
+      session.status = 'completed';
+      session.runtimeSessionId = null;
+      // #region debug-point H1:rename-dispatch
+      this.reportDebugEvent('H1', 'pre-fix', 'publishing.service:syncPlatformExtensionLogin:before-rename', {
+        sessionId: session.sessionId,
+        platform: session.platform,
+        accountId: saved.id,
+        accountName: saved.accountName,
+        externalGroupId: session.externalGroupId,
+        profileId: session.profileId,
+      });
+      // #endregion
+      await this.publishingBitBrowserService
+        .renameDedicatedProfile({
+          creatorId: session.userId,
+          externalGroupId: session.externalGroupId,
+          platform: session.platform,
+          platformAccountId: saved.id,
+          accountName: saved.displayName || saved.accountName,
+          profileId: session.profileId,
+        })
+        .then(() => {
+          // #region debug-point H1:rename-dispatch-result
+          this.reportDebugEvent(
+            'H1',
+            'pre-fix',
+            'publishing.service:syncPlatformExtensionLogin:rename-dispatched',
+            {
+              sessionId: session.sessionId,
+              platform: session.platform,
+              accountId: saved.id,
+              profileId: session.profileId,
+            },
+          );
+          // #endregion
+        })
+        .catch((error) => {
+          // #region debug-point H1:rename-dispatch-error
+          this.reportDebugEvent(
+            'H1',
+            'pre-fix',
+            'publishing.service:syncPlatformExtensionLogin:rename-dispatch-error',
+            {
+              sessionId: session.sessionId,
+              platform: session.platform,
+              accountId: saved.id,
+              profileId: session.profileId,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          );
+          // #endregion
+          return undefined;
+        });
+      await this.publishingBitBrowserService.closeRuntimeSession(runtimeSessionId, 'completed');
+
+      return {
+        sessionId: session.sessionId,
+        account: this.serializePlatformAccount(saved),
+        sourceUrl: finalSourceUrl,
+      };
+    } catch (error) {
+      // #region debug-point H5:sync-platform-login-error
+      this.reportDebugEvent('H5', 'pre-fix', 'publishing.service:syncPlatformExtensionLogin:error', {
+        sessionId: session.sessionId,
+        platform: session.platform,
+        runtimeSessionId,
+        error: error instanceof Error ? error.message : String(error),
+        sourceUrl: dto.sourceUrl?.trim() || null,
+      });
+      // #endregion
+      await this.publishingBitBrowserService.closeRuntimeSession(runtimeSessionId, 'failed');
+      throw error;
     }
-
-    session.status = 'completed';
-    session.syncedAccountId = saved.id;
-
-    return {
-      sessionId: session.sessionId,
-      account: this.serializePlatformAccount(saved),
-      sourceUrl: dto.sourceUrl?.trim() || null,
-    };
   }
 
   async updatePlatformAccount(user: SessionUser, id: string, dto: UpdatePlatformAccountDto) {
@@ -1128,6 +1506,9 @@ export class PublishingService {
           ...(dto.accountName !== undefined ? { accountName: dto.accountName.trim() } : {}),
           ...(dto.displayName !== undefined ? { displayName: dto.displayName.trim() || null } : {}),
           ...(dto.remark !== undefined ? { remark: dto.remark.trim() || null } : {}),
+          ...(dto.externalGroupId !== undefined
+            ? { externalGroupId: dto.externalGroupId.trim() || null }
+            : {}),
           ...(dto.status ? { status: dto.status as PlatformAccountStatus } : {}),
           ...(authPayloadChanged
             ? {
@@ -1150,16 +1531,129 @@ export class PublishingService {
 
   async deletePlatformAccount(user: SessionUser, id: string) {
     const current = await this.findAccessiblePlatformAccount(user, id);
-    await this.prisma.leadPlatformAccount.delete({
-      where: { id: current.id },
-    });
-    return { id: current.id };
+    const profileId = this.extractExternalProfileId(current.externalMeta);
+    try {
+      // #region debug-point H1:delete-account
+      this.reportDebugEvent('H1', 'pre-fix', 'publishing.service:deletePlatformAccount:before-release-profile', {
+        accountId: current.id,
+        platform: current.platform,
+        externalGroupId: current.externalGroupId,
+        profileId,
+      });
+      // #endregion
+      await this.publishingBitBrowserService.releaseDedicatedProfile(
+        user.userId,
+        current.externalGroupId,
+        profileId,
+      );
+      // #region debug-point H1:delete-account-result
+      this.reportDebugEvent('H1', 'pre-fix', 'publishing.service:deletePlatformAccount:after-release-profile', {
+        accountId: current.id,
+        platform: current.platform,
+        externalGroupId: current.externalGroupId,
+        profileId,
+      });
+      // #endregion
+      await this.prisma.leadPlatformAccount.delete({
+        where: { id: current.id },
+      });
+      return { id: current.id };
+    } catch (error) {
+      this.logger.error(
+        `删除平台账号失败: accountId=${current.id}, platform=${current.platform}, externalGroupId=${current.externalGroupId ?? ''}, profileId=${profileId ?? ''}, error=${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
   }
 
   async validatePlatformAccount(user: SessionUser, id: string) {
     const current = await this.findAccessiblePlatformAccount(user, id);
     const decryptedPayload = this.decryptAuthPayload(current.authPayloadEncrypted);
     if (current.authType === PlatformAccountAuthType.cookie) {
+      const externalGroupId = current.externalGroupId?.trim() || '';
+      if (
+        current.provider === PlatformAccountProvider.extension &&
+        externalGroupId &&
+        this.publishingBitBrowserService.isEnabled()
+      ) {
+        try {
+          const snapshot = await this.publishingBitBrowserService.collectPlatformAccountCookieSnapshot({
+            creatorId: current.creatorId,
+            platform: current.platform,
+            accountId: current.id,
+            accountName: current.accountName,
+            externalGroupId,
+          });
+          if (snapshot?.authPayload) {
+            const validation = this.validateAuthPayload(
+              PlatformAccountAuthType.cookie,
+              snapshot.authPayload,
+            );
+            const snapshotAccountName = this.sanitizeExtensionResolvedAccountText(
+              current.platform,
+              snapshot.accountName,
+            );
+            const snapshotExternalAccountId = this.sanitizeExtensionResolvedAccountText(
+              current.platform,
+              snapshot.externalAccountId,
+            );
+            const snapshotDisplayName = this.sanitizeExtensionResolvedAccountText(
+              current.platform,
+              snapshot.displayName,
+            );
+            const nextAccountName =
+              snapshotExternalAccountId ||
+              snapshotAccountName ||
+              snapshotDisplayName ||
+              current.accountName;
+            const updated = await this.prisma.leadPlatformAccount.update({
+              where: { id: current.id },
+              data: {
+                accountName: nextAccountName,
+                displayName: snapshotDisplayName ?? current.displayName,
+                authType: PlatformAccountAuthType.cookie,
+                authPayloadEncrypted: this.encryptAuthPayload(snapshot.authPayload),
+                authPayloadPreview: this.maskAuthPayload(snapshot.authPayload),
+                status: validation.status,
+                loginStatus:
+                  validation.status === PlatformAccountStatus.valid
+                    ? PlatformAccountLoginStatus.authenticated
+                    : PlatformAccountLoginStatus.failed,
+                lastValidatedAt: new Date(),
+                lastLoginCompletedAt:
+                  validation.status === PlatformAccountStatus.valid
+                    ? new Date()
+                    : current.lastLoginCompletedAt,
+                lastError: validation.lastError,
+                loginUrl: snapshot.sourceUrl || current.loginUrl,
+                externalAccountId: snapshotExternalAccountId ?? current.externalAccountId,
+                externalMeta: {
+                  ...(current.externalMeta && typeof current.externalMeta === 'object'
+                    ? (current.externalMeta as Record<string, unknown>)
+                    : {}),
+                  ...(snapshot.avatarUrl ? { avatarUrl: snapshot.avatarUrl } : {}),
+                  ...(typeof snapshot.followerCount === 'number' &&
+                  Number.isFinite(snapshot.followerCount)
+                    ? { followerCount: Math.max(0, Math.round(snapshot.followerCount)) }
+                    : {}),
+                } as Prisma.InputJsonValue,
+              },
+              include: leadPlatformAccountInclude,
+            });
+            return this.serializePlatformAccount(updated);
+          }
+        } catch (error) {
+          this.logger.warn(
+            `BitBrowser 平台账号校验回退到旧链路: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+
       try {
         const result = await this.platformLoginBrowserService.collectLoginResult({
           accountId: current.id,
@@ -1961,6 +2455,240 @@ export class PublishingService {
       '重新登录',
     ];
     return hints.some((hint) => normalized.includes(hint.toLowerCase()));
+  }
+
+  private async startBitBrowserPublishJob(jobId: string) {
+    const current = await this.prisma.leadPublishJob.findUnique({
+      where: { id: jobId },
+      include: leadPublishJobInclude,
+    });
+
+    if (!current) {
+      throw new NotFoundException('发布任务不存在');
+    }
+
+    const session = await this.prepareExtensionPublishSession(current, current.createdById);
+    const platformAccount = current.platformAccount;
+    if (!platformAccount) {
+      throw new NotFoundException('未找到发布账号');
+    }
+
+    try {
+      return await this.publishingBitBrowserService.startPublishRuntime({
+        creatorId: current.createdById,
+        platform: current.platform,
+        accountId: platformAccount.id,
+        accountName: platformAccount.accountName,
+        externalGroupId: this.requireExternalGroupId(platformAccount, current.platform),
+        sessionToken: session.sessionToken,
+        accountAuthPayload: session.accountAuthPayload,
+        job: session.job,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'BitBrowser 发布启动失败';
+      await this.prisma.leadPublishJob.update({
+        where: { id: current.id },
+        data: {
+          status: LeadPublishStatus.failed,
+          lastError: message,
+        },
+      });
+      throw error;
+    }
+  }
+
+  private async prepareExtensionPublishSession(
+    job: LeadPublishJobWithRelations,
+    userId: string,
+  ) {
+    const accountAuthPayload = this.getValidatedExtensionPublishAuthPayload(job);
+    const platformAccount = job.platformAccount;
+    if (!platformAccount) {
+      throw new NotFoundException('未找到发布账号');
+    }
+
+    const sessionToken = await this.jwtService.signAsync(
+      {
+        purpose: EXTENSION_PUBLISH_TOKEN_PURPOSE,
+        jid: job.id,
+        uid: userId,
+        platform: job.platform,
+        aid: platformAccount.id,
+      } satisfies ExtensionPublishTokenPayload,
+      {
+        expiresIn: `${EXTENSION_PUBLISH_TTL_SECONDS}s`,
+      },
+    );
+
+    const running =
+      job.status === LeadPublishStatus.running
+        ? job
+        : await this.prisma.leadPublishJob.update({
+            where: { id: job.id },
+            data: {
+              status: LeadPublishStatus.running,
+              lastError: null,
+            },
+            include: leadPublishJobInclude,
+          });
+
+    return {
+      sessionToken,
+      expiresAt: new Date(Date.now() + EXTENSION_PUBLISH_TTL_SECONDS * 1000).toISOString(),
+      job: this.serializePublishJob(running),
+      accountAuthPayload,
+      accountCookiePayload: this.getExtensionAccountCookiePayload(platformAccount),
+      platformAccountId: platformAccount.id,
+      platformAccountName: platformAccount.accountName,
+      platformAccountDisplayName: platformAccount.displayName,
+    };
+  }
+
+  private shouldUseBitBrowserPublish(job: LeadPublishJobWithRelations) {
+    return Boolean(
+      job.platformAccount &&
+        job.platformAccount.provider === PlatformAccountProvider.extension &&
+        BITBROWSER_EXTENSION_PUBLISH_PLATFORMS.has(job.platform),
+    );
+  }
+
+  private requireExternalGroupId(
+    account: Pick<LeadPlatformAccountWithRelations, 'externalGroupId'>,
+    platform: LeadPublishPlatform,
+  ) {
+    const externalGroupId = account.externalGroupId?.trim() || '';
+    if (!externalGroupId) {
+      throw new ConflictException(
+        `${this.getPlatformDisplayName(platform)}账号尚未建立浏览器环境，请重新登录一次后再试`,
+      );
+    }
+    return externalGroupId;
+  }
+
+  private async resolvePlatformLoginGroupId(input: {
+    userId: string;
+    platform: LeadPublishPlatform;
+    currentAccount: LeadPlatformAccountWithRelations | null;
+    requestedGroupId: string | null;
+  }) {
+    const currentGroupId = input.currentAccount?.externalGroupId?.trim();
+    if (currentGroupId) {
+      await this.migrateSharedPlatformGroupIfNeeded(input.userId, input.currentAccount);
+      return currentGroupId;
+    }
+
+    const requestedGroupId = input.requestedGroupId?.trim();
+    if (requestedGroupId) {
+      return this.normalizeAutoGroupId(requestedGroupId);
+    }
+
+    const existingAccounts = await this.prisma.leadPlatformAccount.findMany({
+      where: {
+        creatorId: input.userId,
+        provider: PlatformAccountProvider.extension,
+        externalGroupId: {
+          not: null,
+        },
+      },
+      select: {
+        externalGroupId: true,
+      },
+    });
+
+    const groupIds = new Set<string>();
+    for (const account of existingAccounts) {
+      const groupId = this.normalizeAutoGroupId(account.externalGroupId || '');
+      if (!groupId) {
+        continue;
+      }
+      groupIds.add(groupId);
+    }
+
+    return this.buildNextAutoGroupId(groupIds);
+  }
+
+  private async migrateSharedPlatformGroupIfNeeded(
+    userId: string,
+    currentAccount: LeadPlatformAccountWithRelations | null,
+  ) {
+    if (!currentAccount?.externalGroupId) {
+      return;
+    }
+
+    const sharedAccounts = await this.prisma.leadPlatformAccount.findMany({
+      where: {
+        creatorId: userId,
+        provider: PlatformAccountProvider.extension,
+        externalGroupId: currentAccount.externalGroupId,
+        id: {
+          not: currentAccount.id,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (!sharedAccounts.length) {
+      return;
+    }
+
+    await this.prisma.leadPlatformAccount.updateMany({
+      where: {
+        id: {
+          in: sharedAccounts.map((item) => item.id),
+        },
+      },
+      data: {
+        externalGroupId: null,
+        loginStatus: PlatformAccountLoginStatus.failed,
+        lastError: '请重新登录以迁移到专属 BitBrowser Profile',
+      },
+    });
+  }
+
+  private normalizeAutoGroupId(value: string) {
+    return value.trim().toUpperCase();
+  }
+
+  private buildNextAutoGroupId(existingGroupIds: Set<string>) {
+    let index = 0;
+    while (index < 702) {
+      const candidate = this.convertIndexToGroupId(index);
+      if (!existingGroupIds.has(candidate)) {
+        return candidate;
+      }
+      index += 1;
+    }
+    throw new ConflictException('自动分配账号分组失败，请清理无效账号后重试');
+  }
+
+  private convertIndexToGroupId(index: number) {
+    let current = index;
+    let result = '';
+    do {
+      result = String.fromCharCode(65 + (current % 26)) + result;
+      current = Math.floor(current / 26) - 1;
+    } while (current >= 0);
+    return result;
+  }
+
+  private getPlatformDisplayName(platform: LeadPublishPlatform) {
+    switch (platform) {
+      case LeadPublishPlatform.xiaohongshu:
+        return '小红书';
+      case LeadPublishPlatform.douyin:
+        return '抖音';
+      case LeadPublishPlatform.wechat_mp:
+        return '视频号';
+      case LeadPublishPlatform.kuaishou:
+        return '快手';
+      case LeadPublishPlatform.wechat_official:
+        return '微信公众号';
+      case LeadPublishPlatform.bilibili:
+        return '哔哩哔哩';
+      default:
+        return platform;
+    }
   }
 
   private serializeLeadContent(item: LeadContentWithRelations) {
@@ -2831,6 +3559,17 @@ export class PublishingService {
     ]);
   }
 
+  private extractExternalProfileId(value: unknown) {
+    return (
+      this.readFirstStringFromPaths(value, [
+        ['profileId'],
+        ['profile_id'],
+        ['bitbrowserProfileId'],
+        ['runtime', 'profileId'],
+      ]) || null
+    );
+  }
+
   private readFirstStringFromPaths(value: unknown, paths: string[][]) {
     if (!value) return '';
     for (const path of paths) {
@@ -2863,7 +3602,7 @@ export class PublishingService {
     platform: LeadPublishPlatform,
     value?: string | null,
   ) {
-    const normalized = value?.trim() || '';
+    const normalized = this.normalizeExtensionIdentityText(platform, value);
     if (!normalized) return null;
 
     const lowered = normalized.toLowerCase();
@@ -2878,16 +3617,47 @@ export class PublishingService {
         '数据中心',
       ],
       [LeadPublishPlatform.douyin]: ['抖音', 'douyin', '创作者平台'],
-      [LeadPublishPlatform.wechat_mp]: ['视频号', '视频号助手', 'wechat', 'channels'],
+      [LeadPublishPlatform.wechat_mp]: [
+        '视频号',
+        '微信视频号',
+        '视频号助手',
+        '视频号管理',
+        'wechat',
+        'channels',
+      ],
       [LeadPublishPlatform.kuaishou]: ['快手', 'kuaishou', '创作者服务平台'],
       [LeadPublishPlatform.bilibili]: ['哔哩哔哩', 'bilibili'],
       [LeadPublishPlatform.wechat_official]: ['公众号', '微信公众平台', 'mp.weixin'],
     };
 
-    if ((blockedKeywords[platform] ?? []).some((keyword) => lowered.includes(keyword.toLowerCase()))) {
+    const matchedBlockedKeyword = (blockedKeywords[platform] ?? []).some((keyword) =>
+      platform === LeadPublishPlatform.wechat_mp
+        ? lowered === keyword.toLowerCase()
+        : lowered.includes(keyword.toLowerCase()),
+    );
+    if (matchedBlockedKeyword) {
       return null;
     }
 
+    return normalized;
+  }
+
+  private normalizeExtensionIdentityText(
+    platform: LeadPublishPlatform,
+    value?: string | null,
+  ) {
+    const normalized = value?.trim() || '';
+    if (!normalized) {
+      return '';
+    }
+    if (platform !== LeadPublishPlatform.wechat_mp) {
+      return normalized;
+    }
+    if (/^(?:微信)?视频号(?:名称|ID|Id)?\s*[:：]/i.test(normalized)) {
+      return normalized
+        .replace(/^(?:微信)?视频号(?:名称|ID|Id)?\s*[:：]\s*/i, '')
+        .trim();
+    }
     return normalized;
   }
 
@@ -2913,17 +3683,14 @@ export class PublishingService {
     externalAccountId: string | null;
     displayName: string | null;
   }) {
-    const preferredId = input.externalAccountId || input.accountName;
-    if (preferredId) {
-      return preferredId;
+    const preferredIdentity =
+      input.externalAccountId || input.accountName || input.displayName;
+    if (preferredIdentity) {
+      return preferredIdentity;
     }
 
-    if (input.displayName) {
-      const fingerprint = createHash('sha1').update(input.authPayload).digest('hex').slice(0, 10);
-      return `${input.platform}_${fingerprint}`;
-    }
-
-    return `auto_${input.platform}_${new Date().getTime().toString(36)}`;
+    const fingerprint = createHash('sha1').update(input.authPayload).digest('hex').slice(0, 10);
+    return `auto_${input.platform}_${fingerprint}`;
   }
 
   private getValidatedExtensionPublishAuthPayload(job: LeadPublishJobWithRelations) {
@@ -2960,6 +3727,53 @@ export class PublishingService {
     }
 
     return accountAuthPayload;
+  }
+
+  private getExtensionAccountCookiePayload(
+    account: Pick<LeadPlatformAccountWithRelations, 'externalMeta'> | null | undefined,
+  ) {
+    const cookiePayload = this.readUnknownPath(account?.externalMeta, ['cookiePayload']);
+    return typeof cookiePayload === 'string' && cookiePayload.trim() ? cookiePayload.trim() : null;
+  }
+
+  private normalizeExtensionCookiePayload(value: string | undefined) {
+    const raw = value?.trim();
+    if (!raw) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return null;
+      }
+      const normalized = parsed
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => {
+          const cookie = item as Record<string, unknown>;
+          const name = String(cookie.name || '').trim();
+          const value = String(cookie.value || '').trim();
+          if (!name || !value) {
+            return null;
+          }
+          return {
+            name,
+            value,
+            domain: String(cookie.domain || '').trim() || undefined,
+            path: String(cookie.path || '/').trim() || '/',
+            secure: Boolean(cookie.secure),
+            httpOnly: Boolean(cookie.httpOnly),
+            sameSite: String(cookie.sameSite || '').trim() || undefined,
+            expirationDate:
+              typeof cookie.expirationDate === 'number' && Number.isFinite(cookie.expirationDate)
+                ? cookie.expirationDate
+                : undefined,
+          };
+        })
+        .filter(Boolean);
+      return normalized.length ? JSON.stringify(normalized) : null;
+    } catch {
+      return null;
+    }
   }
 
   private readUnknownPath(value: unknown, path: string[]) {

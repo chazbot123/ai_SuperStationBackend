@@ -11,4 +11,9 @@ export class StartPlatformExtensionLoginDto {
   @IsString()
   @MaxLength(80)
   accountId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  externalGroupId?: string;
 }

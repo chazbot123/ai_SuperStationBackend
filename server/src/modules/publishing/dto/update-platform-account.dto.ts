@@ -33,4 +33,9 @@ export class UpdatePlatformAccountDto {
   @IsString()
   @IsIn(PLATFORM_ACCOUNT_STATUSES)
   status?: (typeof PLATFORM_ACCOUNT_STATUSES)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  externalGroupId?: string;
 }

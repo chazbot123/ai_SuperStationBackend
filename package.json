@@ -10,7 +10,10 @@
     "preview": "vite preview --host 127.0.0.1 --port 5173 --strictPort",
     "check": "tsc -b --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "agent:local": "node ./scripts/local-agent/agent.mjs",
+    "agent:serve": "node ./scripts/local-agent/agent.mjs serve",
+    "agent:build-client": "node ./scripts/local-agent/build-client.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -30,6 +33,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.4.1",
+    "@yao-pkg/pkg": "^6.19.0",
     "autoprefixer": "^10.4.21",
     "babel-plugin-react-dev-locator": "^1.0.0",
     "eslint": "^9.25.0",
