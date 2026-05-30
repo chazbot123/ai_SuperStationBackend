@@ -1,0 +1,165 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AgentsService = void 0;
+const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../prisma/prisma.service");
+const rbac_constants_1 = require("../rbac/rbac.constants");
+let AgentsService = class AgentsService {
+    prisma;
+    constructor(prisma) {
+        this.prisma = prisma;
+    }
+    async list(user, query) {
+        const where = this.buildWhere(user, query);
+        const [items, total] = await Promise.all([
+            this.prisma.agent.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (query.page - 1) * query.limit,
+                take: query.limit,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            displayName: true,
+                        },
+                    },
+                },
+            }),
+            this.prisma.agent.count({ where }),
+        ]);
+        return {
+            items,
+            pagination: { page: query.page, limit: query.limit, total },
+        };
+    }
+    async create(user, dto) {
+        await this.ensureMainCompany(user);
+        const code = dto.code.trim().toUpperCase();
+        const existing = await this.prisma.agent.findUnique({
+            where: { code },
+            select: { id: true },
+        });
+        if (existing) {
+            throw new common_1.ConflictException('代理编号已存在');
+        }
+        return this.prisma.agent.create({
+            data: {
+                code,
+                name: dto.name.trim(),
+                ruleId: dto.ruleId?.trim() || null,
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        displayName: true,
+                    },
+                },
+            },
+        });
+    }
+    async getById(user, id) {
+        const agent = await this.findAccessibleAgent(user, id);
+        return this.findAgentWithUser(agent.id);
+    }
+    async update(user, id, dto) {
+        await this.ensureMainCompany(user);
+        await this.ensureAgentExists(id);
+        return this.prisma.agent.update({
+            where: { id },
+            data: {
+                ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+                ...(dto.status !== undefined
+                    ? { status: dto.status }
+                    : {}),
+                ...(dto.ruleId !== undefined ? { ruleId: dto.ruleId.trim() || null } : {}),
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        displayName: true,
+                    },
+                },
+            },
+        });
+    }
+    buildWhere(user, query) {
+        const trimmedQuery = query.q?.trim();
+        const baseWhere = {
+            ...(query.status ? { status: query.status } : {}),
+            ...(trimmedQuery
+                ? {
+                    OR: [
+                        { code: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { name: { contains: trimmedQuery, mode: 'insensitive' } },
+                    ],
+                }
+                : {}),
+        };
+        if (user.role === rbac_constants_1.MAIN_COMPANY_ROLE_KEY) {
+            return baseWhere;
+        }
+        return {
+            ...baseWhere,
+            userId: user.userId,
+        };
+    }
+    async findAccessibleAgent(user, id) {
+        const agent = await this.prisma.agent.findUnique({ where: { id } });
+        if (!agent) {
+            throw new common_1.NotFoundException('代理不存在');
+        }
+        if (user.role !== rbac_constants_1.MAIN_COMPANY_ROLE_KEY && agent.userId !== user.userId) {
+            throw new common_1.ForbiddenException('无权访问该代理');
+        }
+        return agent;
+    }
+    async ensureAgentExists(id) {
+        const agent = await this.prisma.agent.findUnique({
+            where: { id },
+            select: { id: true },
+        });
+        if (!agent) {
+            throw new common_1.NotFoundException('代理不存在');
+        }
+    }
+    async findAgentWithUser(id) {
+        return this.prisma.agent.findUniqueOrThrow({
+            where: { id },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        displayName: true,
+                    },
+                },
+            },
+        });
+    }
+    async ensureMainCompany(user) {
+        if (user.role !== rbac_constants_1.MAIN_COMPANY_ROLE_KEY) {
+            throw new common_1.ForbiddenException('仅主公司可操作代理');
+        }
+    }
+};
+exports.AgentsService = AgentsService;
+exports.AgentsService = AgentsService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+], AgentsService);
+//# sourceMappingURL=agents.service.js.map

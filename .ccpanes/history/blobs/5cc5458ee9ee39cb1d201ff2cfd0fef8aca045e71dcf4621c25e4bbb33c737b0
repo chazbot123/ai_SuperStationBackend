@@ -1,0 +1,36 @@
+import type { BitBrowserBindingRepository } from './bitbrowser.contracts';
+import type { AcquireProfileLockInput, BindBitBrowserProfileInput, BrowserProfileBinding, BusinessOwner, CreateRuntimeCommandInput, CreateRuntimeSessionInput, CreateBusinessOwnerInput, PlatformAccountBinding, PlatformType, ProfileRuntimeLock, RegisterExtensionHandshakeInput, RegisterPlatformAccountInput, ReleaseProfileLockInput, RuntimeCommand, RuntimeSession, UpdateRuntimeCommandStatusInput, UpdateRuntimeSessionStatusInput } from './bitbrowser.types';
+export declare class FileBitBrowserBindingRepository implements BitBrowserBindingRepository {
+    private readonly storageFilePath;
+    private storeWriteQueue;
+    constructor(storageFilePath?: string);
+    createOwner(input: CreateBusinessOwnerInput): Promise<BusinessOwner>;
+    getOwnerById(creatorId: string, ownerId: string): Promise<BusinessOwner | null>;
+    listOwners(creatorId: string): Promise<BusinessOwner[]>;
+    bindProfile(input: BindBitBrowserProfileInput): Promise<BrowserProfileBinding>;
+    getProfileBindingByPlatformAccount(creatorId: string, ownerId: string, platform: PlatformType, accountId?: string | null, accountName?: string | null): Promise<BrowserProfileBinding | null>;
+    getProfileBindingById(creatorId: string, profileBindingId: string): Promise<BrowserProfileBinding | null>;
+    touchProfileBinding(creatorId: string, profileBindingId: string, usedAt: string): Promise<void>;
+    registerPlatformAccount(input: RegisterPlatformAccountInput): Promise<PlatformAccountBinding>;
+    listPlatformAccountsByOwner(creatorId: string, ownerId: string): Promise<PlatformAccountBinding[]>;
+    deleteProfileBindingResourcesByProfileId(creatorId: string, profileId: string): Promise<void>;
+    acquireProfileLock(input: AcquireProfileLockInput): Promise<ProfileRuntimeLock>;
+    getProfileLock(profileBindingId: string): Promise<ProfileRuntimeLock | null>;
+    releaseProfileLock(input: ReleaseProfileLockInput): Promise<void>;
+    createRuntimeSession(input: CreateRuntimeSessionInput): Promise<RuntimeSession>;
+    getRuntimeSessionById(runtimeSessionId: string): Promise<RuntimeSession | null>;
+    listRuntimeSessions(): Promise<RuntimeSession[]>;
+    listRuntimeSessionsByProfileBindingId(profileBindingId: string): Promise<RuntimeSession[]>;
+    registerExtensionHandshake(input: RegisterExtensionHandshakeInput): Promise<RuntimeSession>;
+    updateRuntimeSessionStatus(input: UpdateRuntimeSessionStatusInput): Promise<RuntimeSession>;
+    createRuntimeCommand(input: CreateRuntimeCommandInput): Promise<RuntimeCommand>;
+    listRuntimeCommandsBySessionId(runtimeSessionId: string): Promise<RuntimeCommand[]>;
+    updateRuntimeCommandStatus(input: UpdateRuntimeCommandStatusInput): Promise<RuntimeCommand>;
+    private readStore;
+    private updateStore;
+    private ensureStoreFile;
+    private writeStore;
+    private runExclusiveStoreWrite;
+    private tryParseStore;
+    private extractFirstTopLevelJsonObject;
+}

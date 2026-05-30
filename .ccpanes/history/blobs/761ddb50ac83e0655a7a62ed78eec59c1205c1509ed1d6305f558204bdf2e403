@@ -1,0 +1,26 @@
+import { type SuperSiteIndustryCrawlResult, type SuperSiteIndustrySourceConfig } from './super-site-industry.types';
+export declare class SuperSiteIndustryCrawlerService {
+    private readonly logger;
+    crawl(sourceConfigs: SuperSiteIndustrySourceConfig[], keywords: string[], sourceKeys?: string[]): Promise<SuperSiteIndustryCrawlResult>;
+    private crawlRssSource;
+    private crawlHtmlSource;
+    getSourceLabels(sourceConfigs: SuperSiteIndustrySourceConfig[]): {
+        label: string;
+        key: string;
+        sourceType: import("@prisma/client").SuperSiteIndustrySourceType;
+        enabled: boolean;
+    }[];
+    private hasValidShape;
+    private applyKeywordFilter;
+    private matchBlocks;
+    private matchTag;
+    private matchCdata;
+    private matchAttribute;
+    private stripHtml;
+    private decodeText;
+    private decodeXmlText;
+    private readXmlTagValue;
+    private normalizeSourceUrl;
+    private toAbsoluteUrl;
+    private parseDate;
+}

@@ -1,0 +1,15 @@
+declare const PUBLISH_PLATFORMS: readonly ["xiaohongshu", "douyin", "wechat_mp", "kuaishou", "bilibili", "wechat_official"];
+declare const PLATFORM_ACCOUNT_STATUSES: readonly ["saved", "valid", "invalid", "disabled"];
+declare const PLATFORM_ACCOUNT_LOGIN_STATUSES: readonly ["idle", "pending", "authenticated", "failed", "cancelled"];
+declare const PLATFORM_ACCOUNT_PROVIDERS: readonly ["extension", "mcp", "official_oauth"];
+declare const PLATFORM_ACCOUNT_AUTO_COMPLETE: readonly ["none", "pending"];
+export declare class ListPlatformAccountsQueryDto {
+    platform?: (typeof PUBLISH_PLATFORMS)[number];
+    status?: (typeof PLATFORM_ACCOUNT_STATUSES)[number];
+    loginStatus?: (typeof PLATFORM_ACCOUNT_LOGIN_STATUSES)[number];
+    provider?: (typeof PLATFORM_ACCOUNT_PROVIDERS)[number];
+    autoComplete?: (typeof PLATFORM_ACCOUNT_AUTO_COMPLETE)[number];
+    page: number;
+    limit: number;
+}
+export {};

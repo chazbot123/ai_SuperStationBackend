@@ -1,0 +1,7 @@
+declare const PUBLISH_PLATFORMS: readonly ["xiaohongshu", "douyin", "wechat_mp", "kuaishou"];
+export declare class StartPlatformExtensionLoginDto {
+    platform: (typeof PUBLISH_PLATFORMS)[number];
+    accountId?: string;
+    externalGroupId?: string;
+}
+export {};

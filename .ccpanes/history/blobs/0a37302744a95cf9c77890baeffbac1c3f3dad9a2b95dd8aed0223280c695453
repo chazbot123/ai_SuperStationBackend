@@ -1,0 +1,12 @@
+export declare class KnowledgeParserService {
+    private static readonly MIN_PDF_TEXT_LENGTH;
+    extractText(fileExt: string, buffer: Buffer): Promise<string>;
+    private extractPdfText;
+    private extractDocxText;
+    private extractPptxText;
+    private extractImageText;
+    private extractTextFromPdfScreenshots;
+    private recognizeWithWorker;
+    private hasUsablePdfText;
+    private normalizeExtractedText;
+}

@@ -171,7 +171,13 @@ function resetRuntimeSessionReadyState(session, nextUrl = "") {
   if (nextUrl) {
     session.pageUrl = nextUrl;
   }
-  if (session.pendingCommand && ["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(String(session.pendingCommand.type || "").trim())) {
+  const pendingCommandType = String(session.pendingCommand?.type || "").trim();
+  const publishCommandActive = ["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(pendingCommandType);
+  if (
+    session.pendingCommand &&
+    publishCommandActive &&
+    !session.commandAcked
+  ) {
     session.pendingCommand.dispatched = false;
   }
 }
@@ -1072,18 +1078,40 @@ async function applyPlatformAuthPayload(platform, authPayload, job) {
 
 async function applyPlatformCookiePayload(platform, cookiePayload, job) {
   const parsedCookies = parseCookiePayload(cookiePayload);
+  const targetUrls = getPlatformCookieSetUrls(platform, job);
+  // #region debug-point B6:cookie-payload-parse
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: "bitbrowser-cookie-persist",
+      runId: "post-fix",
+      hypothesisId: "D",
+      location: "scripts/browser-extension/platform-login-helper/background.js:applyPlatformCookiePayload:parsed",
+      msg: "[DEBUG] publish cookie payload parsed",
+      data: {
+        platform,
+        jobId: String(job?.id || ""),
+        parsedCookieCount: parsedCookies.length,
+        targetUrls,
+        cookiePayloadLength: String(cookiePayload || "").length,
+      },
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   if (parsedCookies.length === 0) {
     await applyPlatformAuthPayload(platform, cookiePayload, job);
     return;
   }
 
   const writes = [];
-  const targetUrls = getPlatformCookieSetUrls(platform, job);
+  let skippedByDomain = 0;
   for (const cookie of parsedCookies) {
     for (const targetUrl of targetUrls) {
       const host = new URL(targetUrl).hostname;
       const normalizedDomain = String(cookie.domain || "").trim().replace(/^\./, "");
       if (normalizedDomain && !host.endsWith(normalizedDomain)) {
+        skippedByDomain += 1;
         continue;
       }
       writes.push(
@@ -1106,6 +1134,28 @@ async function applyPlatformCookiePayload(platform, cookiePayload, job) {
   }
 
   const results = await Promise.all(writes);
+  // #region debug-point B7:cookie-payload-write-result
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: "bitbrowser-cookie-persist",
+      runId: "post-fix",
+      hypothesisId: "D",
+      location: "scripts/browser-extension/platform-login-helper/background.js:applyPlatformCookiePayload:write-result",
+      msg: "[DEBUG] publish cookie payload write result",
+      data: {
+        platform,
+        jobId: String(job?.id || ""),
+        parsedCookieCount: parsedCookies.length,
+        attemptedWrites: writes.length,
+        successfulWrites: results.filter(Boolean).length,
+        skippedByDomain,
+        targetUrls,
+      },
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   if (!results.some(Boolean)) {
     throw new Error("所选账号原始 Cookie 注入失败，请重新登录该账号后再试");
   }
@@ -1158,6 +1208,27 @@ async function syncLoginResult(session, context) {
   try {
     const authPayload = await collectPlatformCookies(session.platform);
     const cookiePayload = await collectPlatformCookiePayload(session.platform);
+    // #region debug-point B1:cookie-collect
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "bitbrowser-cookie-persist",
+        runId: "post-fix",
+        hypothesisId: "A",
+        location: "scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:cookie-collected",
+        msg: "[DEBUG] login cookies collected",
+        data: {
+          platform: session.platform,
+          sessionId: session.sessionId,
+          runtimeSessionId: session.runtimeSessionId || "",
+          authPayloadLength: authPayload ? authPayload.length : 0,
+          cookiePayloadLength: cookiePayload ? cookiePayload.length : 0,
+          sourceUrl: String(context?.url || ""),
+        },
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     if (!authPayload || authPayload.length < 20) {
       throw new Error("当前页面还没有可用的登录 Cookie，请先完成平台登录。");
     }
@@ -1174,6 +1245,7 @@ async function syncLoginResult(session, context) {
     const hasResolvedProfile = Boolean(
       accountName || externalAccountId || displayName || avatarUrl || followerCount !== null,
     );
+    const hasPrimaryWechatIdentity = Boolean(accountName || externalAccountId || displayName);
     // #region debug-point P2:sync-login-context
     fetch("http://127.0.0.1:7777/event", {
       method: "POST",
@@ -1205,8 +1277,8 @@ async function syncLoginResult(session, context) {
 
     const shouldDeferWechatLoginSync =
       session.platform === "wechat_mp" &&
-      !hasResolvedProfile &&
-      /channels\.weixin\.qq\.com\/login(?:\.html)?/i.test(sourceUrl);
+      (!hasPrimaryWechatIdentity ||
+        /channels\.weixin\.qq\.com\/login(?:\.html)?/i.test(sourceUrl));
     if (shouldDeferWechatLoginSync) {
       return;
     }
@@ -1263,6 +1335,27 @@ async function syncLoginResult(session, context) {
       session.runtimeSessionId = null;
       session.runtimeCommandId = "";
     }
+    // #region debug-point B2:login-close-tab
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "bitbrowser-cookie-persist",
+        runId: "post-fix",
+        hypothesisId: "C",
+        location: "scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:before-close-login-tab",
+        msg: "[DEBUG] login sync completed before close tab",
+        data: {
+          platform: session.platform,
+          sessionId: session.sessionId,
+          accountId: String(payload?.account?.id || ""),
+          accountName: String(payload?.account?.accountName || ""),
+          loginTabId: Number(session.loginTabId || 0),
+          appTabId: Number(session.appTabId || 0),
+        },
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     notifyApp(session, {
       source: "ai-superweb-extension",
       type: "AI_SUPERWEB_EXTENSION_LOGIN_SYNCED",
@@ -1559,6 +1652,57 @@ function getPublishSessionByTabId(tabId) {
   return null;
 }
 
+function getOrBuildRuntimePublishSession(runtimeSession) {
+  if (!runtimeSession?.pendingCommand) {
+    return null;
+  }
+  const pendingCommandType = String(runtimeSession.pendingCommand.type || "").trim();
+  if (!["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(pendingCommandType)) {
+    return null;
+  }
+  const dispatchSession = buildRuntimePublishDispatchSession(
+    runtimeSession.runtimeSessionId,
+    runtimeSession.pendingCommand,
+    runtimeSession.platform,
+  );
+  const existingSession = Array.from(activePublishSessions.values()).find((item) => {
+    const itemJobId = String(item?.job?.id || "").trim();
+    const dispatchJobId = String(dispatchSession.job?.id || "").trim();
+    const itemSessionToken = String(item?.sessionToken || "").trim();
+    const dispatchSessionToken = String(dispatchSession.sessionToken || "").trim();
+    return (
+      (dispatchJobId && itemJobId === dispatchJobId) ||
+      (dispatchSessionToken && itemSessionToken === dispatchSessionToken)
+    );
+  });
+  if (existingSession) {
+    existingSession.runtimeSessionId = runtimeSession.runtimeSessionId;
+    existingSession.runtimeCommandId = dispatchSession.runtimeCommandId;
+    existingSession.platform = dispatchSession.platform;
+    existingSession.apiBaseUrl = runtimeSession.apiBaseUrl || existingSession.apiBaseUrl;
+    existingSession.tabId = runtimeSession.tabId || existingSession.tabId;
+    existingSession.job = dispatchSession.job;
+    existingSession.sessionToken = dispatchSession.sessionToken;
+    return existingSession;
+  }
+  return {
+    sessionToken: dispatchSession.sessionToken,
+    platform: dispatchSession.platform,
+    apiBaseUrl: runtimeSession.apiBaseUrl,
+    appTabId: null,
+    tabId: runtimeSession.tabId,
+    job: dispatchSession.job,
+    status: "pending",
+    lastDispatchUrl: "",
+    lastDispatchAt: 0,
+    dispatching: false,
+    lastPageReadyUrl: "",
+    lastPageReadyAt: 0,
+    runtimeSessionId: runtimeSession.runtimeSessionId,
+    runtimeCommandId: dispatchSession.runtimeCommandId,
+  };
+}
+
 async function syncPublishResult(session, payload) {
   if (!session || !payload?.status) {
     return;
@@ -1655,6 +1799,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             jobId: payload.session?.job?.id || "",
             hasVideo: Boolean(payload.session?.job?.draftVideoUrl),
           });
+          // #region debug-point B8:start-publish-payload
+          fetch("http://127.0.0.1:7777/event", {
+            method: "POST",
+            body: JSON.stringify({
+              sessionId: "bitbrowser-cookie-persist",
+              runId: "post-fix",
+              hypothesisId: "D",
+              location: "scripts/browser-extension/platform-login-helper/background.js:onMessage:START_PUBLISH",
+              msg: "[DEBUG] start publish payload",
+              data: {
+                platform: payload.platform,
+                jobId: String(payload.session?.job?.id || ""),
+                sessionTokenLength: String(payload.session?.sessionToken || "").length,
+                accountCookiePayloadLength: String(payload.session?.accountCookiePayload || "").length,
+                accountAuthPayloadLength: String(payload.session?.accountAuthPayload || "").length,
+                targetUrl: getPlatformPublishUrl(payload.platform, payload.session?.job),
+              },
+              ts: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
           const accountAuthPayload = await resolveExtensionPublishAuthPayload(
             payload.apiBaseUrl,
             payload.session,
@@ -2073,21 +2238,78 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       try {
         const status = String(message.payload.status || "").trim();
+        const runtimePublishSession = getOrBuildRuntimePublishSession(runtimeSession);
+        const resultPayload =
+          message.payload.resultPayload && typeof message.payload.resultPayload === "object"
+            ? message.payload.resultPayload
+            : {};
         if (status === "running") {
           await ackRuntimeCommand(runtimeSession);
         } else if (status === "success") {
-          await completeRuntimeCommand(runtimeSession, message.payload.resultPayload || {});
+          await completeRuntimeCommand(runtimeSession, resultPayload);
         } else if (status === "failed") {
           await failRuntimeCommand(
             runtimeSession,
             message.payload.lastError || message.payload.message || "扩展本地发布失败",
           );
         }
+        if (runtimePublishSession && ["running", "success", "failed"].includes(status)) {
+          void syncPublishResult(runtimePublishSession, {
+            status,
+            draftUrl:
+              String(message.payload.draftUrl || "").trim() ||
+              String(resultPayload.draftUrl || "").trim(),
+            lastError:
+              String(message.payload.lastError || "").trim() ||
+              String(message.payload.message || "").trim() ||
+              String(resultPayload.lastError || "").trim(),
+            sourceUrl:
+              String(message.payload.sourceUrl || "").trim() ||
+              String(resultPayload.sourceUrl || "").trim(),
+            accountName: String(resultPayload.accountName || "").trim(),
+            displayName: String(resultPayload.displayName || "").trim(),
+          });
+        }
         sendResponseSafe(sendResponse, { ok: true });
       } catch (error) {
         sendResponseSafe(sendResponse, {
           ok: false,
           message: error instanceof Error ? error.message : "扩展命令状态同步失败",
+        });
+      }
+    })();
+    return true;
+  }
+
+  if (message?.type === "AI_SUPERWEB_CDP_CLICK") {
+    const { x, y } = message.payload || {};
+    const tabId = sender.tab?.id;
+    if (!tabId || typeof x !== "number" || typeof y !== "number") {
+      sendResponseSafe(sendResponse, { ok: false, message: "missing params" });
+      return true;
+    }
+    (async () => {
+      try {
+        await chrome.debugger.attach({ tabId }, "1.3");
+        const dispatchClick = (type, clickCount = 1) =>
+          chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", {
+            type,
+            x: Math.round(x),
+            y: Math.round(y),
+            button: "left",
+            clickCount,
+          });
+        await dispatchClick("mousePressed");
+        await new Promise((r) => setTimeout(r, 80));
+        await dispatchClick("mouseReleased");
+        await new Promise((r) => setTimeout(r, 100));
+        await chrome.debugger.detach({ tabId });
+        sendResponseSafe(sendResponse, { ok: true });
+      } catch (error) {
+        try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+        sendResponseSafe(sendResponse, {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
         });
       }
     })();

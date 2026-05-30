@@ -116,14 +116,6 @@ export class BitBrowserProfileService {
         new Date().toISOString(),
       );
 
-      if (input.reason === 'login') {
-        await this.runtimeProvider.openPlatformHome(
-          context.profileBinding,
-          input.platform,
-          runtime,
-        );
-      }
-
       return { runtime, context };
     } catch (error) {
       await this.repository.releaseProfileLock({
@@ -273,23 +265,7 @@ export class BitBrowserProfileService {
   }
 
   private async findProfileBindingById(creatorId: string, profileBindingId: string) {
-    const owners = await this.repository.listOwners(creatorId);
-    for (const owner of owners) {
-      const accounts = await this.repository.listPlatformAccountsByOwner(creatorId, owner.id);
-      for (const account of accounts) {
-        const dedicated = await this.repository.getProfileBindingByPlatformAccount(
-          creatorId,
-          owner.id,
-          account.platform,
-          account.accountId || account.id,
-          account.accountName,
-        );
-        if (dedicated?.id === profileBindingId) {
-          return dedicated;
-        }
-      }
-    }
-    return null;
+    return this.repository.getProfileBindingById(creatorId, profileBindingId);
   }
 
   private async assertOwnerExists(creatorId: string, ownerId: string) {

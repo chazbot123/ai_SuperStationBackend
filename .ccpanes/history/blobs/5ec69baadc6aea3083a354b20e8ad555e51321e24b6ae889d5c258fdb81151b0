@@ -1,0 +1,37 @@
+import type { BitBrowserRuntimeFacade } from './bitbrowser.bootstrap';
+import type { AckRuntimeCommandPayload, CompleteRuntimeCommandPayload, ExtensionHeartbeatPayload, ExtensionPageReadyBindPayload, ExtensionReadyPayload, FailRuntimeCommandPayload, PullRuntimeCommandPayload, QueueLoginCommandPayload, QueuePublishCommandPayload } from './bitbrowser.extension-bridge.types';
+import type { BitBrowserHttpErrorResponse, BitBrowserHttpRequest, BitBrowserHttpResponse, BitBrowserHttpSuccessResponse } from './bitbrowser.http-api.types';
+import type { CreateBusinessOwnerInput, PrepareOwnerRuntimeInput, RegisterPlatformAccountInput, ReleaseProfileLockInput } from './bitbrowser.types';
+type ResponseBody<T = unknown> = BitBrowserHttpSuccessResponse<T> | BitBrowserHttpErrorResponse;
+export declare class BitBrowserHttpController {
+    private readonly facade;
+    constructor(facade: BitBrowserRuntimeFacade);
+    createOwner(request: BitBrowserHttpRequest<CreateBusinessOwnerInput>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    registerPlatformAccount(request: BitBrowserHttpRequest<RegisterPlatformAccountInput>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    openRuntimeSession(request: BitBrowserHttpRequest<PrepareOwnerRuntimeInput>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    closeRuntimeSession(request: BitBrowserHttpRequest<ReleaseProfileLockInput & {
+        runtimeSessionId: string;
+        status?: 'completed' | 'failed' | 'closed';
+    }>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    registerExtensionReady(request: BitBrowserHttpRequest<ExtensionReadyPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    pageReadyBind(request: BitBrowserHttpRequest<ExtensionPageReadyBindPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    heartbeat(request: BitBrowserHttpRequest<ExtensionHeartbeatPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    queueLoginPrepare(request: BitBrowserHttpRequest<QueueLoginCommandPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    queueLoginExecute(request: BitBrowserHttpRequest<QueueLoginCommandPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    queuePublishCommand(request: BitBrowserHttpRequest<QueuePublishCommandPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    pullNextCommand(request: BitBrowserHttpRequest<PullRuntimeCommandPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    ackCommand(request: BitBrowserHttpRequest<AckRuntimeCommandPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    completeCommand(request: BitBrowserHttpRequest<CompleteRuntimeCommandPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    failCommand(request: BitBrowserHttpRequest<FailRuntimeCommandPayload>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    writeDebugEvent(request: BitBrowserHttpRequest<Record<string, unknown>>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    getRuntimeSession(request: BitBrowserHttpRequest<{
+        runtimeSessionId: string;
+    }>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    listSessionCommands(request: BitBrowserHttpRequest<{
+        runtimeSessionId: string;
+    }>): Promise<BitBrowserHttpResponse<ResponseBody>>;
+    error(error: unknown, status?: number): BitBrowserHttpResponse<ResponseBody>;
+    private ok;
+    private requireBody;
+}
+export {};

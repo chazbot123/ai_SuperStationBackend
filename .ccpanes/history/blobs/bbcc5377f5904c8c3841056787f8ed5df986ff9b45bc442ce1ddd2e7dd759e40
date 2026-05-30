@@ -1,0 +1,67 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PublishingModule = void 0;
+const common_1 = require("@nestjs/common");
+const jwt_1 = require("@nestjs/jwt");
+const config_1 = require("@nestjs/config");
+const prisma_module_1 = require("../prisma/prisma.module");
+const products_module_1 = require("../products/products.module");
+const publishing_cleanup_service_1 = require("./publishing-cleanup.service");
+const publishing_controller_1 = require("./publishing.controller");
+const publishing_bitbrowser_controller_1 = require("./publishing-bitbrowser.controller");
+const publishing_extension_controller_1 = require("./publishing-extension.controller");
+const publishing_oauth_controller_1 = require("./publishing-oauth.controller");
+const publishing_store_search_service_1 = require("./publishing-store-search.service");
+const platform_login_browser_service_1 = require("./platform-login-browser.service");
+const douyin_share_schema_service_1 = require("./douyin-share-schema.service");
+const kuaishou_open_api_service_1 = require("./kuaishou-open-api.service");
+const wechat_official_publish_service_1 = require("./wechat-official-publish.service");
+const bilibili_open_api_service_1 = require("./bilibili-open-api.service");
+const publishing_bitbrowser_service_1 = require("./publishing-bitbrowser.service");
+const publishing_service_1 = require("./publishing.service");
+let PublishingModule = class PublishingModule {
+};
+exports.PublishingModule = PublishingModule;
+exports.PublishingModule = PublishingModule = __decorate([
+    (0, common_1.Module)({
+        imports: [
+            config_1.ConfigModule,
+            jwt_1.JwtModule.registerAsync({
+                imports: [config_1.ConfigModule],
+                inject: [config_1.ConfigService],
+                useFactory: (configService) => ({
+                    secret: configService.get('JWT_SECRET') ?? 'change_me_jwt_secret',
+                    signOptions: {
+                        expiresIn: (configService.get('JWT_EXPIRES_IN') ?? '30d'),
+                    },
+                }),
+            }),
+            prisma_module_1.PrismaModule,
+            products_module_1.ProductsModule,
+        ],
+        controllers: [
+            publishing_controller_1.PublishingController,
+            publishing_extension_controller_1.PublishingExtensionController,
+            publishing_oauth_controller_1.PublishingOauthController,
+            publishing_bitbrowser_controller_1.PublishingBitBrowserController,
+        ],
+        providers: [
+            publishing_service_1.PublishingService,
+            platform_login_browser_service_1.PlatformLoginBrowserService,
+            douyin_share_schema_service_1.DouyinShareSchemaService,
+            kuaishou_open_api_service_1.KuaishouOpenApiService,
+            wechat_official_publish_service_1.WechatOfficialPublishService,
+            bilibili_open_api_service_1.BilibiliOpenApiService,
+            publishing_bitbrowser_service_1.PublishingBitBrowserService,
+            publishing_cleanup_service_1.PublishingCleanupService,
+            publishing_store_search_service_1.PublishingStoreSearchService,
+        ],
+    })
+], PublishingModule);
+//# sourceMappingURL=publishing.module.js.map

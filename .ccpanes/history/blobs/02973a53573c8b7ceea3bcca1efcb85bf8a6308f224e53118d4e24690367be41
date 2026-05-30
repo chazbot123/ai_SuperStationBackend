@@ -1,0 +1,32 @@
+import type { BitBrowserBindingRepository } from './bitbrowser.contracts';
+import { BitBrowserProfileService } from './bitbrowser.service';
+import type { CreateRuntimeCommandInput, PlatformType, PrepareOwnerRuntimeInput, RegisterExtensionHandshakeInput, RuntimeCommand, RuntimeSession, RuntimeSessionStatus, UpdateRuntimeCommandStatusInput } from './bitbrowser.types';
+export declare class BitBrowserRuntimeSessionError extends Error {
+}
+export declare class BitBrowserRuntimeSessionNotReadyError extends BitBrowserRuntimeSessionError {
+}
+export interface OpenRuntimeSessionResult {
+    session: RuntimeSession;
+    context: Awaited<ReturnType<BitBrowserProfileService['prepareOwnerRuntime']>>['context'];
+    runtime: Awaited<ReturnType<BitBrowserProfileService['prepareOwnerRuntime']>>['runtime'];
+}
+export declare class BitBrowserRuntimeSessionService {
+    private readonly repository;
+    private readonly profileService;
+    constructor(repository: BitBrowserBindingRepository, profileService: BitBrowserProfileService);
+    openRuntimeSession(input: PrepareOwnerRuntimeInput): Promise<OpenRuntimeSessionResult>;
+    registerExtensionReady(input: RegisterExtensionHandshakeInput): Promise<RuntimeSession>;
+    markHeartbeat(runtimeSessionId: string, pageUrl?: string | null): Promise<RuntimeSession>;
+    markSessionStatus(runtimeSessionId: string, status: RuntimeSessionStatus, pageUrl?: string | null): Promise<RuntimeSession>;
+    queueCommand(input: CreateRuntimeCommandInput): Promise<RuntimeCommand>;
+    dispatchCommand(runtimeCommandId: string): Promise<RuntimeCommand>;
+    ackCommand(runtimeCommandId: string): Promise<RuntimeCommand>;
+    completeCommand(runtimeCommandId: string, resultPayload?: Record<string, unknown> | null): Promise<RuntimeCommand>;
+    failCommand(runtimeCommandId: string, errorMessage: string): Promise<RuntimeCommand>;
+    listSessionCommands(runtimeSessionId: string): Promise<RuntimeCommand[]>;
+    getRuntimeSession(runtimeSessionId: string): Promise<RuntimeSession | null>;
+    findLatestAwaitingExtensionSession(platform: PlatformType): Promise<RuntimeSession | null>;
+    closeRuntimeSession(runtimeSessionId: string, status: 'completed' | 'failed' | 'closed'): Promise<RuntimeSession>;
+    updateCommandStatus(input: UpdateRuntimeCommandStatusInput): Promise<RuntimeCommand>;
+    private assertSessionReady;
+}

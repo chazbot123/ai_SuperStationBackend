@@ -1,0 +1,656 @@
+import { SessionUser } from '../auth/auth.types';
+import { CreatePlatformAccountDto } from './dto/create-platform-account.dto';
+import { ImportGaodeStoresDto } from './dto/import-gaode-stores.dto';
+import { ListStoreSearchRegionsQueryDto } from './dto/list-store-search-regions-query.dto';
+import { ListPublishingContentsQueryDto } from './dto/list-publishing-contents-query.dto';
+import { ListPublishingJobsQueryDto } from './dto/list-publishing-jobs-query.dto';
+import { ListPlatformAccountsQueryDto } from './dto/list-platform-accounts-query.dto';
+import { PublishLeadContentDto } from './dto/publish-lead-content.dto';
+import { SearchGaodeStoresDto } from './dto/search-gaode-stores.dto';
+import { StartMcpPlatformLoginDto } from './dto/start-mcp-platform-login.dto';
+import { StartPlatformExtensionLoginDto } from './dto/start-platform-extension-login.dto';
+import { StartPlatformLoginDto } from './dto/start-platform-login.dto';
+import { SyncPublishingContentDto } from './dto/sync-publishing-content.dto';
+import { UpdateStoreSearchConfigDto } from './dto/update-store-search-config.dto';
+import { UpdatePlatformAccountDto } from './dto/update-platform-account.dto';
+import { PublishingStoreSearchService } from './publishing-store-search.service';
+import { PublishingService } from './publishing.service';
+export declare class PublishingController {
+    private readonly publishingService;
+    private readonly publishingStoreSearchService;
+    constructor(publishingService: PublishingService, publishingStoreSearchService: PublishingStoreSearchService);
+    listContents(req: {
+        user: SessionUser;
+    }, query: ListPublishingContentsQueryDto): Promise<{
+        items: {
+            id: string;
+            creatorId: string;
+            creatorName: string;
+            sourceType: import("@prisma/client").$Enums.LeadContentSourceType;
+            sourceId: string | null;
+            title: string;
+            body: string;
+            tags: string[];
+            contentType: import("@prisma/client").$Enums.LeadContentType;
+            platformStyle: import("@prisma/client").$Enums.LeadPublishPlatform;
+            coverImage: string | null;
+            images: string[];
+            videoUrl: string | null;
+            status: import("@prisma/client").$Enums.LeadContentStatus;
+            createdAt: string;
+            updatedAt: string;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    getContentById(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        sourceType: import("@prisma/client").$Enums.LeadContentSourceType;
+        sourceId: string | null;
+        title: string;
+        body: string;
+        tags: string[];
+        contentType: import("@prisma/client").$Enums.LeadContentType;
+        platformStyle: import("@prisma/client").$Enums.LeadPublishPlatform;
+        coverImage: string | null;
+        images: string[];
+        videoUrl: string | null;
+        status: import("@prisma/client").$Enums.LeadContentStatus;
+        createdAt: string;
+        updatedAt: string;
+        publishJobs: {
+            id: string;
+            leadContentId: string;
+            createdById: string;
+            platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+            provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+            platformAccountId: string | null;
+            publishMode: "draft_box";
+            status: import("@prisma/client").$Enums.LeadPublishStatus;
+            draftTitle: string;
+            draftBody: string;
+            draftTags: string[];
+            draftImages: string[];
+            draftVideoUrl: string | null;
+            draftUrl: string | null;
+            externalDraftId: string | null;
+            externalFlowId: string | null;
+            externalStatus: string | null;
+            draftedAt: string | null;
+            queuedAt: string | null;
+            startedAt: string | null;
+            completedAt: string | null;
+            lastError: string | null;
+            createdAt: string;
+            updatedAt: string;
+        }[];
+    }>;
+    syncFromSource(req: {
+        user: SessionUser;
+    }, dto: SyncPublishingContentDto): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        sourceType: import("@prisma/client").$Enums.LeadContentSourceType;
+        sourceId: string | null;
+        title: string;
+        body: string;
+        tags: string[];
+        contentType: import("@prisma/client").$Enums.LeadContentType;
+        platformStyle: import("@prisma/client").$Enums.LeadPublishPlatform;
+        coverImage: string | null;
+        images: string[];
+        videoUrl: string | null;
+        status: import("@prisma/client").$Enums.LeadContentStatus;
+        createdAt: string;
+        updatedAt: string;
+        publishJobs: {
+            id: string;
+            leadContentId: string;
+            createdById: string;
+            platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+            provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+            platformAccountId: string | null;
+            publishMode: "draft_box";
+            status: import("@prisma/client").$Enums.LeadPublishStatus;
+            draftTitle: string;
+            draftBody: string;
+            draftTags: string[];
+            draftImages: string[];
+            draftVideoUrl: string | null;
+            draftUrl: string | null;
+            externalDraftId: string | null;
+            externalFlowId: string | null;
+            externalStatus: string | null;
+            draftedAt: string | null;
+            queuedAt: string | null;
+            startedAt: string | null;
+            completedAt: string | null;
+            lastError: string | null;
+            createdAt: string;
+            updatedAt: string;
+        }[];
+    }>;
+    publishContent(req: {
+        user: SessionUser;
+    }, id: string, dto: PublishLeadContentDto): Promise<{
+        contentId: string;
+        jobs: {
+            leadContentTitle: string;
+            platformAccountId: string | null;
+            platformAccountName: string | null;
+            platformAccountDisplayName: string | null;
+            id: string;
+            leadContentId: string;
+            createdById: string;
+            platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+            provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+            publishMode: "draft_box";
+            status: import("@prisma/client").$Enums.LeadPublishStatus;
+            draftTitle: string;
+            draftBody: string;
+            draftTags: string[];
+            draftImages: string[];
+            draftVideoUrl: string | null;
+            draftUrl: string | null;
+            externalDraftId: string | null;
+            externalFlowId: string | null;
+            externalStatus: string | null;
+            draftedAt: string | null;
+            queuedAt: string | null;
+            startedAt: string | null;
+            completedAt: string | null;
+            lastError: string | null;
+            createdAt: string;
+            updatedAt: string;
+        }[];
+    }>;
+    getStoreSearchConfig(req: {
+        user: SessionUser;
+    }): Promise<{
+        keywords: string[];
+        provinceAdcode: string;
+        provinceName: string;
+        cityAdcode: string;
+        cityName: string;
+        districtAdcode: string;
+        districtName: string;
+        streetAdcode: string;
+        streetName: string;
+    }>;
+    updateStoreSearchConfig(req: {
+        user: SessionUser;
+    }, dto: UpdateStoreSearchConfigDto): Promise<{
+        keywords: string[];
+        provinceAdcode: string;
+        provinceName: string;
+        cityAdcode: string;
+        cityName: string;
+        districtAdcode: string;
+        districtName: string;
+        streetAdcode: string;
+        streetName: string;
+    }>;
+    listStoreSearchRegions(req: {
+        user: SessionUser;
+    }, query: ListStoreSearchRegionsQueryDto): Promise<{
+        items: {
+            name: string;
+            adcode: string;
+            level: string;
+            center: {
+                lng: number;
+                lat: number;
+            } | null;
+        }[];
+    }>;
+    searchStores(req: {
+        user: SessionUser;
+    }, dto: SearchGaodeStoresDto): Promise<{
+        keywords: string[];
+        resolvedRegion: {
+            name: string;
+            adcode: string;
+            level: string;
+            center: {
+                lng: number;
+                lat: number;
+            } | null;
+        };
+        sliceRegions: {
+            name: string;
+            adcode: string;
+            level: string;
+            center: {
+                lng: number;
+                lat: number;
+            } | null;
+        }[];
+        items: {
+            amapId: string;
+            name: string;
+            matchedKeywords: string[];
+            telRaw: string;
+            primaryPhone: string;
+            address: string;
+            pname: string;
+            cityname: string;
+            adname: string;
+            businessArea: string;
+            type: string;
+            typecode: string;
+            locationLng: number | null;
+            locationLat: number | null;
+            website: string;
+            rating: string;
+            cost: string;
+        }[];
+        total: number;
+        partialByBudget: boolean;
+        upstreamRequestCount: number;
+        staticMapUrl: string;
+    }>;
+    importStores(req: {
+        user: SessionUser;
+    }, dto: ImportGaodeStoresDto): Promise<{
+        createdCount: number;
+        skippedCount: number;
+    }>;
+    listJobs(req: {
+        user: SessionUser;
+    }, query: ListPublishingJobsQueryDto): Promise<{
+        items: {
+            leadContentTitle: string;
+            platformAccountId: string | null;
+            platformAccountName: string | null;
+            platformAccountDisplayName: string | null;
+            id: string;
+            leadContentId: string;
+            createdById: string;
+            platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+            provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+            publishMode: "draft_box";
+            status: import("@prisma/client").$Enums.LeadPublishStatus;
+            draftTitle: string;
+            draftBody: string;
+            draftTags: string[];
+            draftImages: string[];
+            draftVideoUrl: string | null;
+            draftUrl: string | null;
+            externalDraftId: string | null;
+            externalFlowId: string | null;
+            externalStatus: string | null;
+            draftedAt: string | null;
+            queuedAt: string | null;
+            startedAt: string | null;
+            completedAt: string | null;
+            lastError: string | null;
+            createdAt: string;
+            updatedAt: string;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    getJobById(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        leadContentTitle: string;
+        platformAccountId: string | null;
+        platformAccountName: string | null;
+        platformAccountDisplayName: string | null;
+        id: string;
+        leadContentId: string;
+        createdById: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        publishMode: "draft_box";
+        status: import("@prisma/client").$Enums.LeadPublishStatus;
+        draftTitle: string;
+        draftBody: string;
+        draftTags: string[];
+        draftImages: string[];
+        draftVideoUrl: string | null;
+        draftUrl: string | null;
+        externalDraftId: string | null;
+        externalFlowId: string | null;
+        externalStatus: string | null;
+        draftedAt: string | null;
+        queuedAt: string | null;
+        startedAt: string | null;
+        completedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    retryJob(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        leadContentTitle: string;
+        platformAccountId: string | null;
+        platformAccountName: string | null;
+        platformAccountDisplayName: string | null;
+        id: string;
+        leadContentId: string;
+        createdById: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        publishMode: "draft_box";
+        status: import("@prisma/client").$Enums.LeadPublishStatus;
+        draftTitle: string;
+        draftBody: string;
+        draftTags: string[];
+        draftImages: string[];
+        draftVideoUrl: string | null;
+        draftUrl: string | null;
+        externalDraftId: string | null;
+        externalFlowId: string | null;
+        externalStatus: string | null;
+        draftedAt: string | null;
+        queuedAt: string | null;
+        startedAt: string | null;
+        completedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    deleteJob(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+    }>;
+    listPlatformAccounts(req: {
+        user: SessionUser;
+    }, query: ListPlatformAccountsQueryDto): Promise<{
+        items: {
+            id: string;
+            creatorId: string;
+            creatorName: string;
+            platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+            provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+            authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+            accountName: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+            followerCount: number | null;
+            authPayloadPreview: string;
+            loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+            loginUrl: string | null;
+            externalAccountId: string | null;
+            externalGroupId: string | null;
+            loginSourceLabel: string;
+            status: import("@prisma/client").$Enums.PlatformAccountStatus;
+            remark: string | null;
+            lastLoginStartedAt: string | null;
+            lastLoginCompletedAt: string | null;
+            lastValidatedAt: string | null;
+            lastError: string | null;
+            createdAt: string;
+            updatedAt: string;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    createPlatformAccount(req: {
+        user: SessionUser;
+    }, dto: CreatePlatformAccountDto): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+        accountName: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+        authPayloadPreview: string;
+        loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+        loginUrl: string | null;
+        externalAccountId: string | null;
+        externalGroupId: string | null;
+        loginSourceLabel: string;
+        status: import("@prisma/client").$Enums.PlatformAccountStatus;
+        remark: string | null;
+        lastLoginStartedAt: string | null;
+        lastLoginCompletedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    startPlatformLogin(req: {
+        user: SessionUser;
+    }, dto: StartPlatformLoginDto): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+        accountName: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+        authPayloadPreview: string;
+        loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+        loginUrl: string | null;
+        externalAccountId: string | null;
+        externalGroupId: string | null;
+        loginSourceLabel: string;
+        status: import("@prisma/client").$Enums.PlatformAccountStatus;
+        remark: string | null;
+        lastLoginStartedAt: string | null;
+        lastLoginCompletedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    startPlatformExtensionLogin(req: {
+        user: SessionUser;
+    }, dto: StartPlatformExtensionLoginDto): Promise<{
+        sessionId: string;
+        sessionToken: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        accountId: string;
+        externalGroupId: string;
+        expiresAt: string;
+        loginUrl: string;
+        runtimeSessionId: string;
+        profileId: string;
+        ownerId: string;
+        bridgeBaseUrl: string;
+    }>;
+    startPlatformMcpLogin(req: {
+        user: SessionUser;
+    }, dto: StartMcpPlatformLoginDto): Promise<void>;
+    updatePlatformAccount(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdatePlatformAccountDto): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+        accountName: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+        authPayloadPreview: string;
+        loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+        loginUrl: string | null;
+        externalAccountId: string | null;
+        externalGroupId: string | null;
+        loginSourceLabel: string;
+        status: import("@prisma/client").$Enums.PlatformAccountStatus;
+        remark: string | null;
+        lastLoginStartedAt: string | null;
+        lastLoginCompletedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    deletePlatformAccount(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+    }>;
+    validatePlatformAccount(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+        accountName: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+        authPayloadPreview: string;
+        loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+        loginUrl: string | null;
+        externalAccountId: string | null;
+        externalGroupId: string | null;
+        loginSourceLabel: string;
+        status: import("@prisma/client").$Enums.PlatformAccountStatus;
+        remark: string | null;
+        lastLoginStartedAt: string | null;
+        lastLoginCompletedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    restartPlatformLogin(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+        accountName: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+        authPayloadPreview: string;
+        loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+        loginUrl: string | null;
+        externalAccountId: string | null;
+        externalGroupId: string | null;
+        loginSourceLabel: string;
+        status: import("@prisma/client").$Enums.PlatformAccountStatus;
+        remark: string | null;
+        lastLoginStartedAt: string | null;
+        lastLoginCompletedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    completePlatformLogin(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+        accountName: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+        authPayloadPreview: string;
+        loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+        loginUrl: string | null;
+        externalAccountId: string | null;
+        externalGroupId: string | null;
+        loginSourceLabel: string;
+        status: import("@prisma/client").$Enums.PlatformAccountStatus;
+        remark: string | null;
+        lastLoginStartedAt: string | null;
+        lastLoginCompletedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    checkPlatformLogin(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+        accountName: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+        authPayloadPreview: string;
+        loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+        loginUrl: string | null;
+        externalAccountId: string | null;
+        externalGroupId: string | null;
+        loginSourceLabel: string;
+        status: import("@prisma/client").$Enums.PlatformAccountStatus;
+        remark: string | null;
+        lastLoginStartedAt: string | null;
+        lastLoginCompletedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    cancelPlatformLogin(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        creatorId: string;
+        creatorName: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+        accountName: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+        authPayloadPreview: string;
+        loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+        loginUrl: string | null;
+        externalAccountId: string | null;
+        externalGroupId: string | null;
+        loginSourceLabel: string;
+        status: import("@prisma/client").$Enums.PlatformAccountStatus;
+        remark: string | null;
+        lastLoginStartedAt: string | null;
+        lastLoginCompletedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    } | {
+        id: string;
+        deleted: boolean;
+    }>;
+}

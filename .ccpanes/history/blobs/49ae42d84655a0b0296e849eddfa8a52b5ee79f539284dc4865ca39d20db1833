@@ -1,0 +1,101 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_PERMISSION_MATRIX = exports.DEFAULT_ROLES = exports.MAIN_COMPANY_ROLE_KEY = void 0;
+exports.buildEmptyPermissionMap = buildEmptyPermissionMap;
+const update_permission_matrix_dto_1 = require("./dto/update-permission-matrix.dto");
+exports.MAIN_COMPANY_ROLE_KEY = 'main_company';
+exports.DEFAULT_ROLES = [
+    {
+        key: exports.MAIN_COMPANY_ROLE_KEY,
+        name: '主公司',
+        description: '全局后台管理权限',
+        isSystem: true,
+    },
+    {
+        key: 'level1_agent',
+        name: '1级代理',
+        description: '代理账号，可访问代理侧页面',
+        isSystem: true,
+    },
+    {
+        key: 'department_admin',
+        name: '部门管理员',
+        description: '部门级管理角色',
+        isSystem: true,
+    },
+    {
+        key: 'employee',
+        name: '普通员工',
+        description: '普通员工基础角色',
+        isSystem: true,
+    },
+];
+exports.DEFAULT_PERMISSION_MATRIX = {
+    main_company: {
+        dashboard: true,
+        studio: true,
+        publishing: true,
+        products: true,
+        assets: true,
+        customerManagement: true,
+        videos: true,
+        support: true,
+        personalization: true,
+        agents: true,
+        rules: true,
+        reviews: true,
+        rbac: true,
+    },
+    level1_agent: {
+        dashboard: true,
+        studio: true,
+        publishing: true,
+        products: true,
+        assets: false,
+        customerManagement: false,
+        videos: true,
+        support: false,
+        personalization: true,
+        agents: true,
+        rules: true,
+        reviews: false,
+        rbac: false,
+    },
+    department_admin: {
+        dashboard: false,
+        studio: true,
+        publishing: true,
+        products: true,
+        assets: false,
+        customerManagement: false,
+        videos: true,
+        support: false,
+        personalization: false,
+        agents: false,
+        rules: false,
+        reviews: false,
+        rbac: false,
+    },
+    employee: {
+        dashboard: false,
+        studio: true,
+        publishing: false,
+        products: false,
+        assets: false,
+        customerManagement: false,
+        videos: false,
+        support: false,
+        personalization: false,
+        agents: false,
+        rules: false,
+        reviews: false,
+        rbac: false,
+    },
+};
+function buildEmptyPermissionMap() {
+    return update_permission_matrix_dto_1.RBAC_PAGE_KEYS.reduce((pageMap, pageKey) => {
+        pageMap[pageKey] = false;
+        return pageMap;
+    }, {});
+}
+//# sourceMappingURL=rbac.constants.js.map

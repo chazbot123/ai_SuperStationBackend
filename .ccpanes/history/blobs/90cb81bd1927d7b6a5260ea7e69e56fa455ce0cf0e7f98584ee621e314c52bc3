@@ -1,0 +1,12 @@
+declare class ImportGaodeStoreItemDto {
+    amapId?: string;
+    name: string;
+    primaryPhone?: string;
+    telRaw?: string;
+    address?: string;
+    type?: string;
+}
+export declare class ImportGaodeStoresDto {
+    items: ImportGaodeStoreItemDto[];
+}
+export {};

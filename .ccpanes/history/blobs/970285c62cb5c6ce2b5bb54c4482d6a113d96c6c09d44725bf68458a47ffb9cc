@@ -1,0 +1,9 @@
+declare const SUPPORT_STATUSES: readonly ["ai_chat", "handoff_requested", "queueing", "human_chat", "ended"];
+export declare class ListSupportConversationsQueryDto {
+    q?: string;
+    status?: (typeof SUPPORT_STATUSES)[number];
+    onlyWaitingHandoff?: boolean;
+    page: number;
+    limit: number;
+}
+export {};

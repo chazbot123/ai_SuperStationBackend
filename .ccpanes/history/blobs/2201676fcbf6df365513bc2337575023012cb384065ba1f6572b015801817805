@@ -1,0 +1,25 @@
+import { ConfigService } from '@nestjs/config';
+import type { KnowledgeUploadFile } from './knowledge-file.types';
+export declare class KnowledgeStorageService {
+    private readonly configService;
+    private readonly client;
+    private readonly bucketName;
+    private readonly publicBaseUrl;
+    private ensureBucketPromise;
+    constructor(configService: ConfigService);
+    uploadKnowledgeFile(userId: string, file?: KnowledgeUploadFile): Promise<{
+        bucket: string;
+        objectKey: string;
+        fileExt: string;
+        url: string;
+    }>;
+    removeKnowledgeFile(objectKey: string): Promise<void>;
+    getKnowledgeFileBuffer(objectKey: string): Promise<Buffer<ArrayBuffer>>;
+    private validateFile;
+    private ensureBucket;
+    private ensureBucketInternal;
+    private buildObjectKey;
+    private resolveExtension;
+    private buildPublicBaseUrl;
+    private encodeObjectKey;
+}

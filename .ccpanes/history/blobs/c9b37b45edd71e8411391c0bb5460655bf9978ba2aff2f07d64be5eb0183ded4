@@ -1,0 +1,85 @@
+import { SessionUser } from '../auth/auth.types';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateAgentDto } from './dto/create-agent.dto';
+import { ListAgentsQueryDto } from './dto/list-agents-query.dto';
+import { UpdateAgentDto } from './dto/update-agent.dto';
+export declare class AgentsService {
+    private readonly prisma;
+    constructor(prisma: PrismaService);
+    list(user: SessionUser, query: ListAgentsQueryDto): Promise<{
+        items: ({
+            user: {
+                id: string;
+                username: string;
+                displayName: string;
+            } | null;
+        } & {
+            name: string;
+            status: import("@prisma/client").$Enums.AgentStatus;
+            id: string;
+            userId: string | null;
+            createdAt: Date;
+            updatedAt: Date;
+            code: string;
+            ruleId: string | null;
+        })[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    create(user: SessionUser, dto: CreateAgentDto): Promise<{
+        user: {
+            id: string;
+            username: string;
+            displayName: string;
+        } | null;
+    } & {
+        name: string;
+        status: import("@prisma/client").$Enums.AgentStatus;
+        id: string;
+        userId: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        code: string;
+        ruleId: string | null;
+    }>;
+    getById(user: SessionUser, id: string): Promise<{
+        user: {
+            id: string;
+            username: string;
+            displayName: string;
+        } | null;
+    } & {
+        name: string;
+        status: import("@prisma/client").$Enums.AgentStatus;
+        id: string;
+        userId: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        code: string;
+        ruleId: string | null;
+    }>;
+    update(user: SessionUser, id: string, dto: UpdateAgentDto): Promise<{
+        user: {
+            id: string;
+            username: string;
+            displayName: string;
+        } | null;
+    } & {
+        name: string;
+        status: import("@prisma/client").$Enums.AgentStatus;
+        id: string;
+        userId: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        code: string;
+        ruleId: string | null;
+    }>;
+    private buildWhere;
+    private findAccessibleAgent;
+    private ensureAgentExists;
+    private findAgentWithUser;
+    private ensureMainCompany;
+}

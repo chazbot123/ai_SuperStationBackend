@@ -1,0 +1,10 @@
+declare const PUBLISH_PLATFORMS: readonly ["xiaohongshu", "douyin", "wechat_mp", "kuaishou"];
+declare const PUBLISH_STATUSES: readonly ["queued", "running", "success", "failed"];
+export declare class ListPublishingJobsQueryDto {
+    platform?: (typeof PUBLISH_PLATFORMS)[number];
+    status?: (typeof PUBLISH_STATUSES)[number];
+    contentId?: string;
+    page: number;
+    limit: number;
+}
+export {};

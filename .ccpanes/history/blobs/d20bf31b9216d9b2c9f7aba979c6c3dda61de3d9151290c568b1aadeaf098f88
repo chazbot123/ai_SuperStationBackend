@@ -1,0 +1,11 @@
+import { RbacPageKey } from './dto/update-permission-matrix.dto';
+export declare const MAIN_COMPANY_ROLE_KEY = "main_company";
+export type DefaultRoleDefinition = {
+    key: string;
+    name: string;
+    description: string;
+    isSystem: boolean;
+};
+export declare const DEFAULT_ROLES: DefaultRoleDefinition[];
+export declare const DEFAULT_PERMISSION_MATRIX: Record<string, Record<RbacPageKey, boolean>>;
+export declare function buildEmptyPermissionMap(): Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>;

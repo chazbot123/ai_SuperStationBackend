@@ -1,0 +1,82 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AiVideoTtsCacheService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const redis_1 = require("redis");
+let AiVideoTtsCacheService = class AiVideoTtsCacheService {
+    configService;
+    client;
+    connectPromise;
+    constructor(configService) {
+        this.configService = configService;
+    }
+    async get(videoTaskId) {
+        const client = await this.getClient();
+        const raw = await client.get(this.buildKey(videoTaskId));
+        if (!raw)
+            return null;
+        try {
+            return JSON.parse(raw);
+        }
+        catch {
+            return null;
+        }
+    }
+    async set(videoTaskId, entry, ttlSeconds = 3600) {
+        const client = await this.getClient();
+        await client.setEx(this.buildKey(videoTaskId), ttlSeconds, JSON.stringify(entry));
+        return entry;
+    }
+    async del(videoTaskId) {
+        const client = await this.getClient();
+        await client.del(this.buildKey(videoTaskId));
+    }
+    async onModuleDestroy() {
+        if (this.client?.isOpen) {
+            await this.client.quit();
+        }
+    }
+    buildKey(videoTaskId) {
+        return `ai:video-tts:${videoTaskId}`;
+    }
+    async getClient() {
+        if (this.client?.isOpen) {
+            return this.client;
+        }
+        if (this.connectPromise) {
+            return this.connectPromise;
+        }
+        const redisUrl = this.configService.get('REDIS_URL')?.trim();
+        if (!redisUrl) {
+            throw new common_1.ServiceUnavailableException('Redis 未配置，无法保存视频配音任务');
+        }
+        const client = (0, redis_1.createClient)({ url: redisUrl });
+        this.client = client;
+        this.connectPromise = client
+            .connect()
+            .then(() => client)
+            .catch((error) => {
+            this.connectPromise = undefined;
+            this.client = undefined;
+            const message = error instanceof Error ? error.message : 'unknown_error';
+            throw new common_1.ServiceUnavailableException(`Redis 不可用：${message}`);
+        });
+        return this.connectPromise;
+    }
+};
+exports.AiVideoTtsCacheService = AiVideoTtsCacheService;
+exports.AiVideoTtsCacheService = AiVideoTtsCacheService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
+], AiVideoTtsCacheService);
+//# sourceMappingURL=ai-video-tts-cache.service.js.map

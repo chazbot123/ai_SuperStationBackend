@@ -1,0 +1,5 @@
+export declare class SearchKnowledgeRetrievalDto {
+    query: string;
+    scope?: 'company' | 'tenant' | 'global';
+    topK: number;
+}

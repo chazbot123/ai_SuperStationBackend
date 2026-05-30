@@ -1,0 +1,661 @@
+import { SessionUser } from '../auth/auth.types';
+import { AiService } from './ai.service';
+import { CreateProductImageDraftDto } from './dto/create-product-image-draft.dto';
+import { CreateVideoDraftDto } from './dto/create-video-draft.dto';
+import { CreateAvatarVideoTaskDto } from './dto/create-avatar-video.dto';
+import { GenerateCopyDto } from './dto/generate-copy.dto';
+import { GenerateImagesDto } from './dto/generate-images.dto';
+import { GeneratePlatformMetaDto } from './dto/generate-platform-meta.dto';
+import { GenerateVideoDto } from './dto/generate-video.dto';
+import { GenerateSocialPostDto } from './dto/generate-social-post.dto';
+import { PromptPolishDto } from './dto/prompt-polish.dto';
+import { ExpandAvatarVideoScriptDto } from './dto/expand-avatar-video-script.dto';
+import { PolishPromptDto } from './dto/polish-prompt.dto';
+import { RecommendBgmDto } from './dto/recommend-bgm.dto';
+import { ReviewMaterialDecisionDto } from './dto/review-material-decision.dto';
+import { SaveModelConfigDto } from './dto/save-model-config.dto';
+import { TestModelConfigDto } from './dto/test-model-config.dto';
+import { UpdateProductImageDraftDto } from './dto/update-product-image-draft.dto';
+import { UpdateSocialPostDto } from './dto/update-social-post.dto';
+import { UpdateVideoDraftDto } from './dto/update-video-draft.dto';
+export declare class AiController {
+    private readonly aiService;
+    constructor(aiService: AiService);
+    generateCopy(req: {
+        user: SessionUser;
+    }, dto: GenerateCopyDto): Promise<{
+        title: string;
+        body: string;
+        tags: string[];
+        text: string;
+        html: string;
+        used: string;
+        provider: string;
+        model: string;
+    }>;
+    polishPrompt(req: {
+        user: SessionUser;
+    }, dto: PolishPromptDto): Promise<{
+        text: string;
+        provider: string;
+        model: string;
+    }>;
+    generatePlatformMeta(req: {
+        user: SessionUser;
+    }, dto: GeneratePlatformMetaDto): Promise<{
+        title: string;
+        tags: [string, string];
+        provider: string;
+        model: string;
+    }>;
+    generateImages(req: {
+        user: SessionUser;
+    }, dto: GenerateImagesDto): Promise<{
+        urls: string[];
+        provider: string;
+        model: string;
+    }>;
+    promptPolish(req: {
+        user: SessionUser;
+    }, dto: PromptPolishDto): Promise<{
+        prompt: string;
+        provider: string;
+        model: string;
+    }>;
+    generateVideo(req: {
+        user: SessionUser;
+    }, dto: GenerateVideoDto): Promise<{
+        provider: string;
+        model: string;
+        status: string;
+        videoUrl: string;
+        taskId?: undefined;
+    } | {
+        provider: string;
+        model: string;
+        status: string;
+        taskId: string;
+        videoUrl?: undefined;
+    }>;
+    recommendBgm(req: {
+        user: SessionUser;
+    }, dto: RecommendBgmDto): Promise<{
+        id: string;
+        title: string;
+        url: string;
+        volume: number;
+        provider: string;
+        model: string;
+    }>;
+    getVideoTask(req: {
+        user: SessionUser;
+    }, taskId: string): Promise<{
+        taskId: string;
+        provider: string;
+        model: string;
+        status: string;
+        videoUrl: null;
+        errorMessage?: undefined;
+    } | {
+        taskId: string;
+        provider: string;
+        model: string;
+        status: "failed";
+        videoUrl: null;
+        errorMessage: string | null;
+    } | {
+        taskId: string;
+        provider: string;
+        model: string;
+        status: "processing" | "success";
+        videoUrl: string | null;
+        errorMessage?: undefined;
+    }>;
+    createAvatarVideoTask(req: {
+        user: SessionUser;
+    }, dto: CreateAvatarVideoTaskDto): Promise<{
+        taskId: string;
+        status: import("@prisma/client").$Enums.VideoMainTaskStatus;
+        segmentCount: number;
+    }>;
+    expandAvatarVideoScript(req: {
+        user: SessionUser;
+    }, dto: ExpandAvatarVideoScriptDto): Promise<{
+        text: string;
+        provider: string;
+        model: string;
+        targetSeconds: number;
+    }>;
+    getAvatarVideoTask(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        taskId: string;
+        status: import("@prisma/client").$Enums.VideoMainTaskStatus;
+        segmentCount: number;
+        finishedCount: number;
+        failedCount: number;
+        characterImageUrl: string | null;
+        fullScript: string;
+        finalVideoUrl: string | null;
+        errorMessage: string | null;
+        segments: {
+            id: string;
+            sequenceOrder: number;
+            scriptSegment: string;
+            status: import("@prisma/client").$Enums.VideoSubTaskStatus;
+            attempts: number;
+            maxAttempts: number;
+            retryAt: string | null;
+            segmentVideoUrl: string | null;
+            errorMessage: string | null;
+        }[];
+    }>;
+    retryAvatarVideoTask(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        taskId: string;
+        status: import("@prisma/client").$Enums.VideoMainTaskStatus;
+        segmentCount: number;
+        finishedCount: number;
+        failedCount: number;
+        characterImageUrl: string | null;
+        fullScript: string;
+        finalVideoUrl: string | null;
+        errorMessage: string | null;
+        segments: {
+            id: string;
+            sequenceOrder: number;
+            scriptSegment: string;
+            status: import("@prisma/client").$Enums.VideoSubTaskStatus;
+            attempts: number;
+            maxAttempts: number;
+            retryAt: string | null;
+            segmentVideoUrl: string | null;
+            errorMessage: string | null;
+        }[];
+    } | {
+        taskId: string;
+        resetCount: number;
+    }>;
+    testModelConnection(type: string, dto: TestModelConfigDto): Promise<{
+        success: boolean;
+        message: string;
+        provider: string;
+        model: string;
+    }>;
+    listActiveModelConfigs(req: {
+        user: SessionUser;
+    }): Promise<import("./ai-model-config-cache.service").StoredModelConfigItem[]>;
+    listSavedModelConfigs(req: {
+        user: SessionUser;
+    }): Promise<import("./ai-model-config-cache.service").StoredProviderModelConfigItem[]>;
+    activateModelConfig(req: {
+        user: SessionUser;
+    }, type: string, dto: SaveModelConfigDto): Promise<{
+        enabled: boolean;
+        providerKey: import("./model-provider-presets").ProviderKey;
+        providerName: string;
+        baseUrl: string;
+        taskQueryUrlTemplate?: string;
+        apiKey: string;
+        modelName: string;
+        type: import("./model-provider-presets").ModelType;
+    }>;
+    listSocialPosts(req: {
+        user: SessionUser;
+    }): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        style: string;
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        synced: boolean;
+    }[]>;
+    listProductImageDrafts(req: {
+        user: SessionUser;
+    }): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        syncedToLeads: boolean;
+        syncedToProducts: boolean;
+    }[]>;
+    listVideoDrafts(req: {
+        user: SessionUser;
+    }): Promise<{
+        id: string;
+        prompt: string;
+        source: import("@prisma/client").$Enums.VideoDraftSource;
+        title: string;
+        platformStyle: string | null;
+        publishTitle: string | null;
+        publishTags: string[];
+        createdAt: Date;
+        completedAt: Date | null;
+        durationText: string;
+        generatedScript: string;
+        videoUrl: string | null;
+        taskId: string | null;
+        provider: string | null;
+        model: string | null;
+        errorMessage: string | null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        status: import("@prisma/client").$Enums.VideoDraftStatus;
+        syncedToLeads: boolean;
+    }[]>;
+    listReviewMaterials(req: {
+        user: SessionUser;
+    }): Promise<({
+        id: string;
+        source: "social";
+        title: string;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        videoUrl: null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        submittedByName: string;
+        submittedAt: string;
+    } | {
+        id: string;
+        source: "product";
+        title: string;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        videoUrl: null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        submittedByName: string;
+        submittedAt: string;
+    } | {
+        id: string;
+        source: "video";
+        title: string;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        videoUrl: string | null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        submittedByName: string;
+        submittedAt: string;
+    })[]>;
+    approveReviewMaterial(req: {
+        user: SessionUser;
+    }, source: string, id: string): Promise<{
+        id: string;
+        source: "social";
+        title: string;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        videoUrl: null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        submittedByName: string;
+        submittedAt: string;
+    } | {
+        id: string;
+        source: "product";
+        title: string;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        videoUrl: null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        submittedByName: string;
+        submittedAt: string;
+    } | {
+        id: string;
+        source: "video";
+        title: string;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        videoUrl: string | null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        submittedByName: string;
+        submittedAt: string;
+    }>;
+    rejectReviewMaterial(req: {
+        user: SessionUser;
+    }, source: string, id: string, dto: ReviewMaterialDecisionDto): Promise<{
+        success: boolean;
+    }>;
+    generateSocialPost(req: {
+        user: SessionUser;
+    }, dto: GenerateSocialPostDto): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        style: string;
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        synced: boolean;
+    }>;
+    createProductImageDraft(req: {
+        user: SessionUser;
+    }, dto: CreateProductImageDraftDto): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        syncedToLeads: boolean;
+        syncedToProducts: boolean;
+    }>;
+    createVideoDraft(req: {
+        user: SessionUser;
+    }, dto: CreateVideoDraftDto): Promise<{
+        id: string;
+        prompt: string;
+        source: import("@prisma/client").$Enums.VideoDraftSource;
+        title: string;
+        platformStyle: string | null;
+        publishTitle: string | null;
+        publishTags: string[];
+        createdAt: Date;
+        completedAt: Date | null;
+        durationText: string;
+        generatedScript: string;
+        videoUrl: string | null;
+        taskId: string | null;
+        provider: string | null;
+        model: string | null;
+        errorMessage: string | null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        status: import("@prisma/client").$Enums.VideoDraftStatus;
+        syncedToLeads: boolean;
+    }>;
+    submitSocialPost(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        style: string;
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        synced: boolean;
+    }>;
+    withdrawSocialPostReview(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        style: string;
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        synced: boolean;
+    }>;
+    markSocialPostSynced(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        style: string;
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        synced: boolean;
+    }>;
+    updateSocialPost(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdateSocialPostDto): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        style: string;
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        synced: boolean;
+    }>;
+    removeSocialPost(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        success: boolean;
+    }>;
+    updateProductImageDraft(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdateProductImageDraftDto): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        syncedToLeads: boolean;
+        syncedToProducts: boolean;
+    }>;
+    updateVideoDraft(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdateVideoDraftDto): Promise<{
+        id: string;
+        prompt: string;
+        source: import("@prisma/client").$Enums.VideoDraftSource;
+        title: string;
+        platformStyle: string | null;
+        publishTitle: string | null;
+        publishTags: string[];
+        createdAt: Date;
+        completedAt: Date | null;
+        durationText: string;
+        generatedScript: string;
+        videoUrl: string | null;
+        taskId: string | null;
+        provider: string | null;
+        model: string | null;
+        errorMessage: string | null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        status: import("@prisma/client").$Enums.VideoDraftStatus;
+        syncedToLeads: boolean;
+    }>;
+    removeVideoDraft(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        success: boolean;
+    }>;
+    removeProductImageDraft(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        success: boolean;
+    }>;
+    submitProductImageDraft(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        syncedToLeads: boolean;
+        syncedToProducts: boolean;
+    }>;
+    withdrawProductImageDraftReview(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        syncedToLeads: boolean;
+        syncedToProducts: boolean;
+    }>;
+    markProductImageDraftSynced(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        syncedToLeads: boolean;
+        syncedToProducts: boolean;
+    }>;
+    markProductImageDraftProductSynced(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        title: string;
+        createdAt: Date;
+        body: string;
+        tags: string[];
+        images: string[];
+        downloadableImages: boolean[];
+        sizePreset: string;
+        resolution: string;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        syncedToLeads: boolean;
+        syncedToProducts: boolean;
+    }>;
+    submitVideoDraft(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        source: import("@prisma/client").$Enums.VideoDraftSource;
+        title: string;
+        platformStyle: string | null;
+        publishTitle: string | null;
+        publishTags: string[];
+        createdAt: Date;
+        completedAt: Date | null;
+        durationText: string;
+        generatedScript: string;
+        videoUrl: string | null;
+        taskId: string | null;
+        provider: string | null;
+        model: string | null;
+        errorMessage: string | null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        status: import("@prisma/client").$Enums.VideoDraftStatus;
+        syncedToLeads: boolean;
+    }>;
+    withdrawVideoDraftReview(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        source: import("@prisma/client").$Enums.VideoDraftSource;
+        title: string;
+        platformStyle: string | null;
+        publishTitle: string | null;
+        publishTags: string[];
+        createdAt: Date;
+        completedAt: Date | null;
+        durationText: string;
+        generatedScript: string;
+        videoUrl: string | null;
+        taskId: string | null;
+        provider: string | null;
+        model: string | null;
+        errorMessage: string | null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        status: import("@prisma/client").$Enums.VideoDraftStatus;
+        syncedToLeads: boolean;
+    }>;
+    markVideoDraftSynced(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        prompt: string;
+        source: import("@prisma/client").$Enums.VideoDraftSource;
+        title: string;
+        platformStyle: string | null;
+        publishTitle: string | null;
+        publishTags: string[];
+        createdAt: Date;
+        completedAt: Date | null;
+        durationText: string;
+        generatedScript: string;
+        videoUrl: string | null;
+        taskId: string | null;
+        provider: string | null;
+        model: string | null;
+        errorMessage: string | null;
+        reviewStage: import("@prisma/client").$Enums.SocialPostReviewStage;
+        status: import("@prisma/client").$Enums.VideoDraftStatus;
+        syncedToLeads: boolean;
+    }>;
+}

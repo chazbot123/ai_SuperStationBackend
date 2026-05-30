@@ -1,0 +1,320 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.UpdateSuperSiteSettingDto = exports.SuperSiteIndustryRefreshConfigDto = exports.SuperSiteIndustrySourceConfigDto = exports.SuperSiteVideoSettingsDto = exports.SuperSiteImageSlotDto = exports.SuperSiteSpecialOfferDto = exports.SuperSiteMetricDto = exports.SuperSiteModuleDto = void 0;
+const class_transformer_1 = require("class-transformer");
+const class_validator_1 = require("class-validator");
+class SuperSiteModuleDto {
+    key;
+    label;
+    enabled;
+}
+exports.SuperSiteModuleDto = SuperSiteModuleDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteModuleDto.prototype, "key", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteModuleDto.prototype, "label", void 0);
+__decorate([
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], SuperSiteModuleDto.prototype, "enabled", void 0);
+class SuperSiteMetricDto {
+    key;
+    label;
+    enabled;
+    valueMode;
+    startValue;
+    tickInterval;
+    incrementMin;
+    incrementMax;
+    fixedValue;
+    suffix;
+    highlight;
+}
+exports.SuperSiteMetricDto = SuperSiteMetricDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "key", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "label", void 0);
+__decorate([
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], SuperSiteMetricDto.prototype, "enabled", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "valueMode", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "startValue", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "tickInterval", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "incrementMin", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "incrementMax", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "fixedValue", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "suffix", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteMetricDto.prototype, "highlight", void 0);
+class SuperSiteSpecialOfferDto {
+    id;
+    name;
+    summary;
+    tag;
+    priceText;
+    originalPriceText;
+    ctaText;
+    images;
+    enabled;
+}
+exports.SuperSiteSpecialOfferDto = SuperSiteSpecialOfferDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteSpecialOfferDto.prototype, "id", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteSpecialOfferDto.prototype, "name", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteSpecialOfferDto.prototype, "summary", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteSpecialOfferDto.prototype, "tag", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteSpecialOfferDto.prototype, "priceText", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteSpecialOfferDto.prototype, "originalPriceText", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteSpecialOfferDto.prototype, "ctaText", void 0);
+__decorate([
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.IsString)({ each: true }),
+    __metadata("design:type", Array)
+], SuperSiteSpecialOfferDto.prototype, "images", void 0);
+__decorate([
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], SuperSiteSpecialOfferDto.prototype, "enabled", void 0);
+class SuperSiteImageSlotDto {
+    slotKey;
+    moduleKey;
+    imageUrl;
+    sourceContentId;
+    updatedAt;
+}
+exports.SuperSiteImageSlotDto = SuperSiteImageSlotDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteImageSlotDto.prototype, "slotKey", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteImageSlotDto.prototype, "moduleKey", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteImageSlotDto.prototype, "imageUrl", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", Object)
+], SuperSiteImageSlotDto.prototype, "sourceContentId", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", Object)
+], SuperSiteImageSlotDto.prototype, "updatedAt", void 0);
+class SuperSiteVideoSettingsDto {
+    videoUrl;
+    posterUrl;
+}
+exports.SuperSiteVideoSettingsDto = SuperSiteVideoSettingsDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteVideoSettingsDto.prototype, "videoUrl", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteVideoSettingsDto.prototype, "posterUrl", void 0);
+class SuperSiteIndustrySourceConfigDto {
+    key;
+    label;
+    sourceType;
+    enabled;
+}
+exports.SuperSiteIndustrySourceConfigDto = SuperSiteIndustrySourceConfigDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteIndustrySourceConfigDto.prototype, "key", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteIndustrySourceConfigDto.prototype, "label", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(['rss', 'html']),
+    __metadata("design:type", String)
+], SuperSiteIndustrySourceConfigDto.prototype, "sourceType", void 0);
+__decorate([
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], SuperSiteIndustrySourceConfigDto.prototype, "enabled", void 0);
+class SuperSiteIndustryRefreshConfigDto {
+    enabled;
+    frequency;
+    dailyTime;
+}
+exports.SuperSiteIndustryRefreshConfigDto = SuperSiteIndustryRefreshConfigDto;
+__decorate([
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], SuperSiteIndustryRefreshConfigDto.prototype, "enabled", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(['daily']),
+    __metadata("design:type", String)
+], SuperSiteIndustryRefreshConfigDto.prototype, "frequency", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SuperSiteIndustryRefreshConfigDto.prototype, "dailyTime", void 0);
+class UpdateSuperSiteSettingDto {
+    enterpriseName;
+    superSiteBaseUrl;
+    siteTemplate;
+    siteModules;
+    siteMetrics;
+    specialOfferTitle;
+    specialOfferSubtitle;
+    specialOffers;
+    siteImageSlots;
+    siteVideoSettings;
+    industrySourceConfigs;
+    industryKeywords;
+    industryRefreshConfig;
+}
+exports.UpdateSuperSiteSettingDto = UpdateSuperSiteSettingDto;
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], UpdateSuperSiteSettingDto.prototype, "enterpriseName", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], UpdateSuperSiteSettingDto.prototype, "superSiteBaseUrl", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], UpdateSuperSiteSettingDto.prototype, "siteTemplate", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ValidateNested)({ each: true }),
+    (0, class_transformer_1.Type)(() => SuperSiteModuleDto),
+    __metadata("design:type", Array)
+], UpdateSuperSiteSettingDto.prototype, "siteModules", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ValidateNested)({ each: true }),
+    (0, class_transformer_1.Type)(() => SuperSiteMetricDto),
+    __metadata("design:type", Array)
+], UpdateSuperSiteSettingDto.prototype, "siteMetrics", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], UpdateSuperSiteSettingDto.prototype, "specialOfferTitle", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], UpdateSuperSiteSettingDto.prototype, "specialOfferSubtitle", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ValidateNested)({ each: true }),
+    (0, class_transformer_1.Type)(() => SuperSiteSpecialOfferDto),
+    __metadata("design:type", Array)
+], UpdateSuperSiteSettingDto.prototype, "specialOffers", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ValidateNested)({ each: true }),
+    (0, class_transformer_1.Type)(() => SuperSiteImageSlotDto),
+    __metadata("design:type", Array)
+], UpdateSuperSiteSettingDto.prototype, "siteImageSlots", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.ValidateNested)(),
+    (0, class_transformer_1.Type)(() => SuperSiteVideoSettingsDto),
+    __metadata("design:type", SuperSiteVideoSettingsDto)
+], UpdateSuperSiteSettingDto.prototype, "siteVideoSettings", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ValidateNested)({ each: true }),
+    (0, class_transformer_1.Type)(() => SuperSiteIndustrySourceConfigDto),
+    __metadata("design:type", Array)
+], UpdateSuperSiteSettingDto.prototype, "industrySourceConfigs", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.IsString)({ each: true }),
+    __metadata("design:type", Array)
+], UpdateSuperSiteSettingDto.prototype, "industryKeywords", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.ValidateNested)(),
+    (0, class_transformer_1.Type)(() => SuperSiteIndustryRefreshConfigDto),
+    __metadata("design:type", SuperSiteIndustryRefreshConfigDto)
+], UpdateSuperSiteSettingDto.prototype, "industryRefreshConfig", void 0);
+//# sourceMappingURL=update-super-site-setting.dto.js.map

@@ -1,0 +1,53 @@
+import { OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { type ModelType, type ProviderKey } from './model-provider-presets';
+export type StoredModelConfig = {
+    enabled: boolean;
+    providerKey: ProviderKey;
+    providerName: string;
+    baseUrl: string;
+    taskQueryUrlTemplate?: string;
+    apiKey: string;
+    modelName: string;
+};
+export type StoredModelConfigItem = StoredModelConfig & {
+    type: ModelType;
+};
+export type StoredProviderModelConfigItem = StoredModelConfig & {
+    type: ModelType;
+    providerKey: ProviderKey;
+};
+export declare class AiModelConfigCacheService implements OnModuleDestroy {
+    private readonly configService;
+    private client?;
+    private connectPromise?;
+    constructor(configService: ConfigService);
+    get(userId: string, type: ModelType): Promise<StoredModelConfig | null>;
+    getAll(userId: string): Promise<StoredModelConfigItem[]>;
+    getSaved(userId: string, type: ModelType, providerKey: ProviderKey): Promise<StoredModelConfig | null>;
+    getAllSaved(userId: string): Promise<StoredProviderModelConfigItem[]>;
+    set(userId: string, type: ModelType, config: StoredModelConfig): Promise<{
+        enabled: boolean;
+        providerKey: ProviderKey;
+        providerName: string;
+        baseUrl: string;
+        taskQueryUrlTemplate?: string;
+        apiKey: string;
+        modelName: string;
+        type: ModelType;
+    }>;
+    setSaved(userId: string, type: ModelType, providerKey: ProviderKey, config: StoredModelConfig): Promise<{
+        providerKey: ProviderKey;
+        enabled: boolean;
+        providerName: string;
+        baseUrl: string;
+        taskQueryUrlTemplate?: string;
+        apiKey: string;
+        modelName: string;
+        type: ModelType;
+    }>;
+    onModuleDestroy(): Promise<void>;
+    private buildKey;
+    private buildSavedKey;
+    private getClient;
+}

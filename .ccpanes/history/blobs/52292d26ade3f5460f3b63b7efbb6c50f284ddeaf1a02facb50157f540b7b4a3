@@ -1,0 +1,342 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var WechatOfficialPublishService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WechatOfficialPublishService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const crypto = __importStar(require("crypto"));
+let WechatOfficialPublishService = WechatOfficialPublishService_1 = class WechatOfficialPublishService {
+    configService;
+    logger = new common_1.Logger(WechatOfficialPublishService_1.name);
+    constructor(configService) {
+        this.configService = configService;
+    }
+    async publishMpNewsFromJob(input) {
+        if (input.job.draftVideoUrl?.trim()) {
+            throw new common_1.ConflictException('微信公众号官方发布当前仅支持图文');
+        }
+        const token = this.readTokenPayload(input.account.authType, input.account.authPayloadEncrypted);
+        const coverUrl = this.pickFirstUrl([
+            input.job.draftImages[0],
+            input.leadContent.coverImage,
+            input.leadContent.images[0],
+        ]);
+        if (!coverUrl) {
+            throw new common_1.ConflictException('微信公众号发布需要封面图');
+        }
+        const bodyText = (input.job.draftBody || input.leadContent.body || '').trim();
+        const images = (input.job.draftImages.length ? input.job.draftImages : input.leadContent.images)
+            .map((item) => (item || '').trim())
+            .filter(Boolean);
+        const title = (input.job.draftTitle || input.leadContent.title || '公众号图文').trim();
+        const publish = async (accessToken) => {
+            const thumbMediaId = await this.uploadCoverImageAsMaterial(accessToken, coverUrl);
+            const uploadedImages = [];
+            for (const url of images) {
+                const uploaded = await this.uploadArticleImage(accessToken, url);
+                uploadedImages.push(uploaded);
+            }
+            const content = this.buildArticleHtml(bodyText, uploadedImages);
+            const mediaId = await this.uploadNews(accessToken, {
+                title,
+                thumbMediaId,
+                content,
+                digest: '',
+                showCoverPic: 1,
+            });
+            await this.submitPublish(accessToken, mediaId);
+            const query = await this.queryPublish(accessToken, mediaId);
+            return {
+                mediaId,
+                url: query.url || null,
+                status: query.status || 'submitted',
+            };
+        };
+        try {
+            const result = await publish(token.accessToken);
+            return { result, token: null };
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : '';
+            const shouldRefresh = Boolean(token.refreshToken) &&
+                (message.includes('access_token') ||
+                    message.toLowerCase().includes('token') ||
+                    message.includes('invalid credential') ||
+                    message.includes('access_token expired'));
+            if (!shouldRefresh)
+                throw error;
+            const refreshed = await this.refreshAuthorizerToken({
+                componentAccessToken: input.componentAccessToken,
+                componentAppId: input.componentAppId,
+                authorizerAppId: token.authorizerAppId,
+                authorizerRefreshToken: token.refreshToken ?? '',
+            });
+            const result = await publish(refreshed.accessToken);
+            return { result, token: refreshed };
+        }
+    }
+    readTokenPayload(authType, encrypted) {
+        if (authType !== 'token') {
+            throw new common_1.ConflictException('平台账号授权类型不匹配');
+        }
+        const raw = this.decryptAuthPayload(encrypted);
+        let payload = {};
+        try {
+            payload = raw ? JSON.parse(raw) : {};
+        }
+        catch {
+            throw new common_1.ConflictException('平台账号 Token 数据格式异常');
+        }
+        if (!payload || typeof payload !== 'object') {
+            throw new common_1.ConflictException('平台账号 Token 数据格式异常');
+        }
+        const accessToken = typeof payload.accessToken === 'string'
+            ? (payload.accessToken || '').trim()
+            : '';
+        const refreshToken = typeof payload.refreshToken === 'string'
+            ? (payload.refreshToken || '').trim()
+            : null;
+        const authorizerAppId = typeof payload.authorizerAppId === 'string'
+            ? (payload.authorizerAppId || '').trim()
+            : '';
+        if (!accessToken)
+            throw new common_1.ConflictException('平台账号缺少 accessToken');
+        if (!authorizerAppId)
+            throw new common_1.ConflictException('平台账号缺少 authorizerAppId');
+        return { accessToken, refreshToken, authorizerAppId };
+    }
+    async refreshAuthorizerToken(input) {
+        const url = new URL('https://api.weixin.qq.com/cgi-bin/component/api_authorizer_token');
+        url.searchParams.set('component_access_token', input.componentAccessToken);
+        const payload = await this.requestJson(url.toString(), {
+            component_appid: input.componentAppId,
+            authorizer_appid: input.authorizerAppId,
+            authorizer_refresh_token: input.authorizerRefreshToken,
+        });
+        const accessToken = (payload.authorizer_access_token || '').trim();
+        if (!accessToken) {
+            throw new common_1.ConflictException(payload.errmsg || '微信公众号刷新 authorizer_access_token 失败');
+        }
+        const refreshToken = (payload.authorizer_refresh_token || '').trim() || null;
+        return {
+            accessToken,
+            refreshToken,
+        };
+    }
+    async uploadCoverImageAsMaterial(accessToken, coverUrl) {
+        const bytes = await this.fetchBytes(coverUrl, 10 * 1024 * 1024, '封面素材');
+        const url = new URL('https://api.weixin.qq.com/cgi-bin/material/add_material');
+        url.searchParams.set('access_token', accessToken);
+        url.searchParams.set('type', 'image');
+        const form = new FormData();
+        form.append('media', new Blob([new Uint8Array(bytes)]), 'cover');
+        const payload = await this.requestJson(url.toString(), form, true);
+        const mediaId = (payload.media_id || '').trim();
+        if (!mediaId) {
+            throw new common_1.ConflictException(payload.errmsg || '微信公众号上传封面失败');
+        }
+        return mediaId;
+    }
+    async uploadArticleImage(accessToken, imageUrl) {
+        const bytes = await this.fetchBytes(imageUrl, 10 * 1024 * 1024, '正文图片');
+        const url = new URL('https://api.weixin.qq.com/cgi-bin/media/uploadimg');
+        url.searchParams.set('access_token', accessToken);
+        const form = new FormData();
+        form.append('media', new Blob([new Uint8Array(bytes)]), 'image');
+        const payload = await this.requestJson(url.toString(), form, true);
+        const uploadedUrl = (payload.url || '').trim();
+        if (!uploadedUrl) {
+            throw new common_1.ConflictException(payload.errmsg || '微信公众号上传正文图片失败');
+        }
+        return uploadedUrl;
+    }
+    async uploadNews(accessToken, input) {
+        const url = new URL('https://api.weixin.qq.com/cgi-bin/publish/uploadnews');
+        url.searchParams.set('access_token', accessToken);
+        const payload = await this.requestJson(url.toString(), {
+            articles: [
+                {
+                    title: input.title,
+                    thumb_media_id: input.thumbMediaId,
+                    author: '',
+                    digest: input.digest,
+                    show_cover_pic: input.showCoverPic,
+                    content: input.content,
+                    content_source_url: '',
+                    need_open_comment: 0,
+                    only_fans_can_comment: 0,
+                },
+            ],
+        });
+        const mediaId = (payload.media_id || '').trim();
+        if (!mediaId) {
+            throw new common_1.ConflictException(payload.errmsg || '微信公众号上传图文失败');
+        }
+        return mediaId;
+    }
+    async submitPublish(accessToken, mediaId) {
+        const url = new URL('https://api.weixin.qq.com/cgi-bin/publish/submit');
+        url.searchParams.set('access_token', accessToken);
+        const payload = await this.requestJson(url.toString(), {
+            media_id: mediaId,
+            msgtype: 'mpnews',
+        });
+        if (payload.errcode && payload.errcode !== 0) {
+            throw new common_1.ConflictException(payload.errmsg || '微信公众号提交发布失败');
+        }
+    }
+    async queryPublish(accessToken, mediaId) {
+        const url = new URL('https://api.weixin.qq.com/cgi-bin/publish/query');
+        url.searchParams.set('access_token', accessToken);
+        const payload = await this.requestJson(url.toString(), {
+            media_id: mediaId,
+        });
+        if (payload.errcode && payload.errcode !== 0) {
+            throw new common_1.ConflictException(payload.errmsg || '微信公众号查询发布状态失败');
+        }
+        return payload;
+    }
+    buildArticleHtml(body, imageUrls) {
+        const parts = [];
+        if (body) {
+            const lines = body.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+            for (const line of lines) {
+                parts.push(`<p>${this.escapeHtml(line)}</p>`);
+            }
+        }
+        for (const url of imageUrls) {
+            parts.push(`<p><img src="${this.escapeHtml(url)}" /></p>`);
+        }
+        if (!parts.length) {
+            parts.push('<p></p>');
+        }
+        return parts.join('');
+    }
+    escapeHtml(input) {
+        return input
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+    pickFirstUrl(values) {
+        for (const value of values) {
+            const trimmed = (value || '').trim();
+            if (trimmed)
+                return trimmed;
+        }
+        return '';
+    }
+    async fetchBytes(url, maxSize, label) {
+        const response = await fetch(url, { headers: { Accept: '*/*' }, redirect: 'follow' });
+        if (!response.ok) {
+            throw new common_1.ConflictException(`微信公众号${label}下载失败：${response.status}`);
+        }
+        const bytes = Buffer.from(await response.arrayBuffer());
+        if (bytes.length <= 0) {
+            throw new common_1.ConflictException(`微信公众号${label}为空`);
+        }
+        if (bytes.length > maxSize) {
+            throw new common_1.ConflictException(`微信公众号${label}不能超过 ${Math.floor(maxSize / 1024 / 1024)}MB`);
+        }
+        return bytes;
+    }
+    async requestJson(url, body, isMultipart = false) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: isMultipart ? undefined : { 'content-type': 'application/json' },
+            body: isMultipart ? body : JSON.stringify(body),
+        });
+        const text = await response.text();
+        let parsed = {};
+        try {
+            parsed = text ? JSON.parse(text) : {};
+        }
+        catch {
+            this.logger.warn(`[wechat-official] invalid json http=${response.status} body=${text.slice(0, 200)}`);
+            throw new common_1.ConflictException(`微信公众号接口返回异常：HTTP ${response.status}`);
+        }
+        if (!response.ok) {
+            const msg = typeof parsed.errmsg === 'string'
+                ? (parsed.errmsg || '').trim()
+                : '';
+            throw new common_1.ConflictException(msg || `微信公众号接口失败：HTTP ${response.status}`);
+        }
+        const payload = parsed;
+        const errcode = typeof payload.errcode === 'number' ? payload.errcode : null;
+        if (errcode && errcode !== 0) {
+            const errmsg = typeof payload.errmsg === 'string' ? payload.errmsg : '';
+            throw new common_1.ConflictException(errmsg || `微信公众号接口错误：${errcode}`);
+        }
+        return payload;
+    }
+    decryptAuthPayload(value) {
+        const [ivBase64, tagBase64, encryptedBase64] = value.split('.');
+        if (!ivBase64 || !tagBase64 || !encryptedBase64) {
+            throw new common_1.ConflictException('平台登录信息格式无效');
+        }
+        const key = this.getPlatformAccountSecretKey();
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivBase64, 'base64'));
+        decipher.setAuthTag(Buffer.from(tagBase64, 'base64'));
+        const decrypted = Buffer.concat([
+            decipher.update(Buffer.from(encryptedBase64, 'base64')),
+            decipher.final(),
+        ]);
+        return decrypted.toString('utf8');
+    }
+    getPlatformAccountSecretKey() {
+        const secret = this.configService.get('PLATFORM_ACCOUNT_SECRET') ||
+            this.configService.get('JWT_SECRET') ||
+            'change_me_platform_account_secret';
+        return crypto.createHash('sha256').update(secret).digest();
+    }
+};
+exports.WechatOfficialPublishService = WechatOfficialPublishService;
+exports.WechatOfficialPublishService = WechatOfficialPublishService = WechatOfficialPublishService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
+], WechatOfficialPublishService);
+//# sourceMappingURL=wechat-official-publish.service.js.map

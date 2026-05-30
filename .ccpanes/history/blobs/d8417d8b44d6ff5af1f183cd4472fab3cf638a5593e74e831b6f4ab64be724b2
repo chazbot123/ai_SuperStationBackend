@@ -1,0 +1,158 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SuperSiteSettingsController = void 0;
+const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
+const create_super_site_industry_item_dto_1 = require("./dto/create-super-site-industry-item.dto");
+const list_super_site_industry_items_query_dto_1 = require("./dto/list-super-site-industry-items-query.dto");
+const reorder_super_site_industry_items_dto_1 = require("./dto/reorder-super-site-industry-items.dto");
+const sync_super_site_industry_dto_1 = require("./dto/sync-super-site-industry.dto");
+const update_super_site_setting_dto_1 = require("./dto/update-super-site-setting.dto");
+const update_super_site_industry_item_dto_1 = require("./dto/update-super-site-industry-item.dto");
+const super_site_industry_service_1 = require("./super-site-industry.service");
+const super_site_settings_service_1 = require("./super-site-settings.service");
+let SuperSiteSettingsController = class SuperSiteSettingsController {
+    superSiteSettingsService;
+    superSiteIndustryService;
+    constructor(superSiteSettingsService, superSiteIndustryService) {
+        this.superSiteSettingsService = superSiteSettingsService;
+        this.superSiteIndustryService = superSiteIndustryService;
+    }
+    getMySettings(req) {
+        return this.superSiteSettingsService.getMySettings(req.user.userId);
+    }
+    updateMySettings(req, dto) {
+        return this.superSiteSettingsService.updateMySettings(req.user.userId, dto);
+    }
+    uploadMyImage(req, file) {
+        return this.superSiteSettingsService.uploadSiteImage(req.user.userId, file);
+    }
+    uploadMyVideo(req, file) {
+        return this.superSiteSettingsService.uploadSiteVideo(req.user.userId, file);
+    }
+    listMyIndustryItems(req, query) {
+        return this.superSiteIndustryService.listMyIndustryItems(req.user.userId, query);
+    }
+    createMyIndustryItem(req, dto) {
+        return this.superSiteIndustryService.createMyIndustryItem(req.user.userId, dto);
+    }
+    updateMyIndustryItem(req, id, dto) {
+        return this.superSiteIndustryService.updateMyIndustryItem(req.user.userId, id, dto);
+    }
+    deleteMyIndustryItem(req, id) {
+        return this.superSiteIndustryService.deleteMyIndustryItem(req.user.userId, id);
+    }
+    reorderMyIndustryItems(req, dto) {
+        return this.superSiteIndustryService.reorderMyIndustryItems(req.user.userId, dto);
+    }
+    async syncMyIndustryItems(req, dto) {
+        return this.superSiteIndustryService.syncMyIndustryItems(req.user.userId, dto);
+    }
+};
+exports.SuperSiteSettingsController = SuperSiteSettingsController;
+__decorate([
+    (0, common_1.Get)('me'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "getMySettings", null);
+__decorate([
+    (0, common_1.Put)('me'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, update_super_site_setting_dto_1.UpdateSuperSiteSettingDto]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "updateMySettings", null);
+__decorate([
+    (0, common_1.Post)('me/upload-image'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', {
+        limits: { fileSize: 10 * 1024 * 1024 },
+    })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.UploadedFile)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "uploadMyImage", null);
+__decorate([
+    (0, common_1.Post)('me/upload-video'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', {
+        limits: { fileSize: 200 * 1024 * 1024 },
+    })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.UploadedFile)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "uploadMyVideo", null);
+__decorate([
+    (0, common_1.Get)('me/industry-items'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, list_super_site_industry_items_query_dto_1.ListSuperSiteIndustryItemsQueryDto]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "listMyIndustryItems", null);
+__decorate([
+    (0, common_1.Post)('me/industry-items'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, create_super_site_industry_item_dto_1.CreateSuperSiteIndustryItemDto]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "createMyIndustryItem", null);
+__decorate([
+    (0, common_1.Patch)('me/industry-items/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, update_super_site_industry_item_dto_1.UpdateSuperSiteIndustryItemDto]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "updateMyIndustryItem", null);
+__decorate([
+    (0, common_1.Delete)('me/industry-items/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "deleteMyIndustryItem", null);
+__decorate([
+    (0, common_1.Post)('me/industry-items/reorder'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, reorder_super_site_industry_items_dto_1.ReorderSuperSiteIndustryItemsDto]),
+    __metadata("design:returntype", void 0)
+], SuperSiteSettingsController.prototype, "reorderMyIndustryItems", null);
+__decorate([
+    (0, common_1.Post)('me/industry-sync'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, sync_super_site_industry_dto_1.SyncSuperSiteIndustryDto]),
+    __metadata("design:returntype", Promise)
+], SuperSiteSettingsController.prototype, "syncMyIndustryItems", null);
+exports.SuperSiteSettingsController = SuperSiteSettingsController = __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Controller)('super-site-settings'),
+    __metadata("design:paramtypes", [super_site_settings_service_1.SuperSiteSettingsService,
+        super_site_industry_service_1.SuperSiteIndustryService])
+], SuperSiteSettingsController);
+//# sourceMappingURL=super-site-settings.controller.js.map

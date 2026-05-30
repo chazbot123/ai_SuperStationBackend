@@ -1,0 +1,7 @@
+import { CustomerSourcePlatform } from '@prisma/client';
+export declare class ListCustomerLeadsQueryDto {
+    q?: string;
+    sourcePlatform?: CustomerSourcePlatform;
+    page: number;
+    limit: number;
+}

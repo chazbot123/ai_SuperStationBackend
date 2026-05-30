@@ -1,0 +1,16 @@
+import { type BitBrowserGatewayConfig } from './bitbrowser.gateway';
+import { BitBrowserExtensionBridgeService } from './bitbrowser.extension-bridge.service';
+import { BitBrowserRuntimeSessionService } from './bitbrowser.runtime-session.service';
+import { BitBrowserProfileService } from './bitbrowser.service';
+import type { PlatformType, ProfileLockReason } from './bitbrowser.types';
+export interface FileBackedBitBrowserModuleOptions {
+    storageFilePath?: string;
+    gateway: BitBrowserGatewayConfig;
+}
+export interface BitBrowserRuntimeFacade {
+    service: BitBrowserProfileService;
+    runtimeSessionService: BitBrowserRuntimeSessionService;
+    extensionBridgeService: BitBrowserExtensionBridgeService;
+    prepare(creatorId: string, ownerId: string, platform: PlatformType, reason: ProfileLockReason, expiresAt: string): ReturnType<BitBrowserProfileService['prepareOwnerRuntime']>;
+}
+export declare function createFileBackedBitBrowserModule(options: FileBackedBitBrowserModuleOptions): BitBrowserRuntimeFacade;

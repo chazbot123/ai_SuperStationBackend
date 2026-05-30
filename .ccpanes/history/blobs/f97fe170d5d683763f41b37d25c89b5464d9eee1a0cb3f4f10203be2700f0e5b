@@ -1,0 +1,296 @@
+import { SessionUser } from '../auth/auth.types';
+import { CreateProductDto } from './dto/create-product.dto';
+import { InferEnglishNameDto } from './dto/infer-english-name.dto';
+import { ListProductsQueryDto } from './dto/list-products-query.dto';
+import { ReviewProductDto } from './dto/review-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
+import { ProductsService } from './products.service';
+import type { ProductUploadFile } from './product-image.types';
+export declare class ProductsController {
+    private readonly productsService;
+    constructor(productsService: ProductsService);
+    list(req: {
+        user: SessionUser;
+    }, query: ListProductsQueryDto): Promise<{
+        items: {
+            id: string;
+            ownerUserId: string;
+            ownerName: string;
+            ownerRoleKey: string;
+            name: string;
+            englishName: string;
+            summary: string;
+            priceText: string;
+            specialOfferEnabled: boolean;
+            originalPriceText: string | null;
+            specialPriceText: string | null;
+            specialTag: string | null;
+            category: string | null;
+            images: string[];
+            status: import("@prisma/client").$Enums.ProductStatus;
+            rejectReason: string | null;
+            submittedAt: Date | null;
+            reviewedAt: Date | null;
+            description: string | null;
+            sortOrder: number;
+            createdAt: Date;
+            updatedAt: Date;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    create(req: {
+        user: SessionUser;
+    }, dto: CreateProductDto): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    uploadImage(req: {
+        user: SessionUser;
+    }, file?: ProductUploadFile): Promise<{
+        bucket: string;
+        objectKey: string;
+        url: string;
+    }>;
+    inferEnglishName(req: {
+        user: SessionUser;
+    }, dto: InferEnglishNameDto): Promise<{
+        englishName: string;
+    }>;
+    getById(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    update(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdateProductDto): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    remove(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        success: boolean;
+    }>;
+    submit(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    withdrawSubmission(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    publish(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    unpublish(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    approve(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    reject(req: {
+        user: SessionUser;
+    }, id: string, dto: ReviewProductDto): Promise<{
+        id: string;
+        ownerUserId: string;
+        ownerName: string;
+        ownerRoleKey: string;
+        name: string;
+        englishName: string;
+        summary: string;
+        priceText: string;
+        specialOfferEnabled: boolean;
+        originalPriceText: string | null;
+        specialPriceText: string | null;
+        specialTag: string | null;
+        category: string | null;
+        images: string[];
+        status: import("@prisma/client").$Enums.ProductStatus;
+        rejectReason: string | null;
+        submittedAt: Date | null;
+        reviewedAt: Date | null;
+        description: string | null;
+        sortOrder: number;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+}

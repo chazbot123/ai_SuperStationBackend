@@ -1,0 +1,122 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BitBrowserHttpController = void 0;
+const promises_1 = require("node:fs/promises");
+const node_path_1 = require("node:path");
+class BitBrowserHttpController {
+    facade;
+    constructor(facade) {
+        this.facade = facade;
+    }
+    async createOwner(request) {
+        const owner = await this.facade.service.createOwner(this.requireBody(request));
+        return this.ok(owner, 201);
+    }
+    async registerPlatformAccount(request) {
+        const account = await this.facade.service.registerPlatformAccount(this.requireBody(request));
+        return this.ok(account, 201);
+    }
+    async openRuntimeSession(request) {
+        const opened = await this.facade.runtimeSessionService.openRuntimeSession(this.requireBody(request));
+        return this.ok(opened, 201);
+    }
+    async closeRuntimeSession(request) {
+        const body = this.requireBody(request);
+        const result = await this.facade.runtimeSessionService.closeRuntimeSession(body.runtimeSessionId, body.status ?? 'closed');
+        return this.ok(result);
+    }
+    async registerExtensionReady(request) {
+        const result = await this.facade.extensionBridgeService.registerReady(this.requireBody(request));
+        return this.ok(result);
+    }
+    async pageReadyBind(request) {
+        const result = await this.facade.extensionBridgeService.bindRuntimeByPageReady(this.requireBody(request));
+        return this.ok(result);
+    }
+    async heartbeat(request) {
+        const result = await this.facade.extensionBridgeService.heartbeat(this.requireBody(request));
+        return this.ok(result);
+    }
+    async queueLoginPrepare(request) {
+        const result = await this.facade.extensionBridgeService.queueLoginPrepare(this.requireBody(request));
+        return this.ok(result, 201);
+    }
+    async queueLoginExecute(request) {
+        const result = await this.facade.extensionBridgeService.queueLoginExecute(this.requireBody(request));
+        return this.ok(result, 201);
+    }
+    async queuePublishCommand(request) {
+        const result = await this.facade.extensionBridgeService.queuePublishCommand(this.requireBody(request));
+        return this.ok(result, 201);
+    }
+    async pullNextCommand(request) {
+        const result = await this.facade.extensionBridgeService.pullNextCommand(this.requireBody(request));
+        return this.ok(result);
+    }
+    async ackCommand(request) {
+        const result = await this.facade.extensionBridgeService.ackCommand(this.requireBody(request));
+        return this.ok(result);
+    }
+    async completeCommand(request) {
+        const result = await this.facade.extensionBridgeService.completeCommand(this.requireBody(request));
+        return this.ok(result);
+    }
+    async failCommand(request) {
+        const result = await this.facade.extensionBridgeService.failCommand(this.requireBody(request));
+        return this.ok(result);
+    }
+    async writeDebugEvent(request) {
+        const body = this.requireBody(request);
+        const payload = {
+            sessionId: String(body.sessionId || 'douyin-handshake-fail'),
+            runId: String(body.runId || 'pre-fix'),
+            hypothesisId: String(body.hypothesisId || 'unknown'),
+            location: String(body.location || 'unknown'),
+            msg: String(body.msg || ''),
+            data: body.data && typeof body.data === 'object'
+                ? body.data
+                : {},
+            ts: typeof body.ts === 'number' ? body.ts : Date.now(),
+        };
+        const filePath = (0, node_path_1.resolve)(process.cwd(), '.runtime', 'bitbrowser', 'debug-handshake.ndjson');
+        await (0, promises_1.mkdir)((0, node_path_1.dirname)(filePath), { recursive: true });
+        await (0, promises_1.appendFile)(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
+        return this.ok({ written: true, filePath }, 201);
+    }
+    async getRuntimeSession(request) {
+        const body = this.requireBody(request);
+        const session = await this.facade.runtimeSessionService.getRuntimeSession(body.runtimeSessionId);
+        return this.ok(session);
+    }
+    async listSessionCommands(request) {
+        const body = this.requireBody(request);
+        const commands = await this.facade.runtimeSessionService.listSessionCommands(body.runtimeSessionId);
+        return this.ok(commands);
+    }
+    error(error, status = 400) {
+        return {
+            status,
+            body: {
+                success: false,
+                error: error instanceof Error ? error.message : 'unknown error',
+            },
+        };
+    }
+    ok(data, status = 200) {
+        return {
+            status,
+            body: {
+                success: true,
+                data,
+            },
+        };
+    }
+    requireBody(request) {
+        if (!request.body) {
+            throw new Error('request body is required');
+        }
+        return request.body;
+    }
+}
+exports.BitBrowserHttpController = BitBrowserHttpController;
+//# sourceMappingURL=bitbrowser.http-controller.js.map

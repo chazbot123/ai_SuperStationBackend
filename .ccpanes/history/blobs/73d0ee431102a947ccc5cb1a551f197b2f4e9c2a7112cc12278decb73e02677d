@@ -1,0 +1,196 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BitBrowserRuntimeSessionService = exports.BitBrowserRuntimeSessionNotReadyError = exports.BitBrowserRuntimeSessionError = void 0;
+const node_fs_1 = require("node:fs");
+const node_path_1 = require("node:path");
+class BitBrowserRuntimeSessionError extends Error {
+}
+exports.BitBrowserRuntimeSessionError = BitBrowserRuntimeSessionError;
+class BitBrowserRuntimeSessionNotReadyError extends BitBrowserRuntimeSessionError {
+}
+exports.BitBrowserRuntimeSessionNotReadyError = BitBrowserRuntimeSessionNotReadyError;
+async function reportDouyinLoginDebug(hypothesisId, location, msg, data) {
+    let url = 'http://127.0.0.1:7777/event';
+    let sessionId = 'douyin-login-page';
+    try {
+        const envText = (0, node_fs_1.readFileSync)((0, node_path_1.resolve)(process.cwd(), '..', '.dbg', 'douyin-login-page.env'), 'utf8');
+        url = envText.match(/DEBUG_SERVER_URL=(.+)/)?.[1]?.trim() ?? url;
+        sessionId =
+            envText.match(/DEBUG_SESSION_ID=(.+)/)?.[1]?.trim() ?? sessionId;
+    }
+    catch { }
+    await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            sessionId,
+            runId: 'pre-fix',
+            hypothesisId,
+            location,
+            msg: `[DEBUG] ${msg}`,
+            data,
+            ts: Date.now(),
+        }),
+    }).catch(() => { });
+}
+class BitBrowserRuntimeSessionService {
+    repository;
+    profileService;
+    constructor(repository, profileService) {
+        this.repository = repository;
+        this.profileService = profileService;
+    }
+    async openRuntimeSession(input) {
+        await reportDouyinLoginDebug('E', 'bitbrowser.runtime-session.service:openRuntimeSession:input', 'openRuntimeSession called', {
+            creatorId: input.creatorId,
+            ownerId: input.ownerId,
+            platformAccountId: input.platformAccountId ?? null,
+            platform: input.platform,
+            reason: input.reason,
+            taskId: input.taskId,
+        });
+        const prepared = await this.profileService.prepareOwnerRuntime(input);
+        const session = await this.repository.createRuntimeSession({
+            creatorId: input.creatorId,
+            ownerId: input.ownerId,
+            platformAccountId: input.platformAccountId ?? null,
+            profileBindingId: prepared.context.profileBinding.id,
+            profileId: prepared.context.profileBinding.profileId,
+            platform: input.platform,
+            taskId: input.taskId,
+            reason: input.reason,
+            debugUrl: prepared.runtime.debugUrl,
+            wsEndpoint: prepared.runtime.wsEndpoint ?? null,
+            expiresAt: input.expiresAt,
+        });
+        await reportDouyinLoginDebug('B', 'bitbrowser.runtime-session.service:openRuntimeSession:created', 'runtime session created', {
+            runtimeSessionId: session.id,
+            profileBindingId: prepared.context.profileBinding.id,
+            profileId: prepared.context.profileBinding.profileId,
+            profileName: prepared.context.profileBinding.profileName,
+            platform: session.platform,
+            debugUrl: prepared.runtime.debugUrl,
+            wsEndpoint: prepared.runtime.wsEndpoint,
+        });
+        return {
+            session,
+            context: prepared.context,
+            runtime: prepared.runtime,
+        };
+    }
+    async registerExtensionReady(input) {
+        await reportDouyinLoginDebug('C', 'bitbrowser.runtime-session.service:registerExtensionReady', 'extension ready received', {
+            runtimeSessionId: input.runtimeSessionId,
+            extensionInstanceId: input.extensionInstanceId,
+            tabId: input.tabId,
+            pageUrl: input.pageUrl,
+            extensionVersion: input.extensionVersion,
+        });
+        return this.repository.registerExtensionHandshake(input);
+    }
+    async markHeartbeat(runtimeSessionId, pageUrl) {
+        return this.repository.updateRuntimeSessionStatus({
+            runtimeSessionId,
+            status: 'ready',
+            pageUrl,
+            heartbeatAt: new Date().toISOString(),
+        });
+    }
+    async markSessionStatus(runtimeSessionId, status, pageUrl) {
+        return this.repository.updateRuntimeSessionStatus({
+            runtimeSessionId,
+            status,
+            pageUrl,
+            heartbeatAt: status === 'ready' || status === 'running'
+                ? new Date().toISOString()
+                : undefined,
+        });
+    }
+    async queueCommand(input) {
+        const session = await this.assertSessionReady(input.runtimeSessionId);
+        return this.repository.createRuntimeCommand({
+            ...input,
+            platform: session.platform,
+            taskId: session.taskId,
+            creatorId: session.creatorId,
+            ownerId: session.ownerId,
+        });
+    }
+    async dispatchCommand(runtimeCommandId) {
+        return this.repository.updateRuntimeCommandStatus({
+            runtimeCommandId,
+            status: 'dispatched',
+        });
+    }
+    async ackCommand(runtimeCommandId) {
+        return this.repository.updateRuntimeCommandStatus({
+            runtimeCommandId,
+            status: 'acked',
+        });
+    }
+    async completeCommand(runtimeCommandId, resultPayload) {
+        return this.repository.updateRuntimeCommandStatus({
+            runtimeCommandId,
+            status: 'completed',
+            resultPayload: resultPayload ?? null,
+        });
+    }
+    async failCommand(runtimeCommandId, errorMessage) {
+        return this.repository.updateRuntimeCommandStatus({
+            runtimeCommandId,
+            status: 'failed',
+            errorMessage,
+        });
+    }
+    async listSessionCommands(runtimeSessionId) {
+        return this.repository.listRuntimeCommandsBySessionId(runtimeSessionId);
+    }
+    async getRuntimeSession(runtimeSessionId) {
+        return this.repository.getRuntimeSessionById(runtimeSessionId);
+    }
+    async findLatestAwaitingExtensionSession(platform) {
+        const normalizedPlatform = String(platform || '').trim().toLowerCase();
+        if (!normalizedPlatform) {
+            return null;
+        }
+        const sessions = await this.repository.listRuntimeSessions();
+        return (sessions
+            .filter((item) => {
+            if (item.status !== 'awaiting_extension') {
+                return false;
+            }
+            return String(item.platform || '').trim().toLowerCase() === normalizedPlatform;
+        })
+            .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null);
+    }
+    async closeRuntimeSession(runtimeSessionId, status) {
+        const session = await this.repository.getRuntimeSessionById(runtimeSessionId);
+        if (!session) {
+            throw new BitBrowserRuntimeSessionError(`runtime session ${runtimeSessionId} 不存在`);
+        }
+        const updated = await this.repository.updateRuntimeSessionStatus({
+            runtimeSessionId,
+            status,
+        });
+        await this.profileService.releaseOwnerRuntime({
+            creatorId: session.creatorId,
+            taskId: session.taskId,
+        });
+        return updated;
+    }
+    async updateCommandStatus(input) {
+        return this.repository.updateRuntimeCommandStatus(input);
+    }
+    async assertSessionReady(runtimeSessionId) {
+        const session = await this.repository.getRuntimeSessionById(runtimeSessionId);
+        if (!session) {
+            throw new BitBrowserRuntimeSessionError(`runtime session ${runtimeSessionId} 不存在`);
+        }
+        if (!session.extensionInstanceId || session.tabId === null) {
+            throw new BitBrowserRuntimeSessionNotReadyError(`runtime session ${runtimeSessionId} 尚未完成扩展握手`);
+        }
+        return session;
+    }
+}
+exports.BitBrowserRuntimeSessionService = BitBrowserRuntimeSessionService;
+//# sourceMappingURL=bitbrowser.runtime-session.service.js.map

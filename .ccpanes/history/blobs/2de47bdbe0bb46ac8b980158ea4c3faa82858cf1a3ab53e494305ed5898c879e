@@ -1,0 +1,520 @@
+{
+  "version": 1,
+  "owners": [
+    {
+      "id": "owner_reta3wnx",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "name": "账号组 B",
+      "code": "platform-group:b",
+      "status": "active",
+      "createdAt": "2026-05-29T09:06:24.382Z",
+      "updatedAt": "2026-05-29T09:06:24.382Z"
+    },
+    {
+      "id": "owner_xnnzrscr",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "name": "账号组 C",
+      "code": "platform-group:c",
+      "status": "active",
+      "createdAt": "2026-05-29T09:06:40.202Z",
+      "updatedAt": "2026-05-29T09:06:40.202Z"
+    },
+    {
+      "id": "owner_kbahjts8",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "name": "账号组 A",
+      "code": "platform-group:a",
+      "status": "active",
+      "createdAt": "2026-05-29T09:18:33.405Z",
+      "updatedAt": "2026-05-29T09:18:33.405Z"
+    },
+    {
+      "id": "owner_r2pbqe1a",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "name": "账号组 D",
+      "code": "platform-group:d",
+      "status": "active",
+      "createdAt": "2026-05-30T03:25:07.090Z",
+      "updatedAt": "2026-05-30T03:25:07.090Z"
+    },
+    {
+      "id": "owner_gh2gex4z",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "name": "账号组 E",
+      "code": "platform-group:e",
+      "status": "active",
+      "createdAt": "2026-05-30T03:25:25.321Z",
+      "updatedAt": "2026-05-30T03:25:25.321Z"
+    },
+    {
+      "id": "owner_3tccfypl",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "name": "账号组 F",
+      "code": "platform-group:f",
+      "status": "active",
+      "createdAt": "2026-05-30T03:25:40.718Z",
+      "updatedAt": "2026-05-30T03:25:40.718Z"
+    }
+  ],
+  "profileBindings": [
+    {
+      "id": "profile_0owwy4cb",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platform": "douyin",
+      "accountId": "cmprsfhi10000f4u9aj0cdtr6",
+      "accountName": "pending_douyin_D_mprsfhhg",
+      "provider": "bitbrowser",
+      "profileId": "cfd78c46c4fd447c826b11d877399ce1",
+      "profileName": "抖音 pending_douyin_D_mprsfhhg",
+      "bindingMode": "dedicated_by_account",
+      "proxyConfig": null,
+      "browserConfig": {
+        "proxyMethod": 2,
+        "proxyType": "noproxy",
+        "syncExtensions": true,
+        "syncUserExtensions": true,
+        "browserFingerPrint": {
+          "coreProduct": "chrome",
+          "coreVersion": "130",
+          "ostype": "PC",
+          "os": "Win32",
+          "osVersion": "11,10"
+        },
+        "name": "抖音 pending_douyin_D_mprsfhhg"
+      },
+      "status": "active",
+      "lastUsedAt": null,
+      "createdAt": "2026-05-30T03:25:07.369Z",
+      "updatedAt": "2026-05-30T03:25:07.369Z"
+    },
+    {
+      "id": "profile_ed6pfav0",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_gh2gex4z",
+      "platform": "wechat_mp",
+      "accountId": "cmprsfvlo0001f4u9ug254nxn",
+      "accountName": "pending_wechat_mp_E_mprsfvlk",
+      "provider": "bitbrowser",
+      "profileId": "c91e2aeb5a074f57807ebc4c953e4992",
+      "profileName": "视频号 pending_wechat_mp_E_mprsfvlk",
+      "bindingMode": "dedicated_by_account",
+      "proxyConfig": null,
+      "browserConfig": {
+        "proxyMethod": 2,
+        "proxyType": "noproxy",
+        "syncExtensions": true,
+        "syncUserExtensions": true,
+        "browserFingerPrint": {
+          "coreProduct": "chrome",
+          "coreVersion": "130",
+          "ostype": "PC",
+          "os": "Win32",
+          "osVersion": "11,10"
+        },
+        "name": "视频号 pending_wechat_mp_E_mprsfvlk"
+      },
+      "status": "active",
+      "lastUsedAt": null,
+      "createdAt": "2026-05-30T03:25:25.481Z",
+      "updatedAt": "2026-05-30T03:25:25.481Z"
+    },
+    {
+      "id": "profile_aaukhgqy",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_3tccfypl",
+      "platform": "wechat_mp",
+      "accountId": "cmprsg7gq0002f4u94q9lccg7",
+      "accountName": "pending_wechat_mp_F_mprsg7gn",
+      "provider": "bitbrowser",
+      "profileId": "e186e6e7bde443b2bed66c3e761b49fd",
+      "profileName": "视频号 pending_wechat_mp_F_mprsg7gn",
+      "bindingMode": "dedicated_by_account",
+      "proxyConfig": null,
+      "browserConfig": {
+        "proxyMethod": 2,
+        "proxyType": "noproxy",
+        "syncExtensions": true,
+        "syncUserExtensions": true,
+        "browserFingerPrint": {
+          "coreProduct": "chrome",
+          "coreVersion": "130",
+          "ostype": "PC",
+          "os": "Win32",
+          "osVersion": "11,10"
+        },
+        "name": "视频号 pending_wechat_mp_F_mprsg7gn"
+      },
+      "status": "active",
+      "lastUsedAt": null,
+      "createdAt": "2026-05-30T03:25:40.905Z",
+      "updatedAt": "2026-05-30T03:25:40.905Z"
+    },
+    {
+      "id": "profile_286n086k",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platform": "wechat_mp",
+      "accountId": "cmprufwoe0000gou9zfnp1fdy",
+      "accountName": "pending_wechat_mp_D_mprufwmg",
+      "provider": "bitbrowser",
+      "profileId": "81074c153f2d4d41b3643bb321dfc284",
+      "profileName": "视频号 pending_wechat_mp_D_mprufwmg",
+      "bindingMode": "dedicated_by_account",
+      "proxyConfig": null,
+      "browserConfig": {
+        "proxyMethod": 2,
+        "proxyType": "noproxy",
+        "syncExtensions": true,
+        "syncUserExtensions": true,
+        "browserFingerPrint": {
+          "coreProduct": "chrome",
+          "coreVersion": "130",
+          "ostype": "PC",
+          "os": "Win32",
+          "osVersion": "11,10"
+        },
+        "name": "视频号 pending_wechat_mp_D_mprufwmg"
+      },
+      "status": "active",
+      "lastUsedAt": "2026-05-30T04:21:33.297Z",
+      "createdAt": "2026-05-30T04:21:26.227Z",
+      "updatedAt": "2026-05-30T04:21:33.297Z"
+    },
+    {
+      "id": "profile_80tuwfet",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platform": "douyin",
+      "accountId": "cmprvpogx0000xwu9gp4vraik",
+      "accountName": "pending_douyin_D_mprvpogm",
+      "provider": "bitbrowser",
+      "profileId": "2f3f7accd3c84834a435351d052dcbe3",
+      "profileName": "抖音 pending_douyin_D_mprvpogm",
+      "bindingMode": "dedicated_by_account",
+      "proxyConfig": null,
+      "browserConfig": {
+        "proxyMethod": 2,
+        "proxyType": "noproxy",
+        "syncExtensions": true,
+        "syncUserExtensions": true,
+        "browserFingerPrint": {
+          "coreProduct": "chrome",
+          "coreVersion": "130",
+          "ostype": "PC",
+          "os": "Win32",
+          "osVersion": "11,10"
+        },
+        "name": "抖音 pending_douyin_D_mprvpogm"
+      },
+      "status": "active",
+      "lastUsedAt": "2026-05-30T04:57:05.959Z",
+      "createdAt": "2026-05-30T04:57:02.033Z",
+      "updatedAt": "2026-05-30T04:57:05.959Z"
+    },
+    {
+      "id": "profile_p8lej9uy",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platform": "douyin",
+      "accountId": "cmps04ku60007v8u9bpk3yj5y",
+      "accountName": "pending_douyin_D_mps04ku4",
+      "provider": "bitbrowser",
+      "profileId": "88dcb3b495704c9e9d471aad1734d204",
+      "profileName": "抖音 pending_douyin_D_mps04ku4",
+      "bindingMode": "dedicated_by_account",
+      "proxyConfig": null,
+      "browserConfig": {
+        "proxyMethod": 2,
+        "proxyType": "noproxy",
+        "syncExtensions": true,
+        "syncUserExtensions": true,
+        "browserFingerPrint": {
+          "coreProduct": "chrome",
+          "coreVersion": "130",
+          "ostype": "PC",
+          "os": "Win32",
+          "osVersion": "11,10"
+        },
+        "name": "抖音 pending_douyin_D_mps04ku4"
+      },
+      "status": "active",
+      "lastUsedAt": "2026-05-30T07:00:39.498Z",
+      "createdAt": "2026-05-30T07:00:36.066Z",
+      "updatedAt": "2026-05-30T07:00:39.498Z"
+    },
+    {
+      "id": "profile_cbhfrf28",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_kbahjts8",
+      "platform": "douyin",
+      "accountId": "cmps1z900000dxku9jvb3bd3s",
+      "accountName": "pending_douyin_A_mps1z8zw",
+      "provider": "bitbrowser",
+      "profileId": "202a23420df64b2faba59e18f023c41c",
+      "profileName": "抖音 pending_douyin_A_mps1z8zw",
+      "bindingMode": "dedicated_by_account",
+      "proxyConfig": null,
+      "browserConfig": {
+        "proxyMethod": 2,
+        "proxyType": "noproxy",
+        "syncExtensions": true,
+        "syncUserExtensions": true,
+        "browserFingerPrint": {
+          "coreProduct": "chrome",
+          "coreVersion": "130",
+          "ostype": "PC",
+          "os": "Win32",
+          "osVersion": "11,10"
+        },
+        "name": "抖音 pending_douyin_A_mps1z8zw"
+      },
+      "status": "active",
+      "lastUsedAt": "2026-05-30T07:52:29.094Z",
+      "createdAt": "2026-05-30T07:52:25.931Z",
+      "updatedAt": "2026-05-30T07:52:29.094Z"
+    }
+  ],
+  "platformAccounts": [
+    {
+      "id": "account_ozs7s3ch",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "profileBindingId": "profile_286n086k",
+      "platform": "wechat_mp",
+      "accountName": "pending_wechat_mp_D_mprufwmg",
+      "accountId": "cmprufwoe0000gou9zfnp1fdy",
+      "authPayloadRef": "cmprufwoe0000gou9zfnp1fdy",
+      "createdAt": "2026-05-30T04:21:26.854Z",
+      "updatedAt": "2026-05-30T04:21:26.922Z"
+    },
+    {
+      "id": "account_rzn8cmjp",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "profileBindingId": "profile_80tuwfet",
+      "platform": "douyin",
+      "accountName": "pending_douyin_D_mprvpogm",
+      "accountId": "cmprvpogx0000xwu9gp4vraik",
+      "authPayloadRef": "cmprvpogx0000xwu9gp4vraik",
+      "createdAt": "2026-05-30T04:57:04.076Z",
+      "updatedAt": "2026-05-30T04:57:04.093Z"
+    },
+    {
+      "id": "account_tnhbhe83",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "profileBindingId": "profile_p8lej9uy",
+      "platform": "douyin",
+      "accountName": "pending_douyin_D_mps04ku4",
+      "accountId": "cmps04ku60007v8u9bpk3yj5y",
+      "authPayloadRef": "cmps04ku60007v8u9bpk3yj5y",
+      "createdAt": "2026-05-30T07:00:36.759Z",
+      "updatedAt": "2026-05-30T07:00:36.782Z"
+    },
+    {
+      "id": "account_g80ireig",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_kbahjts8",
+      "profileBindingId": "profile_cbhfrf28",
+      "platform": "douyin",
+      "accountName": "pending_douyin_A_mps1z8zw",
+      "accountId": "cmps1z900000dxku9jvb3bd3s",
+      "authPayloadRef": "cmps1z900000dxku9jvb3bd3s",
+      "createdAt": "2026-05-30T07:52:27.643Z",
+      "updatedAt": "2026-05-30T07:52:27.661Z"
+    }
+  ],
+  "locks": [
+    {
+      "profileBindingId": "profile_286n086k",
+      "lockedByTaskId": "publishing-login:wechat_mp:D:1780114886971",
+      "reason": "login",
+      "lockedAt": "2026-05-30T04:21:27.007Z",
+      "expiresAt": "2026-05-30T04:36:26.972Z"
+    },
+    {
+      "profileBindingId": "profile_80tuwfet",
+      "lockedByTaskId": "publishing-login:douyin:D:1780117024107",
+      "reason": "login",
+      "lockedAt": "2026-05-30T04:57:04.117Z",
+      "expiresAt": "2026-05-30T05:12:04.107Z"
+    },
+    {
+      "profileBindingId": "profile_p8lej9uy",
+      "lockedByTaskId": "publishing-login:douyin:D:1780124436798",
+      "reason": "login",
+      "lockedAt": "2026-05-30T07:00:36.810Z",
+      "expiresAt": "2026-05-30T07:15:36.798Z"
+    },
+    {
+      "profileBindingId": "profile_cbhfrf28",
+      "lockedByTaskId": "publishing-login:douyin:A:1780127547676",
+      "reason": "login",
+      "lockedAt": "2026-05-30T07:52:27.684Z",
+      "expiresAt": "2026-05-30T08:07:27.676Z"
+    }
+  ],
+  "runtimeSessions": [
+    {
+      "id": "runtime_3zzilgal",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platformAccountId": "cmprufwoe0000gou9zfnp1fdy",
+      "profileBindingId": "profile_286n086k",
+      "profileId": "81074c153f2d4d41b3643bb321dfc284",
+      "platform": "wechat_mp",
+      "taskId": "publishing-login:wechat_mp:D:1780114886971",
+      "reason": "login",
+      "status": "ready",
+      "debugUrl": "127.0.0.1:59282",
+      "wsEndpoint": "ws://127.0.0.1:59282/devtools/browser/eefc9b7a-e6e1-4a69-8be9-f7db50ff0877",
+      "extensionInstanceId": "54bd9b59-6afd-4694-be5e-a20e079a38f2",
+      "extensionVersion": "0.1.0",
+      "tabId": 538203570,
+      "pageUrl": "https://channels.weixin.qq.com/?ai_superweb_runtime_session_id=runtime_3zzilgal&ai_superweb_bridge_base_url=http%3A%2F%2F127.0.0.1%3A3001",
+      "handshakeAt": "2026-05-30T04:21:35.947Z",
+      "lastHeartbeatAt": "2026-05-30T04:21:36.014Z",
+      "expiresAt": "2026-05-30T04:36:26.972Z",
+      "createdAt": "2026-05-30T04:21:33.723Z",
+      "updatedAt": "2026-05-30T04:21:36.020Z"
+    },
+    {
+      "id": "runtime_vjksbuwy",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platformAccountId": "cmprvpogx0000xwu9gp4vraik",
+      "profileBindingId": "profile_80tuwfet",
+      "profileId": "2f3f7accd3c84834a435351d052dcbe3",
+      "platform": "douyin",
+      "taskId": "publishing-login:douyin:D:1780117024107",
+      "reason": "login",
+      "status": "ready",
+      "debugUrl": "127.0.0.1:53134",
+      "wsEndpoint": "ws://127.0.0.1:53134/devtools/browser/7e803e07-3b9e-4daa-8440-d5b71c8dcecd",
+      "extensionInstanceId": "4d4cf923-bf4e-4543-a451-fac5fa3e86ce",
+      "extensionVersion": "0.1.0",
+      "tabId": 564333041,
+      "pageUrl": "https://creator.douyin.com/?ai_superweb_runtime_session_id=runtime_vjksbuwy&ai_superweb_bridge_base_url=http%3A%2F%2F127.0.0.1%3A3001",
+      "handshakeAt": "2026-05-30T04:57:08.040Z",
+      "lastHeartbeatAt": "2026-05-30T04:57:08.040Z",
+      "expiresAt": "2026-05-30T05:12:04.107Z",
+      "createdAt": "2026-05-30T04:57:05.990Z",
+      "updatedAt": "2026-05-30T04:57:08.040Z"
+    },
+    {
+      "id": "runtime_m2a3mbxl",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platformAccountId": "cmps04ku60007v8u9bpk3yj5y",
+      "profileBindingId": "profile_p8lej9uy",
+      "profileId": "88dcb3b495704c9e9d471aad1734d204",
+      "platform": "douyin",
+      "taskId": "publishing-login:douyin:D:1780124436798",
+      "reason": "login",
+      "status": "ready",
+      "debugUrl": "127.0.0.1:51289",
+      "wsEndpoint": "ws://127.0.0.1:51289/devtools/browser/44dae87d-224c-4b02-8647-e6435f3d5af0",
+      "extensionInstanceId": "fd971bc6-aea9-4a80-9d58-8bf5e11ff5a9",
+      "extensionVersion": "0.1.0",
+      "tabId": 1273937069,
+      "pageUrl": "https://creator.douyin.com/?ai_superweb_runtime_session_id=runtime_m2a3mbxl&ai_superweb_bridge_base_url=http%3A%2F%2F127.0.0.1%3A3001",
+      "handshakeAt": "2026-05-30T07:00:39.776Z",
+      "lastHeartbeatAt": "2026-05-30T07:00:39.878Z",
+      "expiresAt": "2026-05-30T07:15:36.798Z",
+      "createdAt": "2026-05-30T07:00:39.530Z",
+      "updatedAt": "2026-05-30T07:00:39.882Z"
+    },
+    {
+      "id": "runtime_jbva3uqc",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_kbahjts8",
+      "platformAccountId": "cmps1z900000dxku9jvb3bd3s",
+      "profileBindingId": "profile_cbhfrf28",
+      "profileId": "202a23420df64b2faba59e18f023c41c",
+      "platform": "douyin",
+      "taskId": "publishing-login:douyin:A:1780127547676",
+      "reason": "login",
+      "status": "ready",
+      "debugUrl": "127.0.0.1:57936",
+      "wsEndpoint": "ws://127.0.0.1:57936/devtools/browser/5de63417-a2fa-4ddf-9bab-2a95d9e5bdee",
+      "extensionInstanceId": "43e5ecdb-47e3-4641-a597-63b8e63aa551",
+      "extensionVersion": "0.1.0",
+      "tabId": 1284529548,
+      "pageUrl": "https://creator.douyin.com/?ai_superweb_runtime_session_id=runtime_jbva3uqc&ai_superweb_bridge_base_url=http%3A%2F%2F127.0.0.1%3A3001",
+      "handshakeAt": "2026-05-30T07:52:29.453Z",
+      "lastHeartbeatAt": "2026-05-30T07:52:29.453Z",
+      "expiresAt": "2026-05-30T08:07:27.676Z",
+      "createdAt": "2026-05-30T07:52:29.123Z",
+      "updatedAt": "2026-05-30T07:52:29.453Z"
+    }
+  ],
+  "runtimeCommands": [
+    {
+      "id": "cmd_1y244qzs",
+      "runtimeSessionId": "runtime_3zzilgal",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platform": "wechat_mp",
+      "taskId": "publishing-login:wechat_mp:D:1780114886971",
+      "type": "LOGIN_EXECUTE",
+      "status": "queued",
+      "payload": {
+        "sessionId": "4541956a426a97b5ee8f148560557ccd",
+        "sessionToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwdXJwb3NlIjoicHVibGlzaGluZ19leHRlbnNpb25fbG9naW4iLCJzaWQiOiI0NTQxOTU2YTQyNmE5N2I1ZWU4ZjE0ODU2MDU1N2NjZCIsInVpZCI6ImNtb3Ryd2luYzAwMDBuNHU5ZTI2NXVjY24iLCJwbGF0Zm9ybSI6IndlY2hhdF9tcCIsImFpZCI6ImNtcHJ1ZndvZTAwMDBnb3U5emZucDFmZHkiLCJpYXQiOjE3ODAxMTQ4ODUsImV4cCI6MTc4MDExNTE4NX0.nxxk0CtQ01OyyLgvUwAxH4RYxewKtMQlUF_2ogQaOUY",
+        "apiBaseUrl": "http://127.0.0.1:3001",
+        "platform": "wechat_mp",
+        "forceFreshLogin": false,
+        "targetUrl": "https://channels.weixin.qq.com/"
+      },
+      "resultPayload": null,
+      "errorMessage": null,
+      "createdAt": "2026-05-30T04:21:37.550Z",
+      "updatedAt": "2026-05-30T04:21:37.550Z"
+    },
+    {
+      "id": "cmd_ejl8sohm",
+      "runtimeSessionId": "runtime_vjksbuwy",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platform": "douyin",
+      "taskId": "publishing-login:douyin:D:1780117024107",
+      "type": "LOGIN_EXECUTE",
+      "status": "dispatched",
+      "payload": {
+        "sessionId": "c257c9ecc3fe3d4debdc610c8fca178b",
+        "sessionToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwdXJwb3NlIjoicHVibGlzaGluZ19leHRlbnNpb25fbG9naW4iLCJzaWQiOiJjMjU3YzllY2MzZmUzZDRkZWJkYzYxMGM4ZmNhMTc4YiIsInVpZCI6ImNtb3Ryd2luYzAwMDBuNHU5ZTI2NXVjY24iLCJwbGF0Zm9ybSI6ImRvdXlpbiIsImFpZCI6ImNtcHJ2cG9neDAwMDB4d3U5Z3A0dnJhaWsiLCJpYXQiOjE3ODAxMTcwMjEsImV4cCI6MTc4MDExNzMyMX0.dLZbk-B6T1muei6PYNngUtPIQBy2b9qzbgkAr8ArRkI",
+        "apiBaseUrl": "http://127.0.0.1:3001",
+        "platform": "douyin",
+        "forceFreshLogin": false,
+        "targetUrl": "https://creator.douyin.com/"
+      },
+      "resultPayload": null,
+      "errorMessage": null,
+      "createdAt": "2026-05-30T04:57:07.313Z",
+      "updatedAt": "2026-05-30T04:57:07.726Z"
+    },
+    {
+      "id": "cmd_pio3n3i4",
+      "runtimeSessionId": "runtime_m2a3mbxl",
+      "creatorId": "cmotrwinc0000n4u9e265uccn",
+      "ownerId": "owner_r2pbqe1a",
+      "platform": "douyin",
+      "taskId": "publishing-login:douyin:D:1780124436798",
+      "type": "LOGIN_EXECUTE",
+      "status": "queued",
+      "payload": {
+        "sessionId": "46e172586c04bc2a1781d678e9364677",
+        "sessionToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwdXJwb3NlIjoicHVibGlzaGluZ19leHRlbnNpb25fbG9naW4iLCJzaWQiOiI0NmUxNzI1ODZjMDRiYzJhMTc4MWQ2NzhlOTM2NDY3NyIsInVpZCI6ImNtb3Ryd2luYzAwMDBuNHU5ZTI2NXVjY24iLCJwbGF0Zm9ybSI6ImRvdXlpbiIsImFpZCI6ImNtcHMwNGt1NjAwMDd2OHU5YnBrM3lqNXkiLCJpYXQiOjE3ODAxMjQ0MzUsImV4cCI6MTc4MDEyNDczNX0.WcJdvNqj2aBKhgo24H43LDyd3uWMRJr8gZlW5a1gCro",
+        "apiBaseUrl": "http://127.0.0.1:3001",
+        "platform": "douyin",
+        "forceFreshLogin": false,
+        "targetUrl": "https://creator.douyin.com/"
+      },
+      "resultPayload": null,
+      "errorMessage": null,
+      "createdAt": "2026-05-30T07:00:40.834Z",
+      "updatedAt": "2026-05-30T07:00:40.834Z"
+    }
+  ]
+}

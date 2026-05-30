@@ -1,0 +1,32 @@
+import { AiService } from '../ai/ai.service';
+import { KnowledgeService } from '../knowledge/knowledge.service';
+type SupportAiReply = {
+    answer: string;
+    confidence: number;
+    sources: Array<{
+        chunkId: string;
+        documentId: string;
+        documentTitle: string;
+        score: number;
+        snippet: string;
+    }>;
+};
+export declare class SupportAiService {
+    private readonly knowledgeService;
+    private readonly aiService;
+    constructor(knowledgeService: KnowledgeService, aiService: AiService);
+    generateReply(message: string, userId?: string | null): Promise<SupportAiReply>;
+    private buildSupportSystemPrompt;
+    private buildSupportUserPrompt;
+    private pickRelevantHits;
+    private isGreetingMessage;
+    private normalizeSupportReply;
+    private buildTimeOrderWeight;
+    private buildEvidenceLevel;
+    shouldRequestHandoff(message: string): boolean;
+    hasHandoffIntent(message: string): boolean;
+    private hasHandoffKeyword;
+    private getHumanServiceTimeContext;
+    private isWithinHumanServiceHours;
+}
+export {};

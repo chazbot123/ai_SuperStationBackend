@@ -1,0 +1,16 @@
+declare const PLATFORM_ACCOUNT_AUTH_TYPES: readonly ["cookie", "token"];
+export declare class SyncPlatformExtensionLoginDto {
+    sessionToken: string;
+    authType: (typeof PLATFORM_ACCOUNT_AUTH_TYPES)[number];
+    authPayload: string;
+    accountName?: string;
+    externalAccountId?: string;
+    displayName?: string;
+    remark?: string;
+    sourceUrl?: string;
+    avatarUrl?: string;
+    followerCount?: number;
+    runtimeSessionId?: string;
+    cookiePayload?: string;
+}
+export {};

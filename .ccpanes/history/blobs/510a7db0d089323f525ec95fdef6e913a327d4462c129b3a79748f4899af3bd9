@@ -1,0 +1,10 @@
+import { CustomerSourcePlatform } from '@prisma/client';
+export declare class UpdateCustomerLeadDto {
+    name?: string;
+    phoneNumber?: string;
+    address?: string;
+    remark?: string;
+    wechatId?: string;
+    platformName?: string;
+    sourcePlatform?: CustomerSourcePlatform;
+}

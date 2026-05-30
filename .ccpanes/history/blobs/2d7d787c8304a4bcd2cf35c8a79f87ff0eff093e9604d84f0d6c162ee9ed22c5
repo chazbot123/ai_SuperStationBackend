@@ -1,0 +1,5 @@
+export declare class SearchGaodeStoresDto {
+    regionAdcode: string;
+    regionName: string;
+    keywordsOverride?: string[];
+}

@@ -1,0 +1,139 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AiModelConfigCacheService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const redis_1 = require("redis");
+let AiModelConfigCacheService = class AiModelConfigCacheService {
+    configService;
+    client;
+    connectPromise;
+    constructor(configService) {
+        this.configService = configService;
+    }
+    async get(userId, type) {
+        const client = await this.getClient();
+        const raw = await client.get(this.buildKey(userId, type));
+        if (!raw) {
+            return null;
+        }
+        try {
+            return JSON.parse(raw);
+        }
+        catch {
+            return null;
+        }
+    }
+    async getAll(userId) {
+        const types = ['text', 'image', 'video'];
+        const items = await Promise.all(types.map(async (type) => {
+            const config = await this.get(userId, type);
+            return config ? { type, ...config } : null;
+        }));
+        return items.filter(Boolean);
+    }
+    async getSaved(userId, type, providerKey) {
+        const client = await this.getClient();
+        const raw = await client.get(this.buildSavedKey(userId, type, providerKey));
+        if (!raw) {
+            return null;
+        }
+        try {
+            return JSON.parse(raw);
+        }
+        catch {
+            return null;
+        }
+    }
+    async getAllSaved(userId) {
+        const client = await this.getClient();
+        const keys = await client.keys(`ai:model-config:saved:${userId}:*`);
+        if (keys.length === 0) {
+            return [];
+        }
+        const entries = await Promise.all(keys.map(async (key) => {
+            const raw = await client.get(key);
+            if (!raw) {
+                return null;
+            }
+            const parts = key.split(':');
+            const type = parts[5];
+            const providerKey = parts[6];
+            if (!type || !providerKey) {
+                return null;
+            }
+            try {
+                const config = JSON.parse(raw);
+                return {
+                    type,
+                    ...config,
+                    providerKey,
+                };
+            }
+            catch {
+                return null;
+            }
+        }));
+        return entries.filter(Boolean);
+    }
+    async set(userId, type, config) {
+        const client = await this.getClient();
+        await client.set(this.buildKey(userId, type), JSON.stringify(config));
+        return { type, ...config };
+    }
+    async setSaved(userId, type, providerKey, config) {
+        const client = await this.getClient();
+        await client.set(this.buildSavedKey(userId, type, providerKey), JSON.stringify(config));
+        return { type, ...config, providerKey };
+    }
+    async onModuleDestroy() {
+        if (this.client?.isOpen) {
+            await this.client.quit();
+        }
+    }
+    buildKey(userId, type) {
+        return `ai:model-config:active:${userId}:${type}`;
+    }
+    buildSavedKey(userId, type, providerKey) {
+        return `ai:model-config:saved:${userId}:${type}:${providerKey}`;
+    }
+    async getClient() {
+        if (this.client?.isOpen) {
+            return this.client;
+        }
+        if (this.connectPromise) {
+            return this.connectPromise;
+        }
+        const redisUrl = this.configService.get('REDIS_URL')?.trim();
+        if (!redisUrl) {
+            throw new common_1.ServiceUnavailableException('Redis 未配置，无法保存模型配置');
+        }
+        const client = (0, redis_1.createClient)({ url: redisUrl });
+        this.client = client;
+        this.connectPromise = client
+            .connect()
+            .then(() => client)
+            .catch((error) => {
+            this.connectPromise = undefined;
+            this.client = undefined;
+            const message = error instanceof Error ? error.message : 'unknown_error';
+            throw new common_1.ServiceUnavailableException(`Redis 不可用：${message}`);
+        });
+        return this.connectPromise;
+    }
+};
+exports.AiModelConfigCacheService = AiModelConfigCacheService;
+exports.AiModelConfigCacheService = AiModelConfigCacheService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
+], AiModelConfigCacheService);
+//# sourceMappingURL=ai-model-config-cache.service.js.map

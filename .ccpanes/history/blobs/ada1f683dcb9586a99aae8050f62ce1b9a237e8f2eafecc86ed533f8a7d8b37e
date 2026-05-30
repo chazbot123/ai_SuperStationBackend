@@ -1,0 +1,264 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ProductImageStorageService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const node_crypto_1 = require("node:crypto");
+const node_path_1 = require("node:path");
+const minio_1 = require("minio");
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_REMOTE_ASSET_SIZE_BYTES = 100 * 1024 * 1024;
+let ProductImageStorageService = class ProductImageStorageService {
+    configService;
+    client;
+    bucketName;
+    publicBaseUrl;
+    ensureBucketPromise = null;
+    constructor(configService) {
+        this.configService = configService;
+        const endpoint = this.configService.get('MINIO_ENDPOINT') ?? 'localhost';
+        const port = Number(this.configService.get('MINIO_PORT') ?? '9000');
+        const useSSL = String(this.configService.get('MINIO_USE_SSL') ?? 'false') === 'true';
+        const accessKey = this.configService.get('MINIO_ACCESS_KEY');
+        const secretKey = this.configService.get('MINIO_SECRET_KEY');
+        const bucketName = this.configService.get('MINIO_BUCKET') ?? 'ai-superweb';
+        if (!accessKey || !secretKey) {
+            throw new common_1.InternalServerErrorException('MinIO 配置不完整');
+        }
+        this.client = new minio_1.Client({
+            endPoint: endpoint,
+            port,
+            useSSL,
+            accessKey,
+            secretKey,
+        });
+        this.bucketName = bucketName;
+        this.publicBaseUrl = this.resolvePublicBaseUrl(endpoint, port, useSSL);
+    }
+    async uploadProductImage(userId, file) {
+        this.validateImage(file);
+        return this.storePublicAsset(userId, file, 'products');
+    }
+    isManagedPublicUrl(url) {
+        const trimmed = url?.trim();
+        if (!trimmed) {
+            return false;
+        }
+        return trimmed.startsWith(`${this.publicBaseUrl}/${this.bucketName}/`);
+    }
+    async mirrorRemoteAsset(userId, sourceUrl, folder = 'publishing-assets') {
+        const trimmedSourceUrl = sourceUrl.trim();
+        if (!trimmedSourceUrl) {
+            throw new common_1.BadRequestException('素材地址不能为空');
+        }
+        if (this.isManagedPublicUrl(trimmedSourceUrl)) {
+            const prefix = `${this.publicBaseUrl}/${this.bucketName}/`;
+            return {
+                bucket: this.bucketName,
+                objectKey: decodeURIComponent(trimmedSourceUrl.slice(prefix.length)),
+                url: trimmedSourceUrl,
+            };
+        }
+        const dataUrlAsset = this.parseDataUrl(trimmedSourceUrl);
+        if (dataUrlAsset) {
+            return this.storePublicAsset(userId, {
+                buffer: dataUrlAsset.buffer,
+                size: dataUrlAsset.buffer.length,
+                mimetype: dataUrlAsset.mimeType,
+                originalname: `inline.${this.resolveExtensionFromMimeType(dataUrlAsset.mimeType)}`,
+            }, folder);
+        }
+        const response = await fetch(trimmedSourceUrl, {
+            headers: {
+                Accept: '*/*',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache',
+                Pragma: 'no-cache',
+                Referer: trimmedSourceUrl,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            },
+            redirect: 'follow',
+        });
+        if (!response.ok) {
+            throw new common_1.BadGatewayException(`素材下载失败：${response.status}`);
+        }
+        const contentLength = Number(response.headers.get('content-length') ?? '0');
+        if (contentLength > MAX_REMOTE_ASSET_SIZE_BYTES) {
+            throw new common_1.BadRequestException('素材大小不能超过 100MB');
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (buffer.length <= 0) {
+            throw new common_1.BadRequestException('素材文件不能为空');
+        }
+        if (buffer.length > MAX_REMOTE_ASSET_SIZE_BYTES) {
+            throw new common_1.BadRequestException('素材大小不能超过 100MB');
+        }
+        const mimeType = this.normalizeMimeType(response.headers.get('content-type'));
+        const originalname = this.buildRemoteOriginalName(trimmedSourceUrl, mimeType);
+        return this.storePublicAsset(userId, {
+            buffer,
+            size: buffer.length,
+            mimetype: mimeType,
+            originalname,
+        }, folder);
+    }
+    validateImage(file) {
+        if (!file) {
+            throw new common_1.BadRequestException('请选择商品图片');
+        }
+        if (!file.mimetype.startsWith('image/')) {
+            throw new common_1.BadRequestException('仅支持上传图片文件');
+        }
+        if (file.size <= 0) {
+            throw new common_1.BadRequestException('图片文件不能为空');
+        }
+        if (file.size > MAX_IMAGE_SIZE_BYTES) {
+            throw new common_1.BadRequestException('图片大小不能超过 10MB');
+        }
+    }
+    async storePublicAsset(userId, file, folder) {
+        await this.ensureBucket();
+        const objectKey = this.buildObjectKey(userId, file, folder);
+        try {
+            await this.client.putObject(this.bucketName, objectKey, file.buffer, file.size, {
+                'Content-Type': file.mimetype,
+                'Cache-Control': 'public, max-age=31536000, immutable',
+            });
+        }
+        catch {
+            throw new common_1.InternalServerErrorException('上传素材到 MinIO 失败');
+        }
+        return {
+            bucket: this.bucketName,
+            objectKey,
+            url: `${this.publicBaseUrl}/${this.bucketName}/${this.encodeObjectKey(objectKey)}`,
+        };
+    }
+    ensureBucket() {
+        if (!this.ensureBucketPromise) {
+            this.ensureBucketPromise = this.ensureBucketInternal();
+        }
+        return this.ensureBucketPromise;
+    }
+    async ensureBucketInternal() {
+        try {
+            const exists = await this.client.bucketExists(this.bucketName);
+            if (!exists) {
+                await this.client.makeBucket(this.bucketName);
+            }
+            await this.client.setBucketPolicy(this.bucketName, JSON.stringify(this.buildPublicReadPolicy()));
+        }
+        catch {
+            this.ensureBucketPromise = null;
+            throw new common_1.InternalServerErrorException('初始化 MinIO Bucket 失败');
+        }
+    }
+    buildObjectKey(userId, file, folder) {
+        const now = new Date();
+        const year = String(now.getFullYear());
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const extension = this.resolveExtension(file);
+        return `${folder}/${userId}/${year}/${month}/${day}/${Date.now()}-${(0, node_crypto_1.randomUUID)()}.${extension}`;
+    }
+    resolveExtension(file) {
+        const normalized = (0, node_path_1.extname)(file.originalname).replace('.', '').toLowerCase();
+        if (normalized) {
+            return normalized;
+        }
+        return this.resolveExtensionFromMimeType(file.mimetype);
+    }
+    resolvePublicBaseUrl(endpoint, port, useSSL) {
+        const explicit = this.configService.get('MINIO_PUBLIC_BASE_URL')?.trim();
+        if (explicit) {
+            return explicit.replace(/\/+$/, '');
+        }
+        return this.buildDefaultPublicBaseUrl(endpoint, port, useSSL);
+    }
+    buildDefaultPublicBaseUrl(endpoint, port, useSSL) {
+        const protocol = useSSL ? 'https' : 'http';
+        const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
+        return `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}`;
+    }
+    encodeObjectKey(objectKey) {
+        return objectKey
+            .split('/')
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+    }
+    resolveExtensionFromMimeType(mimeType) {
+        const mimeToExtension = {
+            'image/jpeg': 'jpg',
+            'image/png': 'png',
+            'image/webp': 'webp',
+            'image/gif': 'gif',
+            'image/svg+xml': 'svg',
+            'video/mp4': 'mp4',
+            'video/quicktime': 'mov',
+            'video/webm': 'webm',
+            'application/octet-stream': 'bin',
+        };
+        return mimeToExtension[mimeType] ?? 'bin';
+    }
+    normalizeMimeType(value) {
+        const trimmed = value?.split(';')[0]?.trim().toLowerCase();
+        return trimmed || 'application/octet-stream';
+    }
+    buildRemoteOriginalName(sourceUrl, mimeType) {
+        try {
+            const url = new URL(sourceUrl);
+            const pathname = decodeURIComponent(url.pathname);
+            const name = pathname.split('/').pop()?.trim();
+            if (name) {
+                return name;
+            }
+        }
+        catch {
+        }
+        return `remote.${this.resolveExtensionFromMimeType(mimeType)}`;
+    }
+    parseDataUrl(value) {
+        const match = /^data:([^;]+);base64,(.+)$/i.exec(value);
+        if (!match) {
+            return null;
+        }
+        return {
+            mimeType: match[1].trim().toLowerCase(),
+            buffer: Buffer.from(match[2], 'base64'),
+        };
+    }
+    buildPublicReadPolicy() {
+        return {
+            Version: '2012-10-17',
+            Statement: [
+                {
+                    Effect: 'Allow',
+                    Principal: { AWS: ['*'] },
+                    Action: ['s3:GetBucketLocation', 's3:ListBucket'],
+                    Resource: [`arn:aws:s3:::${this.bucketName}`],
+                },
+                {
+                    Effect: 'Allow',
+                    Principal: { AWS: ['*'] },
+                    Action: ['s3:GetObject'],
+                    Resource: [`arn:aws:s3:::${this.bucketName}/*`],
+                },
+            ],
+        };
+    }
+};
+exports.ProductImageStorageService = ProductImageStorageService;
+exports.ProductImageStorageService = ProductImageStorageService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
+], ProductImageStorageService);
+//# sourceMappingURL=product-image-storage.service.js.map

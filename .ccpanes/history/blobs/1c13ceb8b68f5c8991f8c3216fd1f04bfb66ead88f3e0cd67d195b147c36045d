@@ -1,0 +1,222 @@
+import type { SessionUser } from '../auth/auth.types';
+import { CloseSupportConversationDto } from './dto/close-support-conversation.dto';
+import { ListSupportConversationsQueryDto } from './dto/list-support-conversations-query.dto';
+import { ReplySupportConversationDto } from './dto/reply-support-conversation.dto';
+import { TakeSupportConversationDto } from './dto/take-support-conversation.dto';
+import { SupportService } from './support.service';
+export declare class SupportAdminController {
+    private readonly supportService;
+    constructor(supportService: SupportService);
+    listConversations(req: {
+        user: SessionUser;
+    }, query: ListSupportConversationsQueryDto): Promise<{
+        items: {
+            id: string;
+            channel: string;
+            visitorSessionId: string;
+            visitorName: string | null;
+            visitorContact: string | null;
+            sourcePage: string | null;
+            status: import("@prisma/client").$Enums.SupportConversationStatus;
+            handoffRequestedAt: string | null;
+            humanTakenAt: string | null;
+            endedAt: string | null;
+            lastMessageAt: string;
+            createdAt: string;
+            updatedAt: string;
+            assignedAgent: {
+                id: string;
+                username: string;
+                displayName: string;
+                role: string;
+            } | null;
+            messages: {
+                id: string;
+                role: import("@prisma/client").$Enums.SupportMessageRole;
+                content: string;
+                confidence: number | null;
+                sources: import("@prisma/client/runtime/client").JsonValue;
+                agentUserId: string | null;
+                createdAt: string;
+            }[];
+            latestHandoff: {
+                id: string;
+                status: import("@prisma/client").$Enums.SupportHandoffStatus;
+                queueSerial: number | null;
+                requestedAt: string;
+                acceptedAt: string | null;
+                closedAt: string | null;
+                acceptedByUserId: string | null;
+            } | null;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    getConversation(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        channel: string;
+        visitorSessionId: string;
+        visitorName: string | null;
+        visitorContact: string | null;
+        sourcePage: string | null;
+        status: import("@prisma/client").$Enums.SupportConversationStatus;
+        handoffRequestedAt: string | null;
+        humanTakenAt: string | null;
+        endedAt: string | null;
+        lastMessageAt: string;
+        createdAt: string;
+        updatedAt: string;
+        assignedAgent: {
+            id: string;
+            username: string;
+            displayName: string;
+            role: string;
+        } | null;
+        messages: {
+            id: string;
+            role: import("@prisma/client").$Enums.SupportMessageRole;
+            content: string;
+            confidence: number | null;
+            sources: import("@prisma/client/runtime/client").JsonValue;
+            agentUserId: string | null;
+            createdAt: string;
+        }[];
+        latestHandoff: {
+            id: string;
+            status: import("@prisma/client").$Enums.SupportHandoffStatus;
+            queueSerial: number | null;
+            requestedAt: string;
+            acceptedAt: string | null;
+            closedAt: string | null;
+            acceptedByUserId: string | null;
+        } | null;
+    }>;
+    takeConversation(req: {
+        user: SessionUser;
+    }, id: string, dto: TakeSupportConversationDto): Promise<{
+        id: string;
+        channel: string;
+        visitorSessionId: string;
+        visitorName: string | null;
+        visitorContact: string | null;
+        sourcePage: string | null;
+        status: import("@prisma/client").$Enums.SupportConversationStatus;
+        handoffRequestedAt: string | null;
+        humanTakenAt: string | null;
+        endedAt: string | null;
+        lastMessageAt: string;
+        createdAt: string;
+        updatedAt: string;
+        assignedAgent: {
+            id: string;
+            username: string;
+            displayName: string;
+            role: string;
+        } | null;
+        messages: {
+            id: string;
+            role: import("@prisma/client").$Enums.SupportMessageRole;
+            content: string;
+            confidence: number | null;
+            sources: import("@prisma/client/runtime/client").JsonValue;
+            agentUserId: string | null;
+            createdAt: string;
+        }[];
+        latestHandoff: {
+            id: string;
+            status: import("@prisma/client").$Enums.SupportHandoffStatus;
+            queueSerial: number | null;
+            requestedAt: string;
+            acceptedAt: string | null;
+            closedAt: string | null;
+            acceptedByUserId: string | null;
+        } | null;
+    }>;
+    replyConversation(req: {
+        user: SessionUser;
+    }, id: string, dto: ReplySupportConversationDto): Promise<{
+        id: string;
+        channel: string;
+        visitorSessionId: string;
+        visitorName: string | null;
+        visitorContact: string | null;
+        sourcePage: string | null;
+        status: import("@prisma/client").$Enums.SupportConversationStatus;
+        handoffRequestedAt: string | null;
+        humanTakenAt: string | null;
+        endedAt: string | null;
+        lastMessageAt: string;
+        createdAt: string;
+        updatedAt: string;
+        assignedAgent: {
+            id: string;
+            username: string;
+            displayName: string;
+            role: string;
+        } | null;
+        messages: {
+            id: string;
+            role: import("@prisma/client").$Enums.SupportMessageRole;
+            content: string;
+            confidence: number | null;
+            sources: import("@prisma/client/runtime/client").JsonValue;
+            agentUserId: string | null;
+            createdAt: string;
+        }[];
+        latestHandoff: {
+            id: string;
+            status: import("@prisma/client").$Enums.SupportHandoffStatus;
+            queueSerial: number | null;
+            requestedAt: string;
+            acceptedAt: string | null;
+            closedAt: string | null;
+            acceptedByUserId: string | null;
+        } | null;
+    }>;
+    closeConversation(req: {
+        user: SessionUser;
+    }, id: string, dto: CloseSupportConversationDto): Promise<{
+        id: string;
+        channel: string;
+        visitorSessionId: string;
+        visitorName: string | null;
+        visitorContact: string | null;
+        sourcePage: string | null;
+        status: import("@prisma/client").$Enums.SupportConversationStatus;
+        handoffRequestedAt: string | null;
+        humanTakenAt: string | null;
+        endedAt: string | null;
+        lastMessageAt: string;
+        createdAt: string;
+        updatedAt: string;
+        assignedAgent: {
+            id: string;
+            username: string;
+            displayName: string;
+            role: string;
+        } | null;
+        messages: {
+            id: string;
+            role: import("@prisma/client").$Enums.SupportMessageRole;
+            content: string;
+            confidence: number | null;
+            sources: import("@prisma/client/runtime/client").JsonValue;
+            agentUserId: string | null;
+            createdAt: string;
+        }[];
+        latestHandoff: {
+            id: string;
+            status: import("@prisma/client").$Enums.SupportHandoffStatus;
+            queueSerial: number | null;
+            requestedAt: string;
+            acceptedAt: string | null;
+            closedAt: string | null;
+            acceptedByUserId: string | null;
+        } | null;
+    }>;
+}

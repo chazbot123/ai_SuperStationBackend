@@ -1,0 +1,9 @@
+export declare class CreateSuperSiteIndustryItemDto {
+    title: string;
+    summary?: string;
+    sourceUrl?: string;
+    coverImage?: string;
+    publishedAt?: string;
+    enabled?: boolean;
+    isPinned?: boolean;
+}

@@ -23,6 +23,10 @@
   const profileDebugState = {
     douyinSignature: "",
   };
+  const profileObserverState = {
+    scheduled: false,
+    lastSignature: "",
+  };
 
   function reportRuntimeDebug(hypothesisId, location, data) {
     const apiBaseUrl = runtimeBridgeState.apiBaseUrl || "http://127.0.0.1:3001";
@@ -71,6 +75,69 @@
   }
   //#endregion
 
+  function isWechatMpFinderCreatePage(url = window.location.href) {
+    const currentUrl = String(url || "");
+    return currentUrl.includes("channels.weixin.qq.com/platform/post/finderNewLifeCreate");
+  }
+
+  function reportWechatPublishBounceDebug(location, data) {
+    if (platform !== "wechat_mp") {
+      return;
+    }
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: publishDebugSessionId,
+        runId: "pre-fix",
+        hypothesisId: "W2",
+        location,
+        msg: `[DEBUG] ${location}`,
+        data,
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+
+  function getWechatPublishPageSnapshot() {
+    const pageText = String(document.body?.innerText || document.body?.textContent || "");
+    return {
+      currentUrl: window.location.href,
+      title: document.title || "",
+      readyState: document.readyState || "",
+      hasPendingPublish: Boolean(readStorageValue(pendingBitBrowserPublishStorageKey)),
+      hasRuntimeSessionId: Boolean(runtimeBridgeState.runtimeSessionId),
+      currentCommandId: String(runtimeBridgeState.currentCommandId || ""),
+      pageTextPreview: pageText.slice(0, 220),
+      hasRecentEntry: pageText.includes("最近图文"),
+      hasPublishImageButton: pageText.includes("发表图文"),
+      hasCreateTitleInput: Boolean(
+        document.querySelector('input[placeholder*="标题"], textarea[placeholder*="标题"]'),
+      ),
+      hasDescEditor: Boolean(
+        document.querySelector('[contenteditable="true"], [contenteditable][data-placeholder*="描述"]'),
+      ),
+    };
+  }
+
+  function scheduleWechatPublishBounceSnapshots(reason) {
+    if (platform !== "wechat_mp" || !isWechatMpFinderCreatePage()) {
+      return;
+    }
+    const delays = [300, 1200, 2600];
+    for (const delay of delays) {
+      window.setTimeout(() => {
+        reportWechatPublishBounceDebug(
+          "scripts/browser-extension/platform-login-helper/content.js:wechat-publish-bounce:snapshot",
+          {
+            reason,
+            delay,
+            ...getWechatPublishPageSnapshot(),
+          },
+        );
+      }, delay);
+    }
+  }
+
   function buildBitBrowserRuntimeStatusSender(runtimeSessionId, runtimeCommandId) {
     return async (payload) => {
       const profile = extractProfile(platform);
@@ -115,6 +182,18 @@
       runtimeBridgeState.currentCommandId === runtimeCommandId &&
       publishExecutionState.pageUrl === currentUrl
     ) {
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:startBitBrowserPublishExecution:skip-duplicate",
+        {
+          runtimeSessionId,
+          runtimeCommandId,
+          currentUrl,
+          launchSource,
+          sessionToken: String(session?.sessionToken || "").slice(0, 12),
+          running: publishExecutionState.running,
+          storedPendingLength: readStorageValue(pendingBitBrowserPublishStorageKey).length,
+        },
+      );
       return false;
     }
 
@@ -135,6 +214,10 @@
           launchSource === "page-resume-home-recovery"
             ? Number(previousRuntimeMeta.homeResumeCount || 0) + 1
             : Number(previousRuntimeMeta.homeResumeCount || 0),
+        resumeCount:
+          launchSource.startsWith("page-resume")
+            ? Number(previousRuntimeMeta.resumeCount || 0) + 1
+            : Number(previousRuntimeMeta.resumeCount || 0),
       },
     };
     publishExecutionState.sessionToken = String(sessionWithRuntimeMeta.sessionToken || runtimeSessionId);
@@ -145,6 +228,17 @@
       runtimeCommandId,
       session: sessionWithRuntimeMeta,
     });
+    reportWechatPublishBounceDebug(
+      "scripts/browser-extension/platform-login-helper/content.js:startBitBrowserPublishExecution:persisted",
+      {
+        runtimeSessionId,
+        runtimeCommandId,
+        launchSource,
+        ...getWechatPublishPageSnapshot(),
+        storedPendingLength: readStorageValue(pendingBitBrowserPublishStorageKey).length,
+      },
+    );
+    scheduleWechatPublishBounceSnapshots(`start:${launchSource}`);
 
     //#region debug-point douyin-home-network-resume-start
     fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H2",location:"scripts/browser-extension/platform-login-helper/content.js:startBitBrowserPublishExecution",msg:"[DEBUG] start bitbrowser publish execution",data:{runtimeSessionId,runtimeCommandId,currentUrl,launchSource,looksLikeLoginPage:looksLikeDouyinLoginPage(currentUrl),pageTextPreview:String(document.body?.innerText||document.body?.textContent||"").slice(0,160)},ts:Date.now()})}).catch(()=>{});
@@ -189,6 +283,16 @@
         });
       })
       .finally(() => {
+        reportWechatPublishBounceDebug(
+          "scripts/browser-extension/platform-login-helper/content.js:startBitBrowserPublishExecution:finally",
+          {
+            runtimeSessionId,
+            runtimeCommandId,
+            launchSource,
+            ...getWechatPublishPageSnapshot(),
+            storedPendingLength: readStorageValue(pendingBitBrowserPublishStorageKey).length,
+          },
+        );
         publishExecutionState.running = false;
         runtimeBridgeState.currentCommandId = "";
       });
@@ -220,12 +324,18 @@
     const homeResumeCount = Number(runtimeMeta.homeResumeCount || 0);
     const isContentPage = currentUrl.includes("/creator-micro/content/");
     const isHomePage = currentUrl.includes("/creator-micro/home");
-    const canRecoverOnHome =
-      isHomePage &&
-      homeResumeCount < 1 &&
-      (lastRuntimeUrl.includes("/creator-micro/content/upload") ||
-        lastRuntimeUrl.includes("/creator-micro/content/publish"));
-    const canResumeOnCurrentPage = isContentPage || canRecoverOnHome;
+    const isWechatMpPage = currentUrl.includes("channels.weixin.qq.com");
+    const isWechatMpCreatePage =
+      currentUrl.includes("channels.weixin.qq.com/platform/post/create") ||
+      currentUrl.includes("channels.weixin.qq.com/platform/post/finderNewLifeCreate");
+    const resumeCount = Number(runtimeMeta.resumeCount || 0);
+    if (resumeCount >= 3) {
+      return;
+    }
+    // Douyin home recovery causes repeated restart loops after the platform redirects
+    // an unfinished image publish flow back to home. Only resume on content pages.
+    const canRecoverOnHome = platform !== "douyin" && isHomePage && homeResumeCount < 1;
+    const canResumeOnCurrentPage = isContentPage || canRecoverOnHome || (isWechatMpPage && isWechatMpCreatePage);
     if (!canResumeOnCurrentPage) {
       //#region debug-point douyin-home-return-resume-skip-page
       fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:maybeResumePendingBitBrowserPublish:skip-page",msg:"[DEBUG] resume skipped because page not supported",data:{currentUrl:window.location.href,runtimeSessionId:pendingPublish.runtimeSessionId,runtimeCommandId:pendingPublish.runtimeCommandId,lastRuntimeUrl,homeResumeCount},ts:Date.now()})}).catch(()=>{});
@@ -329,10 +439,9 @@
         session: payload?.session || null,
         storedAt: Date.now(),
       });
-      writeStorageValue(
-        pendingBitBrowserPublishStorageKey,
-        serialized,
-      );
+      window.sessionStorage?.setItem?.(pendingBitBrowserPublishStorageKey, serialized);
+      // Keep pending publish scoped to the current tab so other same-origin tabs cannot resume it.
+      window.localStorage?.removeItem?.(pendingBitBrowserPublishStorageKey);
       //#region debug-point douyin-home-return-persist-pending-success
       fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:persistPendingBitBrowserPublish:success",msg:"[DEBUG] persist pending publish success",data:{currentUrl:window.location.href,runtimeSessionId:String(payload?.runtimeSessionId||"").trim(),runtimeCommandId:String(payload?.runtimeCommandId||"").trim(),serializedLength:serialized.length},ts:Date.now()})}).catch(()=>{});
       //#endregion
@@ -345,8 +454,19 @@
   }
 
   function readPendingBitBrowserPublish() {
-    const rawValue = readStorageValue(pendingBitBrowserPublishStorageKey);
+    const rawValue = (() => {
+      try {
+        return window.sessionStorage?.getItem?.(pendingBitBrowserPublishStorageKey) || "";
+      } catch (_) {
+        return "";
+      }
+    })();
     if (!rawValue) {
+      try {
+        window.localStorage?.removeItem?.(pendingBitBrowserPublishStorageKey);
+      } catch (_) {
+        // ignore stale cross-tab copies
+      }
       //#region debug-point douyin-home-return-read-pending-empty
       fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/content.js:readPendingBitBrowserPublish:empty",msg:"[DEBUG] read pending publish empty",data:{currentUrl:window.location.href},ts:Date.now()})}).catch(()=>{});
       //#endregion
@@ -373,7 +493,25 @@
   }
 
   function clearPendingBitBrowserPublish() {
-    writeStorageValue(pendingBitBrowserPublishStorageKey, "");
+    const beforeClearLength = readStorageValue(pendingBitBrowserPublishStorageKey).length;
+    try {
+      window.sessionStorage?.removeItem?.(pendingBitBrowserPublishStorageKey);
+    } catch (_) {
+      // ignore
+    }
+    try {
+      window.localStorage?.removeItem?.(pendingBitBrowserPublishStorageKey);
+    } catch (_) {
+      // ignore
+    }
+    reportWechatPublishBounceDebug(
+      "scripts/browser-extension/platform-login-helper/content.js:clearPendingBitBrowserPublish",
+      {
+        beforeClearLength,
+        afterClearLength: readStorageValue(pendingBitBrowserPublishStorageKey).length,
+        ...getWechatPublishPageSnapshot(),
+      },
+    );
   }
 
   function resolveRuntimeBridgeConfig() {
@@ -953,9 +1091,9 @@
             "[class*='user-name']",
           ],
           wechat_mp: [
+            "#container-wrap .container-center .main-body .ant-row > div:first-child h2.finder-nickname",
+            "#container-wrap .main-body h2",
             "h2.finder-nickname",
-            "#finder-uid-copy.finder-uniq-id",
-            ".finder-uniq-id",
             ".finder-nickname",
             "[class*='finder-nickname']",
             ".weui-desktop-account__info-name",
@@ -987,10 +1125,10 @@
         : platform === "wechat_mp"
           ? normalizeIdentityText(
               findFirstText([
+                "#finder-uid-copy",
                 "#finder-uid-copy.finder-uniq-id",
                 "span.finder-uniq-id",
                 "[data-clipboard-text].finder-uniq-id",
-                "#finder-uid-copy",
               ]),
               platform,
             ) || null
@@ -1026,6 +1164,7 @@
           ? findDouyinAvatarUrl(anchoredBlockElement) || null
         : platform === "wechat_mp"
           ? findFirstImageSrc([
+              "#container-wrap .container-center .main-body .ant-row > div:first-child img.avatar",
               "img.avatar[alt='视频号头像']",
               "img.avatar",
               "img[src*='wx.qlogo.cn/finderhead/']",
@@ -1039,11 +1178,15 @@
         ? platform === "wechat_mp"
           ? parseCountText(
               findFirstText([
-                ".finder-info-num",
+                "#container-wrap .container-center .main-body .ant-row > div:first-child .finder-content-info .second-info .finder-info-num",
+                "#container-wrap .container-center .main-body .ant-row > div:first-child div.finder-content-info > div.second-info > span.finder-info-num",
                 ".finder-fans .finder-info-num",
                 "[class*='fans'] .finder-info-num",
+                ".finder-info-num",
               ]),
-            ) || findMetricCountByLabel("粉丝")
+            ) ||
+            findMetricCountByLabel("关注者") ||
+            findMetricCountByLabel("粉丝")
           : findMetricCountByLabel("粉丝")
         : platform === "douyin"
           ? parseCountText(
@@ -1176,13 +1319,35 @@
       // #region debug-point H4:publish-command-received
       fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:publishDebugSessionId,runId:"pre-fix",hypothesisId:"H3",location:"scripts/browser-extension/platform-login-helper/content.js:AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND:received",msg:"[DEBUG] runtime publish command received by content script",data:{runtimeSessionId,runtimeCommandId,platform,currentUrl,sessionToken:String(session.sessionToken||"").slice(0,12),looksLikeLoginPage:looksLikeDouyinLoginPage(currentUrl),pageTextPreview:String(document.body?.innerText||document.body?.textContent||"").slice(0,160)},ts:Date.now()})}).catch(()=>{});
       // #endregion
-      startBitBrowserPublishExecution({
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND:received",
+        {
+          runtimeSessionId,
+          runtimeCommandId,
+          currentUrl,
+          sessionToken: String(session.sessionToken || "").slice(0, 12),
+          ...getWechatPublishPageSnapshot(),
+          storedPendingLength: readStorageValue(pendingBitBrowserPublishStorageKey).length,
+        },
+      );
+      const started = startBitBrowserPublishExecution({
         runtimeSessionId,
         runtimeCommandId,
         session,
         currentUrl,
         launchSource: "command",
       });
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:AI_SUPERWEB_BITBROWSER_EXECUTE_COMMAND:started",
+        {
+          runtimeSessionId,
+          runtimeCommandId,
+          currentUrl,
+          started,
+          ...getWechatPublishPageSnapshot(),
+          storedPendingLength: readStorageValue(pendingBitBrowserPublishStorageKey).length,
+        },
+      );
       return;
     }
 
@@ -1352,6 +1517,68 @@
     sendRuntimeTick();
   };
 
+  function buildObservedProfileSignature() {
+    const profile = extractProfile(platform);
+    return JSON.stringify({
+      url: window.location.href,
+      title: document.title || "",
+      accountName: profile.accountName || "",
+      externalAccountId: profile.externalAccountId || "",
+      displayName: profile.displayName || "",
+      avatarUrl: profile.avatarUrl || "",
+      followerCount:
+        typeof profile.followerCount === "number" && Number.isFinite(profile.followerCount)
+          ? profile.followerCount
+          : null,
+    });
+  }
+
+  function flushObservedProfile(reason) {
+    profileObserverState.scheduled = false;
+    const nextSignature = buildObservedProfileSignature();
+    if (nextSignature === profileObserverState.lastSignature) {
+      return;
+    }
+    profileObserverState.lastSignature = nextSignature;
+    debugLog("profile-observer", "profile-updated", {
+      platform,
+      reason,
+      url: window.location.href,
+    });
+    notifyPageReady();
+  }
+
+  function scheduleObservedProfileRefresh(reason) {
+    if (profileObserverState.scheduled) {
+      return;
+    }
+    profileObserverState.scheduled = true;
+    window.setTimeout(() => {
+      flushObservedProfile(reason);
+    }, 120);
+  }
+
+  function startObservedProfileWatcher() {
+    profileObserverState.lastSignature = buildObservedProfileSignature();
+
+    const root = document.documentElement || document.body;
+    if (root && typeof MutationObserver !== "undefined") {
+      const observer = new MutationObserver(() => {
+        scheduleObservedProfileRefresh("mutation");
+      });
+      observer.observe(root, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+      });
+    }
+
+    window.setInterval(() => {
+      scheduleObservedProfileRefresh("interval");
+    }, 1500);
+  }
+
   function startRuntimeBridgeTicker() {
     syncRuntimeBridgeConfig();
     if (!runtimeBridgeState.runtimeSessionId || runtimeBridgeState.extensionTickStarted) {
@@ -1363,6 +1590,7 @@
 
   startRuntimeBridgeTicker();
   notifyPageReady();
+  startObservedProfileWatcher();
   window.addEventListener("load", notifyPageReady, { once: true });
   setTimeout(notifyPageReady, 800);
   setTimeout(notifyPageReady, 2000);
@@ -1370,4 +1598,63 @@
   setTimeout(maybeResumePendingBitBrowserPublish, 300);
   setTimeout(maybeResumePendingBitBrowserPublish, 1200);
   window.addEventListener("load", maybeResumePendingBitBrowserPublish, { once: true });
+
+  if (platform === "wechat_mp") {
+    window.addEventListener("pagehide", () => {
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:wechat-publish-bounce:pagehide",
+        getWechatPublishPageSnapshot(),
+      );
+    });
+    window.addEventListener("beforeunload", () => {
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:wechat-publish-bounce:beforeunload",
+        getWechatPublishPageSnapshot(),
+      );
+    });
+    window.addEventListener("popstate", () => {
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:wechat-publish-bounce:popstate",
+        getWechatPublishPageSnapshot(),
+      );
+    });
+    window.addEventListener("hashchange", () => {
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:wechat-publish-bounce:hashchange",
+        getWechatPublishPageSnapshot(),
+      );
+    });
+    document.addEventListener("visibilitychange", () => {
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:wechat-publish-bounce:visibilitychange",
+        {
+          visibilityState: document.visibilityState || "",
+          ...getWechatPublishPageSnapshot(),
+        },
+      );
+    });
+    const originalPushState = window.history.pushState.bind(window.history);
+    window.history.pushState = function (...args) {
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:wechat-publish-bounce:pushState",
+        {
+          nextUrl: String(args?.[2] || ""),
+          ...getWechatPublishPageSnapshot(),
+        },
+      );
+      return originalPushState(...args);
+    };
+    const originalReplaceState = window.history.replaceState.bind(window.history);
+    window.history.replaceState = function (...args) {
+      reportWechatPublishBounceDebug(
+        "scripts/browser-extension/platform-login-helper/content.js:wechat-publish-bounce:replaceState",
+        {
+          nextUrl: String(args?.[2] || ""),
+          ...getWechatPublishPageSnapshot(),
+        },
+      );
+      return originalReplaceState(...args);
+    };
+    scheduleWechatPublishBounceSnapshots("initial");
+  }
 })();

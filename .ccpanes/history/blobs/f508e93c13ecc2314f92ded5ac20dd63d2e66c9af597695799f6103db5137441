@@ -1,0 +1,141 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+var SuperSiteIndustryQueueService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SuperSiteIndustryQueueService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const bullmq_1 = require("bullmq");
+const ioredis_1 = __importDefault(require("ioredis"));
+const prisma_service_1 = require("../prisma/prisma.service");
+const super_site_industry_service_1 = require("./super-site-industry.service");
+let SuperSiteIndustryQueueService = SuperSiteIndustryQueueService_1 = class SuperSiteIndustryQueueService {
+    prisma;
+    configService;
+    superSiteIndustryService;
+    logger = new common_1.Logger(SuperSiteIndustryQueueService_1.name);
+    queueName = 'super-site-industry-sync';
+    connection = null;
+    queue = null;
+    worker = null;
+    constructor(prisma, configService, superSiteIndustryService) {
+        this.prisma = prisma;
+        this.configService = configService;
+        this.superSiteIndustryService = superSiteIndustryService;
+    }
+    async onModuleInit() {
+        const redisUrl = this.configService.get('REDIS_URL')?.trim() ||
+            'redis://localhost:6379';
+        try {
+            this.connection = new ioredis_1.default(redisUrl, {
+                maxRetriesPerRequest: null,
+            });
+            await this.connection.ping();
+            this.queue = new bullmq_1.Queue(this.queueName, {
+                connection: this.connection,
+            });
+            this.worker = new bullmq_1.Worker(this.queueName, async (job) => {
+                await this.superSiteIndustryService.syncMyIndustryItems(job.data.userId);
+            }, {
+                connection: this.connection,
+                concurrency: 1,
+            });
+            this.worker.on('failed', (job, error) => {
+                this.logger.error(`行业抓取任务失败 userId=${job?.data.userId ?? 'unknown'}: ${error.message}`);
+            });
+            await this.restoreSchedulers();
+        }
+        catch (error) {
+            this.logger.warn(`行业抓取队列未启用：${error instanceof Error ? error.message : String(error)}`);
+            await this.safeClose();
+        }
+    }
+    async onModuleDestroy() {
+        await this.safeClose();
+    }
+    async syncUserScheduler(userId, refreshConfig) {
+        if (!this.queue) {
+            return;
+        }
+        const schedulerId = this.buildSchedulerId(userId);
+        if (!refreshConfig.enabled) {
+            await this.queue.removeJobScheduler(schedulerId);
+            return;
+        }
+        const pattern = this.buildCronPattern(refreshConfig.dailyTime);
+        await this.queue.upsertJobScheduler(schedulerId, {
+            pattern,
+        }, {
+            name: 'sync',
+            data: {
+                userId,
+            },
+        });
+    }
+    async enqueueManualSync(userId) {
+        if (!this.queue) {
+            await this.superSiteIndustryService.syncMyIndustryItems(userId);
+            return;
+        }
+        await this.queue.add('manual-sync', { userId });
+    }
+    async restoreSchedulers() {
+        if (!this.queue) {
+            return;
+        }
+        const settings = await this.prisma.superSiteSetting.findMany({
+            select: {
+                userId: true,
+                industryRefreshConfig: true,
+            },
+        });
+        for (const item of settings) {
+            if (!item.industryRefreshConfig || Array.isArray(item.industryRefreshConfig)) {
+                continue;
+            }
+            const config = item.industryRefreshConfig;
+            if (!config.enabled) {
+                continue;
+            }
+            await this.syncUserScheduler(item.userId, config);
+        }
+    }
+    buildSchedulerId(userId) {
+        return `industry-sync:${userId}`;
+    }
+    buildCronPattern(dailyTime) {
+        const [hourText = '9', minuteText = '0'] = dailyTime.split(':');
+        const hour = Number.isFinite(Number(hourText)) ? Number(hourText) : 9;
+        const minute = Number.isFinite(Number(minuteText))
+            ? Number(minuteText)
+            : 0;
+        return `${Math.min(Math.max(minute, 0), 59)} ${Math.min(Math.max(hour, 0), 23)} * * *`;
+    }
+    async safeClose() {
+        await this.worker?.close();
+        await this.queue?.close();
+        await this.connection?.quit();
+        this.worker = null;
+        this.queue = null;
+        this.connection = null;
+    }
+};
+exports.SuperSiteIndustryQueueService = SuperSiteIndustryQueueService;
+exports.SuperSiteIndustryQueueService = SuperSiteIndustryQueueService = SuperSiteIndustryQueueService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        config_1.ConfigService,
+        super_site_industry_service_1.SuperSiteIndustryService])
+], SuperSiteIndustryQueueService);
+//# sourceMappingURL=super-site-industry-queue.service.js.map

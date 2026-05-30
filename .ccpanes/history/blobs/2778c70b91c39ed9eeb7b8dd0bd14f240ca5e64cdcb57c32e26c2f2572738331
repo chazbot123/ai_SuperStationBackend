@@ -1,0 +1,8 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SaveModelConfigDto = void 0;
+const test_model_config_dto_1 = require("./test-model-config.dto");
+class SaveModelConfigDto extends test_model_config_dto_1.TestModelConfigDto {
+}
+exports.SaveModelConfigDto = SaveModelConfigDto;
+//# sourceMappingURL=save-model-config.dto.js.map

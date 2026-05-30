@@ -1,0 +1,9 @@
+import { TextModelConfigDto } from './generate-copy.dto';
+export declare class RecommendBgmDto {
+    text: string;
+    mode?: 'product_video' | 'avatar_video';
+    platformStyle?: 'douyin' | 'xiaohongshu' | 'wechat_mp';
+    scene?: string;
+    style?: string;
+    modelConfig?: TextModelConfigDto;
+}

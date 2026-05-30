@@ -161,6 +161,17 @@ export class InMemoryBitBrowserBindingRepository
     );
   }
 
+  async getProfileBindingById(
+    creatorId: string,
+    profileBindingId: string,
+  ): Promise<BrowserProfileBinding | null> {
+    const binding = this.profileBindings.get(profileBindingId);
+    if (!binding || binding.creatorId !== creatorId) {
+      return null;
+    }
+    return binding;
+  }
+
   async touchProfileBinding(
     creatorId: string,
     profileBindingId: string,

@@ -1,0 +1,107 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.GenerateImagesDto = exports.ImageModelConfigDto = void 0;
+const class_validator_1 = require("class-validator");
+const class_transformer_1 = require("class-transformer");
+const model_provider_presets_1 = require("../model-provider-presets");
+class ImageModelConfigDto {
+    enabled;
+    providerName;
+    providerKey;
+    baseUrl;
+    taskQueryUrlTemplate;
+    apiKey;
+    modelName;
+}
+exports.ImageModelConfigDto = ImageModelConfigDto;
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], ImageModelConfigDto.prototype, "enabled", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(128),
+    __metadata("design:type", String)
+], ImageModelConfigDto.prototype, "providerName", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(model_provider_presets_1.MODEL_PROVIDER_KEYS),
+    __metadata("design:type", String)
+], ImageModelConfigDto.prototype, "providerKey", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(500),
+    __metadata("design:type", String)
+], ImageModelConfigDto.prototype, "baseUrl", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(500),
+    __metadata("design:type", String)
+], ImageModelConfigDto.prototype, "taskQueryUrlTemplate", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(500),
+    __metadata("design:type", String)
+], ImageModelConfigDto.prototype, "apiKey", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(128),
+    __metadata("design:type", String)
+], ImageModelConfigDto.prototype, "modelName", void 0);
+class GenerateImagesDto {
+    prompt;
+    sizePreset;
+    resolution;
+    referenceImages;
+    modelConfig;
+}
+exports.GenerateImagesDto = GenerateImagesDto;
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(2000),
+    __metadata("design:type", String)
+], GenerateImagesDto.prototype, "prompt", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(['1_1', '3_4', '4_5', '9_16', '16_9']),
+    __metadata("design:type", String)
+], GenerateImagesDto.prototype, "sizePreset", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(['1k', '2k', '4k']),
+    __metadata("design:type", String)
+], GenerateImagesDto.prototype, "resolution", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ArrayMaxSize)(3),
+    (0, class_validator_1.IsString)({ each: true }),
+    __metadata("design:type", Array)
+], GenerateImagesDto.prototype, "referenceImages", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsObject)(),
+    (0, class_validator_1.ValidateNested)(),
+    (0, class_transformer_1.Type)(() => ImageModelConfigDto),
+    __metadata("design:type", ImageModelConfigDto)
+], GenerateImagesDto.prototype, "modelConfig", void 0);
+//# sourceMappingURL=generate-images.dto.js.map

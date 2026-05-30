@@ -1,0 +1,6 @@
+import { TextModelConfigDto } from './generate-copy.dto';
+export declare class PromptPolishDto {
+    prompt: string;
+    scene: 'social_post' | 'product_image';
+    modelConfig?: TextModelConfigDto;
+}

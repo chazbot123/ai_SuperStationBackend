@@ -1,0 +1,7 @@
+export declare class UpdateSocialPostDto {
+    prompt?: string;
+    title: string;
+    body: string;
+    tags?: string[];
+    images?: string[];
+}

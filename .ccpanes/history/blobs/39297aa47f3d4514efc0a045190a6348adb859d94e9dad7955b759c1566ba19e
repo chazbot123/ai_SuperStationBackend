@@ -1,0 +1,4 @@
+export declare class UploadKnowledgeDocumentDto {
+    title?: string;
+    scope?: 'company' | 'tenant' | 'global';
+}

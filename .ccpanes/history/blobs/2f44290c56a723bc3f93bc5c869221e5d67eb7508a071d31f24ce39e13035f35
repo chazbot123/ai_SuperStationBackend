@@ -1,0 +1,6 @@
+declare const OFFICIAL_OAUTH_PLATFORMS: readonly ["douyin", "kuaishou", "bilibili", "wechat_official"];
+export declare class StartOfficialOauthLoginDto {
+    platform: (typeof OFFICIAL_OAUTH_PLATFORMS)[number];
+    accountId?: string;
+}
+export {};

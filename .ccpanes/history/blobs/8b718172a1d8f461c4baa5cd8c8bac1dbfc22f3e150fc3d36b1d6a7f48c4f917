@@ -1,0 +1,15 @@
+export type ModelType = 'text' | 'image' | 'video';
+export type ProviderKey = 'qwen' | 'doubao' | 'openai' | 'deepseek' | 'gemini' | 'vidu' | 'custom';
+export type ProviderProtocol = 'openai_chat' | 'gemini_generate_content' | 'dashscope_image' | 'doubao_image' | 'openai_image' | 'dashscope_video' | 'vidu_image' | 'vidu_video';
+export type ProviderPreset = {
+    key: ProviderKey;
+    providerName: string;
+    baseUrl: string;
+    taskQueryUrlTemplate?: string;
+    defaultModelName: string;
+    protocol: ProviderProtocol;
+};
+export declare const MODEL_PROVIDER_KEYS: readonly ["qwen", "doubao", "openai", "deepseek", "gemini", "vidu", "custom"];
+export declare function getProviderPreset(type: ModelType, key?: ProviderKey | null): ProviderPreset | null;
+export declare function inferProviderKeyByUrl(requestUrl?: string, providerName?: string): ProviderKey;
+export declare function resolveProviderProtocol(type: ModelType, key: ProviderKey, requestUrl?: string): ProviderProtocol;

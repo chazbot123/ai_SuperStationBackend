@@ -1,0 +1,30 @@
+import { OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+export type VideoTtsCacheEntry = {
+    userId?: string | null;
+    voiceId?: string | null;
+    text?: string;
+    subtitleText?: string | null;
+    subtitleEnabled?: boolean | null;
+    ttsTaskId: string;
+    audioUrl: string | null;
+    bgmUrl?: string | null;
+    bgmVolume?: number | null;
+    sourceVideoUrl: string | null;
+    finalVideoUrl: string | null;
+    status: 'processing' | 'success' | 'failed';
+    errorMessage?: string | null;
+    createdAt: string;
+};
+export declare class AiVideoTtsCacheService implements OnModuleDestroy {
+    private readonly configService;
+    private client?;
+    private connectPromise?;
+    constructor(configService: ConfigService);
+    get(videoTaskId: string): Promise<VideoTtsCacheEntry | null>;
+    set(videoTaskId: string, entry: VideoTtsCacheEntry, ttlSeconds?: number): Promise<VideoTtsCacheEntry>;
+    del(videoTaskId: string): Promise<void>;
+    onModuleDestroy(): Promise<void>;
+    private buildKey;
+    private getClient;
+}

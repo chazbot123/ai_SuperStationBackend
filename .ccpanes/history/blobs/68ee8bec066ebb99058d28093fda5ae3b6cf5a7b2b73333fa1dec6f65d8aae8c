@@ -1,0 +1,14 @@
+declare const PUBLISH_PLATFORMS: readonly ["xiaohongshu", "douyin", "wechat_mp", "kuaishou", "wechat_official", "bilibili"];
+declare const PUBLISH_EXECUTION_MODES: readonly ["server", "extension"];
+export declare class PublishLeadContentTargetDto {
+    platform: (typeof PUBLISH_PLATFORMS)[number];
+    platformAccountId: string;
+    draftTitle?: string;
+    draftBody?: string;
+    draftTags?: string[];
+}
+export declare class PublishLeadContentDto {
+    targets: PublishLeadContentTargetDto[];
+    executionMode?: (typeof PUBLISH_EXECUTION_MODES)[number];
+}
+export {};

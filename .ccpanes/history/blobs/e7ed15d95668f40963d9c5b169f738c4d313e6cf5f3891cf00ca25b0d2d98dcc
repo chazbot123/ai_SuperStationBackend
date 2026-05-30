@@ -1,0 +1,19 @@
+import { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+export declare class PublishingCleanupService implements OnModuleInit, OnModuleDestroy {
+    private readonly prisma;
+    private readonly configService;
+    private readonly logger;
+    private cleanupTimer;
+    constructor(prisma: PrismaService, configService: ConfigService);
+    onModuleInit(): void;
+    onModuleDestroy(): void;
+    cleanupExpiredPublishJobs(): Promise<import("@prisma/client").Prisma.BatchPayload | {
+        count: number;
+        skipped: boolean;
+    }>;
+    private isCleanupEnabled;
+    private resolveRetentionDays;
+    private resolveCleanupIntervalMs;
+}

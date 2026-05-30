@@ -1,0 +1,119 @@
+import { ConfigService } from '@nestjs/config';
+import type { SessionUser } from '../auth/auth.types';
+import { PrismaService } from '../prisma/prisma.service';
+import { ImportGaodeStoresDto } from './dto/import-gaode-stores.dto';
+import { ListStoreSearchRegionsQueryDto } from './dto/list-store-search-regions-query.dto';
+import { SearchGaodeStoresDto } from './dto/search-gaode-stores.dto';
+import { UpdateStoreSearchConfigDto } from './dto/update-store-search-config.dto';
+type RegionCenter = {
+    lng: number;
+    lat: number;
+};
+type ResolvedSliceRegion = {
+    name: string;
+    adcode: string;
+    level: string;
+    center: RegionCenter | null;
+};
+type StoreSearchRegionItem = {
+    name: string;
+    adcode: string;
+    level: string;
+    center: RegionCenter | null;
+};
+type SearchItem = {
+    amapId: string;
+    name: string;
+    matchedKeywords: string[];
+    telRaw: string;
+    primaryPhone: string;
+    address: string;
+    pname: string;
+    cityname: string;
+    adname: string;
+    businessArea: string;
+    type: string;
+    typecode: string;
+    locationLng: number | null;
+    locationLat: number | null;
+    website: string;
+    rating: string;
+    cost: string;
+};
+export declare class PublishingStoreSearchService {
+    private readonly prisma;
+    private readonly configService;
+    private readonly logger;
+    private lastAmapRequestAt;
+    constructor(prisma: PrismaService, configService: ConfigService);
+    getConfig(user: SessionUser): Promise<{
+        keywords: string[];
+        provinceAdcode: string;
+        provinceName: string;
+        cityAdcode: string;
+        cityName: string;
+        districtAdcode: string;
+        districtName: string;
+        streetAdcode: string;
+        streetName: string;
+    }>;
+    updateConfig(user: SessionUser, dto: UpdateStoreSearchConfigDto): Promise<{
+        keywords: string[];
+        provinceAdcode: string;
+        provinceName: string;
+        cityAdcode: string;
+        cityName: string;
+        districtAdcode: string;
+        districtName: string;
+        streetAdcode: string;
+        streetName: string;
+    }>;
+    listRegions(_user: SessionUser, dto: ListStoreSearchRegionsQueryDto): Promise<{
+        items: StoreSearchRegionItem[];
+    }>;
+    search(user: SessionUser, dto: SearchGaodeStoresDto): Promise<{
+        keywords: string[];
+        resolvedRegion: {
+            name: string;
+            adcode: string;
+            level: string;
+            center: RegionCenter | null;
+        };
+        sliceRegions: ResolvedSliceRegion[];
+        items: SearchItem[];
+        total: number;
+        partialByBudget: boolean;
+        upstreamRequestCount: number;
+        staticMapUrl: string;
+    }>;
+    importToCustomerManagement(user: SessionUser, dto: ImportGaodeStoresDto): Promise<{
+        createdCount: number;
+        skippedCount: number;
+    }>;
+    private getAmapKey;
+    private resolveRegion;
+    private fetchRegionChildren;
+    private findDistrict;
+    private buildSliceRegions;
+    private searchSliceByKeyword;
+    private searchPoiPage;
+    private toSearchItem;
+    private buildStaticMapUrl;
+    private pickZoom;
+    private normalizeKeywords;
+    private normalizePhone;
+    private normalizeBusinessArea;
+    private normalizeTextValue;
+    private toRegionItem;
+    private parseCenter;
+    private buildPoiIdentity;
+    private buildFallbackIdentity;
+    private truncateLabel;
+    private fetchJson;
+    private waitForAmapRateLimitWindow;
+    private isAmapRateLimitError;
+    private buildAmapErrorMessage;
+    private sleep;
+    private ensureMainCompany;
+}
+export {};

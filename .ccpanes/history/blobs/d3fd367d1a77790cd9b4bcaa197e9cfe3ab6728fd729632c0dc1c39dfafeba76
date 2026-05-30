@@ -1,0 +1,9 @@
+export declare class CreateProductImageDraftDto {
+    prompt: string;
+    title: string;
+    body: string;
+    tags?: string[];
+    images: string[];
+    sizePreset: '1_1' | '3_4' | '4_5' | '9_16' | '16_9';
+    resolution: '1k' | '2k' | '4k';
+}

@@ -1,0 +1,17 @@
+export declare class ImageModelConfigDto {
+    enabled?: boolean;
+    providerName?: string;
+    providerKey?: string;
+    baseUrl?: string;
+    taskQueryUrlTemplate?: string;
+    apiKey?: string;
+    modelName?: string;
+}
+export declare class GenerateImagesDto {
+    prompt?: string;
+    sizePreset?: '1_1' | '3_4' | '4_5' | '9_16' | '16_9';
+    resolution?: '1k' | '2k' | '4k';
+    referenceImages?: string[];
+    modelConfig?: ImageModelConfigDto;
+}
+export type ImageModelConfigInput = ImageModelConfigDto;

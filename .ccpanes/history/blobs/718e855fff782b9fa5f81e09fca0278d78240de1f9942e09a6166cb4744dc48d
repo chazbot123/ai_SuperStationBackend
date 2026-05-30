@@ -1,0 +1,198 @@
+import type { SessionUser } from '../auth/auth.types';
+import { ListKnowledgeDocumentsQueryDto } from './dto/list-knowledge-documents-query.dto';
+import { SearchKnowledgeRetrievalDto } from './dto/search-knowledge-retrieval.dto';
+import { UploadKnowledgeDocumentDto } from './dto/upload-knowledge-document.dto';
+import type { KnowledgeUploadFile } from './knowledge-file.types';
+import { KnowledgeService } from './knowledge.service';
+export declare class KnowledgeController {
+    private readonly knowledgeService;
+    constructor(knowledgeService: KnowledgeService);
+    listDocuments(req: {
+        user: SessionUser;
+    }, query: ListKnowledgeDocumentsQueryDto): Promise<{
+        items: {
+            id: string;
+            scope: string;
+            title: string;
+            fileName: string;
+            fileExt: string;
+            mimeType: string;
+            fileSize: number;
+            bucket: string;
+            objectKey: string;
+            storageUrl: string | null;
+            parseStatus: import("@prisma/client").$Enums.KnowledgeDocumentParseStatus;
+            indexStatus: import("@prisma/client").$Enums.KnowledgeDocumentIndexStatus;
+            chunkCount: number;
+            charCount: number;
+            language: string | null;
+            summary: string | null;
+            errorMessage: string | null;
+            lastIndexedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+            creator: {
+                role: string;
+                id: string;
+                username: string;
+                displayName: string;
+            };
+            jobs: {
+                id: string;
+                jobType: import("@prisma/client").$Enums.KnowledgeDocumentJobType;
+                status: import("@prisma/client").$Enums.KnowledgeDocumentJobStatus;
+                attemptCount: number;
+                errorMessage: string | null;
+                startedAt: Date | null;
+                finishedAt: Date | null;
+                createdAt: Date;
+                updatedAt: Date;
+            }[];
+            chunks: {
+                id: string;
+                chunkIndex: number;
+                content: string;
+                contentPreview: string | null;
+                charCount: number;
+                tokenCount: number | null;
+                pageNumber: number | null;
+                sectionTitle: string | null;
+                keywords: string[];
+                embeddingModel: string;
+                embeddingDim: number;
+                createdAt: Date;
+                updatedAt: Date;
+            }[] | undefined;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    uploadDocument(req: {
+        user: SessionUser;
+    }, dto: UploadKnowledgeDocumentDto, file?: KnowledgeUploadFile): Promise<{
+        id: string;
+        scope: string;
+        title: string;
+        fileName: string;
+        fileExt: string;
+        mimeType: string;
+        fileSize: number;
+        bucket: string;
+        objectKey: string;
+        storageUrl: string | null;
+        parseStatus: import("@prisma/client").$Enums.KnowledgeDocumentParseStatus;
+        indexStatus: import("@prisma/client").$Enums.KnowledgeDocumentIndexStatus;
+        chunkCount: number;
+        charCount: number;
+        language: string | null;
+        summary: string | null;
+        errorMessage: string | null;
+        lastIndexedAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+        creator: {
+            role: string;
+            id: string;
+            username: string;
+            displayName: string;
+        };
+        jobs: {
+            id: string;
+            jobType: import("@prisma/client").$Enums.KnowledgeDocumentJobType;
+            status: import("@prisma/client").$Enums.KnowledgeDocumentJobStatus;
+            attemptCount: number;
+            errorMessage: string | null;
+            startedAt: Date | null;
+            finishedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        }[];
+        chunks: {
+            id: string;
+            chunkIndex: number;
+            content: string;
+            contentPreview: string | null;
+            charCount: number;
+            tokenCount: number | null;
+            pageNumber: number | null;
+            sectionTitle: string | null;
+            keywords: string[];
+            embeddingModel: string;
+            embeddingDim: number;
+            createdAt: Date;
+            updatedAt: Date;
+        }[] | undefined;
+    }>;
+    getDocumentById(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        id: string;
+        scope: string;
+        title: string;
+        fileName: string;
+        fileExt: string;
+        mimeType: string;
+        fileSize: number;
+        bucket: string;
+        objectKey: string;
+        storageUrl: string | null;
+        parseStatus: import("@prisma/client").$Enums.KnowledgeDocumentParseStatus;
+        indexStatus: import("@prisma/client").$Enums.KnowledgeDocumentIndexStatus;
+        chunkCount: number;
+        charCount: number;
+        language: string | null;
+        summary: string | null;
+        errorMessage: string | null;
+        lastIndexedAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+        creator: {
+            role: string;
+            id: string;
+            username: string;
+            displayName: string;
+        };
+        jobs: {
+            id: string;
+            jobType: import("@prisma/client").$Enums.KnowledgeDocumentJobType;
+            status: import("@prisma/client").$Enums.KnowledgeDocumentJobStatus;
+            attemptCount: number;
+            errorMessage: string | null;
+            startedAt: Date | null;
+            finishedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        }[];
+        chunks: {
+            id: string;
+            chunkIndex: number;
+            content: string;
+            contentPreview: string | null;
+            charCount: number;
+            tokenCount: number | null;
+            pageNumber: number | null;
+            sectionTitle: string | null;
+            keywords: string[];
+            embeddingModel: string;
+            embeddingDim: number;
+            createdAt: Date;
+            updatedAt: Date;
+        }[] | undefined;
+    }>;
+    removeDocument(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        success: boolean;
+    }>;
+    searchRetrieval(req: {
+        user: SessionUser;
+    }, dto: SearchKnowledgeRetrievalDto): Promise<{
+        query: string;
+        scope: "global" | "company" | "tenant";
+        hits: import("./knowledge.service").KnowledgeRetrievalHit[];
+        answer: string;
+    }>;
+}

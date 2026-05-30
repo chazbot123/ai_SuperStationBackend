@@ -1,0 +1,29 @@
+import type { Response } from 'express';
+import { PublishingBitBrowserService } from './publishing-bitbrowser.service';
+export declare class PublishingBitBrowserController {
+    private readonly publishingBitBrowserService;
+    private readonly localClientZipPath;
+    constructor(publishingBitBrowserService: PublishingBitBrowserService);
+    getHealth(res: Response): Response<any, Record<string, any>>;
+    downloadLocalClient(res: Response): Promise<Response<any, Record<string, any>>>;
+    createOwner(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    registerPlatformAccount(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    openRuntimeSession(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    closeRuntimeSession(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    getRuntimeSession(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    listRuntimeCommands(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    registerExtensionReady(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    bindRuntimeByPageReady(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    heartbeat(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    queueLoginPrepare(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    queueLoginExecute(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    queuePublish(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    pullCommand(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    ackCommand(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    completeCommand(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    failCommand(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    writeDebugEvent(body: unknown, res: Response): Promise<Response<any, Record<string, any>>>;
+    private createApi;
+    private resolveLocalClientZipPath;
+    private forward;
+}

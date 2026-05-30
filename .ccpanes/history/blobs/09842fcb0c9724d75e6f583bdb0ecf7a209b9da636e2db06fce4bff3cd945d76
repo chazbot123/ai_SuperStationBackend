@@ -1,0 +1,17 @@
+import type { Response } from 'express';
+import { SessionUser } from '../auth/auth.types';
+import { StartOfficialOauthLoginDto } from './dto/start-official-oauth-login.dto';
+import { PublishingService } from './publishing.service';
+export declare class PublishingOauthController {
+    private readonly publishingService;
+    constructor(publishingService: PublishingService);
+    startOfficialOauthLogin(req: {
+        user: SessionUser;
+    }, dto: StartOfficialOauthLoginDto): Promise<{
+        provider: "official_oauth";
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        loginUrl: string;
+        syncHint: string;
+    }>;
+    completeOfficialOauthLogin(platform: string, code: string, authCode: string, state: string, res: Response): Promise<void>;
+}

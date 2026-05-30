@@ -1,0 +1,11 @@
+import { TextModelConfigDto } from './generate-copy.dto';
+import { ImageModelConfigDto } from './generate-images.dto';
+export declare class GenerateSocialPostDto {
+    prompt?: string;
+    style?: 'xiaohongshu' | 'douyin' | 'wechat';
+    sizePreset?: '1_1' | '3_4' | '4_5' | '9_16' | '16_9';
+    resolution?: '1k' | '2k' | '4k';
+    referenceImages?: string[];
+    textModelConfig?: TextModelConfigDto;
+    imageModelConfig?: ImageModelConfigDto;
+}

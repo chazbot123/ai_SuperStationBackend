@@ -1,0 +1,54 @@
+import { SuperSiteIndustrySourceType } from '@prisma/client';
+export type SuperSiteIndustrySourceConfig = {
+    key: string;
+    label: string;
+    sourceType: SuperSiteIndustrySourceType;
+    enabled: boolean;
+};
+export type SuperSiteIndustryRefreshConfig = {
+    enabled: boolean;
+    frequency: 'daily';
+    dailyTime: string;
+};
+export type SuperSiteIndustryItemView = {
+    id: string;
+    sourceType: SuperSiteIndustrySourceType;
+    sourceKey: string;
+    title: string;
+    summary: string;
+    coverImage: string;
+    sourceUrl: string;
+    publishedAt: string | null;
+    sortOrder: number;
+    isPinned: boolean;
+    enabled: boolean;
+    manualCreated: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+export type SuperSiteIndustryCrawlRecord = {
+    sourceType: Exclude<SuperSiteIndustrySourceType, 'manual'>;
+    sourceKey: string;
+    title: string;
+    summary: string;
+    coverImage: string;
+    sourceUrl: string;
+    publishedAt: Date | null;
+    rawPayload: Record<string, unknown>;
+};
+export type SuperSiteIndustryCrawlResult = {
+    records: SuperSiteIndustryCrawlRecord[];
+    errors: string[];
+};
+export type SuperSiteIndustrySourceDefinition = {
+    key: string;
+    label: string;
+    sourceType: Exclude<SuperSiteIndustrySourceType, 'manual'>;
+    requestUrl: string;
+    fallbackRequestUrl?: string;
+};
+export declare const SUPER_SITE_INDUSTRY_SOURCE_DEFINITIONS: SuperSiteIndustrySourceDefinition[];
+export declare function buildDefaultIndustrySourceConfigs(): SuperSiteIndustrySourceConfig[];
+export declare function buildDefaultIndustryKeywords(): string[];
+export declare function buildDefaultIndustryRefreshConfig(): SuperSiteIndustryRefreshConfig;
+export declare function findIndustrySourceDefinition(key: string): SuperSiteIndustrySourceDefinition | undefined;

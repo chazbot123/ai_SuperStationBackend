@@ -258,3 +258,16 @@
 - 扩展端 `content.js` 也存在同类风险：若识别结果带有 `视频号ID：` 前缀，`isGenericPlatformText()` 会把整串文本误判成平台标签
 - 本轮修复后，后端与扩展侧都先剥离 `视频号ID / 视频号名称 / 微信视频号` 这类前缀，再进入平台标签过滤
 - 新增后端定向回归测试后，`Wechat Channels` 相关测试通过，后端构建通过
+
+## 2026-05-30 视频号发布续跑排查
+- 最新发布日志已证明：视频号发布命令确实下发，页面也多次进入 `https://channels.weixin.qq.com/platform/post/finderNewLifeCreate`
+- 旧恢复逻辑只认 `platform/post/create`，没有识别真实编辑页 `finderNewLifeCreate`
+- 旧 `publishWechatMp()` 每次执行都会先 `gotoUrl("https://channels.weixin.qq.com/platform")`，即使当前已经恢复到编辑页，也会被重新跳回首页，这与抖音之前“恢复后自打断”的问题同类
+- 本轮已按抖音修复思路处理：允许在 `finderNewLifeCreate` 恢复；若当前已在视频号编辑页，则直接继续上传/填写/发表，不再重走首页入口
+- 同时已给视频号入口、编辑页识别、上传前后、提交前后补充运行时埋点，方便下一次复现直接分清卡点
+
+## 2026-05-30 视频号图文入口补充
+- `publish-automation.js` 里其实已经存在 `openWechatMpRecentEntry()` 和 `ensureWechatMpPublishReady()`，支持“最近图文 / 发表图文”链路，只是 `publishWechatMp()` 之前没有接入
+- `publishWechatMp()` 之前是直接 `gotoUrl("https://channels.weixin.qq.com/platform/post/create")`，绕过了用户指定的平台首页入口
+- 本轮已改成先进入 `https://channels.weixin.qq.com/platform`，再复用现有 helper 执行“最近图文 -> 发表图文 -> 编辑页”
+- 为严格贴合用户步骤，`openWechatMpRecentEntry()` 的优先顺序已调整为先点“最近图文/最近视频”，再点“发表图文/发表视频”，不再看到发布按钮就直接跳过前一步

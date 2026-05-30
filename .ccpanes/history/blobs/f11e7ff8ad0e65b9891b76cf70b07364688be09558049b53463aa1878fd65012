@@ -1,0 +1,16 @@
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+import { SessionUser } from './auth.types';
+declare const JwtStrategy_base: new (...args: unknown[]) => any;
+export declare class JwtStrategy extends JwtStrategy_base {
+    private readonly prisma;
+    constructor(configService: ConfigService, prisma: PrismaService);
+    validate(payload: {
+        sub: string;
+        username: string;
+        role: SessionUser['role'];
+        sessionId: string;
+        deviceId: string;
+    }): Promise<SessionUser>;
+}
+export {};

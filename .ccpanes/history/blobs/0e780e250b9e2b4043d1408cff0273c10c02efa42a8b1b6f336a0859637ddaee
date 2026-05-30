@@ -1,0 +1,161 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.GenerateVideoDto = exports.VideoModelConfigDto = void 0;
+const class_validator_1 = require("class-validator");
+const class_transformer_1 = require("class-transformer");
+const model_provider_presets_1 = require("../model-provider-presets");
+class VideoModelConfigDto {
+    enabled;
+    providerName;
+    providerKey;
+    baseUrl;
+    taskQueryUrlTemplate;
+    apiKey;
+    modelName;
+}
+exports.VideoModelConfigDto = VideoModelConfigDto;
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], VideoModelConfigDto.prototype, "enabled", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(128),
+    __metadata("design:type", String)
+], VideoModelConfigDto.prototype, "providerName", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(model_provider_presets_1.MODEL_PROVIDER_KEYS),
+    __metadata("design:type", String)
+], VideoModelConfigDto.prototype, "providerKey", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(500),
+    __metadata("design:type", String)
+], VideoModelConfigDto.prototype, "baseUrl", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(500),
+    __metadata("design:type", String)
+], VideoModelConfigDto.prototype, "taskQueryUrlTemplate", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(500),
+    __metadata("design:type", String)
+], VideoModelConfigDto.prototype, "apiKey", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(128),
+    __metadata("design:type", String)
+], VideoModelConfigDto.prototype, "modelName", void 0);
+class GenerateVideoDto {
+    prompt;
+    ttsText;
+    subtitleEnabled;
+    referenceImages;
+    voiceId;
+    bgmUrl;
+    bgmVolume;
+    movementAmplitude;
+    aspectRatio;
+    resolution;
+    durationSeconds;
+    modelConfig;
+}
+exports.GenerateVideoDto = GenerateVideoDto;
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(2000),
+    __metadata("design:type", String)
+], GenerateVideoDto.prototype, "prompt", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(2000),
+    __metadata("design:type", String)
+], GenerateVideoDto.prototype, "ttsText", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], GenerateVideoDto.prototype, "subtitleEnabled", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ArrayMaxSize)(6),
+    (0, class_validator_1.IsString)({ each: true }),
+    (0, class_validator_1.MaxLength)(20000000, { each: true }),
+    __metadata("design:type", Array)
+], GenerateVideoDto.prototype, "referenceImages", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(128),
+    __metadata("design:type", String)
+], GenerateVideoDto.prototype, "voiceId", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsUrl)({ require_protocol: true }, { message: 'bgmUrl 必须为合法 URL' }),
+    (0, class_validator_1.MaxLength)(500),
+    __metadata("design:type", String)
+], GenerateVideoDto.prototype, "bgmUrl", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(1),
+    __metadata("design:type", Number)
+], GenerateVideoDto.prototype, "bgmVolume", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(['auto', 'low', 'medium', 'high']),
+    __metadata("design:type", String)
+], GenerateVideoDto.prototype, "movementAmplitude", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(['16:9', '9:16', '1:1']),
+    __metadata("design:type", String)
+], GenerateVideoDto.prototype, "aspectRatio", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(['360p', '540p', '720p', '1080p']),
+    __metadata("design:type", String)
+], GenerateVideoDto.prototype, "resolution", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(1),
+    (0, class_validator_1.Max)(60),
+    __metadata("design:type", Number)
+], GenerateVideoDto.prototype, "durationSeconds", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsObject)(),
+    (0, class_validator_1.ValidateNested)(),
+    (0, class_transformer_1.Type)(() => VideoModelConfigDto),
+    __metadata("design:type", VideoModelConfigDto)
+], GenerateVideoDto.prototype, "modelConfig", void 0);
+//# sourceMappingURL=generate-video.dto.js.map

@@ -1,0 +1,12 @@
+declare const PUBLISH_PLATFORMS: readonly ["xiaohongshu", "douyin", "wechat_mp", "kuaishou"];
+declare const PLATFORM_ACCOUNT_AUTH_TYPES: readonly ["cookie", "token"];
+export declare class CreatePlatformAccountDto {
+    platform: (typeof PUBLISH_PLATFORMS)[number];
+    authType: (typeof PLATFORM_ACCOUNT_AUTH_TYPES)[number];
+    accountName: string;
+    displayName?: string;
+    authPayload: string;
+    remark?: string;
+    externalGroupId?: string;
+}
+export {};

@@ -1,0 +1,72 @@
+import { SessionUser } from '../auth/auth.types';
+import { RulesService } from './rules.service';
+import { CreateRuleDto } from './dto/create-rule.dto';
+import { ListRulesQueryDto } from './dto/list-rules-query.dto';
+import { UpdateRuleDto } from './dto/update-rule.dto';
+export declare class RulesController {
+    private readonly rulesService;
+    constructor(rulesService: RulesService);
+    list(query: ListRulesQueryDto): Promise<{
+        items: {
+            name: string;
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            minCount: number | null;
+            maxCount: number | null;
+            minLen: number | null;
+            maxLen: number | null;
+            dedupeRequired: boolean;
+            sensitiveFilterEnabled: boolean;
+            submitRateLimitPerDay: number | null;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    create(req: {
+        user: SessionUser;
+    }, dto: CreateRuleDto): Promise<{
+        name: string;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        minCount: number | null;
+        maxCount: number | null;
+        minLen: number | null;
+        maxLen: number | null;
+        dedupeRequired: boolean;
+        sensitiveFilterEnabled: boolean;
+        submitRateLimitPerDay: number | null;
+    }>;
+    getById(id: string): Promise<{
+        name: string;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        minCount: number | null;
+        maxCount: number | null;
+        minLen: number | null;
+        maxLen: number | null;
+        dedupeRequired: boolean;
+        sensitiveFilterEnabled: boolean;
+        submitRateLimitPerDay: number | null;
+    }>;
+    update(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdateRuleDto): Promise<{
+        name: string;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        minCount: number | null;
+        maxCount: number | null;
+        minLen: number | null;
+        maxLen: number | null;
+        dedupeRequired: boolean;
+        sensitiveFilterEnabled: boolean;
+        submitRateLimitPerDay: number | null;
+    }>;
+}

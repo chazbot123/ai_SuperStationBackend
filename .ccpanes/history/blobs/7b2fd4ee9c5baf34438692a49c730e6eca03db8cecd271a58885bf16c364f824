@@ -1,0 +1,597 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var SupportService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SupportService = void 0;
+const common_1 = require("@nestjs/common");
+const client_1 = require("@prisma/client");
+const prisma_service_1 = require("../prisma/prisma.service");
+const rbac_constants_1 = require("../rbac/rbac.constants");
+const support_mapper_1 = require("./support.mapper");
+const support_ai_service_1 = require("./support-ai.service");
+const SUPPORT_AUTO_END_MINUTES = 3;
+const SUPPORT_ENDED_HANDOFF_KEEP = 10;
+const DEFAULT_PUBLIC_SUPPORT_OWNER_USER_ID = 'cmotrwinc0000n4u9e265uccn';
+let SupportService = SupportService_1 = class SupportService {
+    prisma;
+    supportAiService;
+    logger = new common_1.Logger(SupportService_1.name);
+    constructor(prisma, supportAiService) {
+        this.prisma = prisma;
+        this.supportAiService = supportAiService;
+    }
+    async createOrResumePublicSession(dto) {
+        await this.cleanupExpiredSupportConversations();
+        const visitorSessionId = dto.visitorSessionId.trim();
+        if (!visitorSessionId) {
+            throw new common_1.BadRequestException('访客会话标识不能为空');
+        }
+        const existing = await this.prisma.supportConversation.findFirst({
+            where: {
+                visitorSessionId,
+                status: {
+                    in: [
+                        client_1.SupportConversationStatus.ai_chat,
+                        client_1.SupportConversationStatus.handoff_requested,
+                        client_1.SupportConversationStatus.queueing,
+                        client_1.SupportConversationStatus.human_chat,
+                    ],
+                },
+            },
+            orderBy: { updatedAt: 'desc' },
+            include: support_mapper_1.supportConversationInclude,
+        });
+        if (existing) {
+            const updated = await this.prisma.supportConversation.update({
+                where: { id: existing.id },
+                data: {
+                    visitorName: dto.visitorName?.trim() || existing.visitorName,
+                    visitorContact: dto.visitorContact?.trim() || existing.visitorContact,
+                    sourcePage: dto.sourcePage?.trim() || existing.sourcePage,
+                },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            return (0, support_mapper_1.serializeSupportConversation)(updated);
+        }
+        const created = await this.prisma.supportConversation.create({
+            data: {
+                visitorSessionId,
+                visitorName: dto.visitorName?.trim() || null,
+                visitorContact: dto.visitorContact?.trim() || null,
+                sourcePage: dto.sourcePage?.trim() || null,
+                status: client_1.SupportConversationStatus.ai_chat,
+            },
+            include: support_mapper_1.supportConversationInclude,
+        });
+        return (0, support_mapper_1.serializeSupportConversation)(created);
+    }
+    async getPublicSession(conversationId) {
+        await this.cleanupExpiredSupportConversations();
+        const conversation = await this.findConversationOrThrow(conversationId);
+        return (0, support_mapper_1.serializeSupportConversation)(conversation);
+    }
+    async sendPublicMessage(conversationId, dto) {
+        await this.cleanupExpiredSupportConversations();
+        const conversation = await this.findConversationOrThrow(conversationId);
+        const content = dto.message.trim();
+        if (!content) {
+            throw new common_1.BadRequestException('消息不能为空');
+        }
+        if (conversation.status === client_1.SupportConversationStatus.ended) {
+            throw new common_1.BadRequestException('会话已结束，不能继续发送消息');
+        }
+        const currentConversation = await this.prisma.$transaction(async (tx) => {
+            await tx.supportMessage.create({
+                data: {
+                    conversationId,
+                    role: client_1.SupportMessageRole.visitor,
+                    content,
+                },
+            });
+            await tx.supportConversation.update({
+                where: { id: conversationId },
+                data: {
+                    lastMessageAt: new Date(),
+                },
+            });
+            const current = await tx.supportConversation.findUnique({
+                where: { id: conversationId },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            if (!current) {
+                throw new common_1.NotFoundException('客服会话不存在');
+            }
+            return current;
+        });
+        if (currentConversation.status !== client_1.SupportConversationStatus.ai_chat) {
+            return (0, support_mapper_1.serializeSupportConversation)(currentConversation);
+        }
+        const handoffKeywordMatched = this.supportAiService.hasHandoffIntent(content);
+        if (this.supportAiService.shouldRequestHandoff(content)) {
+            const updated = await this.prisma.$transaction(async (tx) => {
+                await this.enqueueHandoff(tx, conversationId);
+                await tx.supportMessage.create({
+                    data: {
+                        conversationId,
+                        role: client_1.SupportMessageRole.system,
+                        content: '已根据访客消息自动转人工，当前进入人工待处理。',
+                    },
+                });
+                const finalConversation = await tx.supportConversation.findUnique({
+                    where: { id: conversationId },
+                    include: support_mapper_1.supportConversationInclude,
+                });
+                if (!finalConversation) {
+                    throw new common_1.NotFoundException('客服会话不存在');
+                }
+                return finalConversation;
+            });
+            return (0, support_mapper_1.serializeSupportConversation)(updated);
+        }
+        if (handoffKeywordMatched) {
+            const updated = await this.prisma.$transaction(async (tx) => {
+                await tx.supportMessage.create({
+                    data: {
+                        conversationId,
+                        role: client_1.SupportMessageRole.system,
+                        content: '人工客服当前不在服务时间内。人工客服服务时间为北京时间 09:00-12:00、14:00-18:00，您可以先留言问题，待人工客服在线后再跟进处理。',
+                    },
+                });
+                await tx.supportConversation.update({
+                    where: { id: conversationId },
+                    data: {
+                        lastMessageAt: new Date(),
+                    },
+                });
+                const finalConversation = await tx.supportConversation.findUnique({
+                    where: { id: conversationId },
+                    include: support_mapper_1.supportConversationInclude,
+                });
+                if (!finalConversation) {
+                    throw new common_1.NotFoundException('客服会话不存在');
+                }
+                return finalConversation;
+            });
+            return (0, support_mapper_1.serializeSupportConversation)(updated);
+        }
+        let aiMessagePayload;
+        try {
+            const aiReply = await this.supportAiService.generateReply(content, DEFAULT_PUBLIC_SUPPORT_OWNER_USER_ID);
+            aiMessagePayload = {
+                role: client_1.SupportMessageRole.ai,
+                content: aiReply.answer,
+                confidence: aiReply.confidence,
+                sourcesJson: aiReply.sources,
+            };
+        }
+        catch (error) {
+            this.logger.error(`AI 托管回复失败，conversationId=${conversationId}`, error instanceof Error ? error.stack : undefined);
+            aiMessagePayload = {
+                role: client_1.SupportMessageRole.system,
+                content: 'AI 客服暂时未能生成回复，请稍后重试或直接转人工客服。',
+            };
+        }
+        const updated = await this.prisma.$transaction(async (tx) => {
+            const latestConversation = await tx.supportConversation.findUnique({
+                where: { id: conversationId },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            if (!latestConversation) {
+                throw new common_1.NotFoundException('客服会话不存在');
+            }
+            if (latestConversation.status === client_1.SupportConversationStatus.ai_chat) {
+                await tx.supportMessage.create({
+                    data: {
+                        conversationId,
+                        role: aiMessagePayload.role,
+                        content: aiMessagePayload.content,
+                        confidence: aiMessagePayload.confidence,
+                        sourcesJson: aiMessagePayload.sourcesJson,
+                    },
+                });
+                await tx.supportConversation.update({
+                    where: { id: conversationId },
+                    data: {
+                        lastMessageAt: new Date(),
+                    },
+                });
+            }
+            const finalConversation = await tx.supportConversation.findUnique({
+                where: { id: conversationId },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            if (!finalConversation) {
+                throw new common_1.NotFoundException('客服会话不存在');
+            }
+            return finalConversation;
+        });
+        return (0, support_mapper_1.serializeSupportConversation)(updated);
+    }
+    async requestPublicHandoff(conversationId, dto) {
+        await this.cleanupExpiredSupportConversations();
+        const conversation = await this.findConversationOrThrow(conversationId);
+        if (conversation.status === client_1.SupportConversationStatus.ended) {
+            throw new common_1.BadRequestException('会话已结束，不能申请转人工');
+        }
+        const updated = await this.prisma.$transaction(async (tx) => {
+            await this.enqueueHandoff(tx, conversationId);
+            await tx.supportMessage.create({
+                data: {
+                    conversationId,
+                    role: client_1.SupportMessageRole.system,
+                    content: dto.note?.trim()
+                        ? `访客申请转人工：${dto.note.trim()}`
+                        : '访客申请转人工，当前进入排队中。',
+                },
+            });
+            const current = await tx.supportConversation.findUnique({
+                where: { id: conversationId },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            if (!current) {
+                throw new common_1.NotFoundException('客服会话不存在');
+            }
+            return current;
+        });
+        const pendingAhead = await this.prisma.supportHandoff.count({
+            where: {
+                status: client_1.SupportHandoffStatus.pending,
+                requestedAt: {
+                    lt: updated.handoffs[0]?.requestedAt ?? new Date(),
+                },
+            },
+        });
+        return {
+            ...(0, support_mapper_1.serializeSupportConversation)(updated),
+            queueNumber: pendingAhead + 1,
+        };
+    }
+    async getPublicQueueStatus(conversationId) {
+        await this.cleanupExpiredSupportConversations();
+        const conversation = await this.findConversationOrThrow(conversationId);
+        const latestHandoff = conversation.handoffs[0] ?? null;
+        let queueNumber = 0;
+        if (latestHandoff?.status === client_1.SupportHandoffStatus.pending) {
+            queueNumber =
+                (await this.prisma.supportHandoff.count({
+                    where: {
+                        status: client_1.SupportHandoffStatus.pending,
+                        requestedAt: { lt: latestHandoff.requestedAt },
+                    },
+                })) + 1;
+        }
+        return {
+            conversationId: conversation.id,
+            status: conversation.status,
+            queueNumber,
+            assignedAgent: conversation.assignedAgent
+                ? {
+                    id: conversation.assignedAgent.id,
+                    displayName: conversation.assignedAgent.displayName,
+                }
+                : null,
+            latestHandoff: latestHandoff
+                ? {
+                    id: latestHandoff.id,
+                    status: latestHandoff.status,
+                    queueSerial: latestHandoff.queueSerial,
+                }
+                : null,
+        };
+    }
+    async listAdminConversations(user, query) {
+        this.ensureMainCompanyUser(user);
+        await this.cleanupExpiredSupportConversations();
+        const trimmedQuery = query.q?.trim();
+        const where = {
+            ...(query.status ? { status: query.status } : {}),
+            ...(query.onlyWaitingHandoff
+                ? {
+                    status: {
+                        in: [client_1.SupportConversationStatus.handoff_requested, client_1.SupportConversationStatus.queueing],
+                    },
+                }
+                : {}),
+            ...(trimmedQuery
+                ? {
+                    OR: [
+                        { visitorSessionId: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { visitorName: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { visitorContact: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { sourcePage: { contains: trimmedQuery, mode: 'insensitive' } },
+                        {
+                            messages: {
+                                some: {
+                                    content: { contains: trimmedQuery, mode: 'insensitive' },
+                                },
+                            },
+                        },
+                    ],
+                }
+                : {}),
+        };
+        const [items, total] = await Promise.all([
+            this.prisma.supportConversation.findMany({
+                where,
+                orderBy: [{ lastMessageAt: 'desc' }],
+                skip: (query.page - 1) * query.limit,
+                take: query.limit,
+                include: support_mapper_1.supportConversationInclude,
+            }),
+            this.prisma.supportConversation.count({ where }),
+        ]);
+        return {
+            items: items.map((item) => (0, support_mapper_1.serializeSupportConversation)(item)),
+            pagination: {
+                page: query.page,
+                limit: query.limit,
+                total,
+            },
+        };
+    }
+    async getAdminConversation(user, conversationId) {
+        this.ensureMainCompanyUser(user);
+        await this.cleanupExpiredSupportConversations();
+        return (0, support_mapper_1.serializeSupportConversation)(await this.findConversationOrThrow(conversationId));
+    }
+    async takeAdminConversation(user, conversationId, dto) {
+        this.ensureMainCompanyUser(user);
+        await this.cleanupExpiredSupportConversations();
+        const conversation = await this.findConversationOrThrow(conversationId);
+        if (conversation.status === client_1.SupportConversationStatus.ended) {
+            throw new common_1.BadRequestException('会话已结束，不能再接线');
+        }
+        const updated = await this.prisma.$transaction(async (tx) => {
+            const pendingHandoff = await tx.supportHandoff.findFirst({
+                where: {
+                    conversationId,
+                    status: client_1.SupportHandoffStatus.pending,
+                },
+                orderBy: { requestedAt: 'desc' },
+            });
+            if (pendingHandoff) {
+                await tx.supportHandoff.update({
+                    where: { id: pendingHandoff.id },
+                    data: {
+                        status: client_1.SupportHandoffStatus.accepted,
+                        acceptedAt: new Date(),
+                        acceptedByUserId: user.userId,
+                    },
+                });
+            }
+            await tx.supportConversation.update({
+                where: { id: conversationId },
+                data: {
+                    assignedAgentId: user.userId,
+                    status: client_1.SupportConversationStatus.human_chat,
+                    humanTakenAt: new Date(),
+                    lastMessageAt: new Date(),
+                },
+            });
+            await tx.supportMessage.create({
+                data: {
+                    conversationId,
+                    role: client_1.SupportMessageRole.system,
+                    content: dto.note?.trim()
+                        ? `人工客服已接线：${dto.note.trim()}`
+                        : '人工客服已接线，当前进入人工处理。',
+                    agentUserId: user.userId,
+                },
+            });
+            const current = await tx.supportConversation.findUnique({
+                where: { id: conversationId },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            if (!current) {
+                throw new common_1.NotFoundException('客服会话不存在');
+            }
+            return current;
+        });
+        return (0, support_mapper_1.serializeSupportConversation)(updated);
+    }
+    async replyAdminConversation(user, conversationId, dto) {
+        this.ensureMainCompanyUser(user);
+        await this.cleanupExpiredSupportConversations();
+        const content = dto.message.trim();
+        if (!content) {
+            throw new common_1.BadRequestException('回复内容不能为空');
+        }
+        const updated = await this.prisma.$transaction(async (tx) => {
+            const conversation = await tx.supportConversation.findUnique({
+                where: { id: conversationId },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            if (!conversation) {
+                throw new common_1.NotFoundException('客服会话不存在');
+            }
+            if (conversation.status === client_1.SupportConversationStatus.ended) {
+                throw new common_1.BadRequestException('会话已结束，不能继续回复');
+            }
+            await tx.supportMessage.create({
+                data: {
+                    conversationId,
+                    role: client_1.SupportMessageRole.agent,
+                    content,
+                    agentUserId: user.userId,
+                },
+            });
+            await tx.supportConversation.update({
+                where: { id: conversationId },
+                data: {
+                    assignedAgentId: conversation.assignedAgentId ?? user.userId,
+                    status: client_1.SupportConversationStatus.human_chat,
+                    lastMessageAt: new Date(),
+                },
+            });
+            const current = await tx.supportConversation.findUnique({
+                where: { id: conversationId },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            if (!current) {
+                throw new common_1.NotFoundException('客服会话不存在');
+            }
+            return current;
+        });
+        return (0, support_mapper_1.serializeSupportConversation)(updated);
+    }
+    async closeAdminConversation(user, conversationId, dto) {
+        this.ensureMainCompanyUser(user);
+        await this.cleanupExpiredSupportConversations();
+        const updated = await this.prisma.$transaction(async (tx) => {
+            await tx.supportConversation.update({
+                where: { id: conversationId },
+                data: {
+                    status: client_1.SupportConversationStatus.ended,
+                    endedAt: new Date(),
+                    lastMessageAt: new Date(),
+                },
+            });
+            await tx.supportHandoff.updateMany({
+                where: {
+                    conversationId,
+                    status: {
+                        in: [client_1.SupportHandoffStatus.pending, client_1.SupportHandoffStatus.accepted],
+                    },
+                },
+                data: {
+                    status: client_1.SupportHandoffStatus.closed,
+                    closedAt: new Date(),
+                },
+            });
+            await tx.supportMessage.create({
+                data: {
+                    conversationId,
+                    role: client_1.SupportMessageRole.system,
+                    content: dto.note?.trim() ? `会话已结束：${dto.note.trim()}` : '会话已结束。',
+                    agentUserId: user.userId,
+                },
+            });
+            const current = await tx.supportConversation.findUnique({
+                where: { id: conversationId },
+                include: support_mapper_1.supportConversationInclude,
+            });
+            if (!current) {
+                throw new common_1.NotFoundException('客服会话不存在');
+            }
+            return current;
+        });
+        return (0, support_mapper_1.serializeSupportConversation)(updated);
+    }
+    async findConversationOrThrow(conversationId) {
+        const conversation = await this.prisma.supportConversation.findUnique({
+            where: { id: conversationId },
+            include: support_mapper_1.supportConversationInclude,
+        });
+        if (!conversation) {
+            throw new common_1.NotFoundException('客服会话不存在');
+        }
+        return conversation;
+    }
+    async cleanupExpiredSupportConversations() {
+        const inactiveBefore = new Date(Date.now() - SUPPORT_AUTO_END_MINUTES * 60 * 1000);
+        await this.prisma.supportConversation.updateMany({
+            where: {
+                status: {
+                    not: client_1.SupportConversationStatus.ended,
+                },
+                lastMessageAt: {
+                    lt: inactiveBefore,
+                },
+            },
+            data: {
+                status: client_1.SupportConversationStatus.ended,
+                endedAt: new Date(),
+            },
+        });
+        const endedWithoutHandoff = await this.prisma.supportConversation.findMany({
+            select: { id: true },
+            where: {
+                status: client_1.SupportConversationStatus.ended,
+                handoffs: {
+                    none: {},
+                },
+            },
+        });
+        if (endedWithoutHandoff.length > 0) {
+            await this.prisma.supportConversation.deleteMany({
+                where: {
+                    id: {
+                        in: endedWithoutHandoff.map((item) => item.id),
+                    },
+                },
+            });
+        }
+        const endedWithHandoff = await this.prisma.supportConversation.findMany({
+            select: { id: true },
+            where: {
+                status: client_1.SupportConversationStatus.ended,
+                handoffs: {
+                    some: {},
+                },
+            },
+            orderBy: [{ endedAt: 'desc' }, { lastMessageAt: 'desc' }, { createdAt: 'desc' }],
+            skip: SUPPORT_ENDED_HANDOFF_KEEP,
+        });
+        if (endedWithHandoff.length === 0) {
+            return;
+        }
+        await this.prisma.supportConversation.deleteMany({
+            where: {
+                id: {
+                    in: endedWithHandoff.map((item) => item.id),
+                },
+            },
+        });
+    }
+    async enqueueHandoff(tx, conversationId) {
+        const lastPending = await tx.supportHandoff.findFirst({
+            where: {
+                conversationId,
+                status: {
+                    in: [client_1.SupportHandoffStatus.pending, client_1.SupportHandoffStatus.accepted],
+                },
+            },
+            orderBy: { requestedAt: 'desc' },
+        });
+        if (!lastPending) {
+            const pendingCount = await tx.supportHandoff.count({
+                where: { status: client_1.SupportHandoffStatus.pending },
+            });
+            await tx.supportHandoff.create({
+                data: {
+                    conversationId,
+                    status: client_1.SupportHandoffStatus.pending,
+                    queueSerial: pendingCount + 1,
+                },
+            });
+        }
+        await tx.supportConversation.update({
+            where: { id: conversationId },
+            data: {
+                status: client_1.SupportConversationStatus.queueing,
+                handoffRequestedAt: new Date(),
+                lastMessageAt: new Date(),
+            },
+        });
+    }
+    ensureMainCompanyUser(user) {
+        if (user.role !== rbac_constants_1.MAIN_COMPANY_ROLE_KEY) {
+            throw new common_1.ForbiddenException('仅主公司账号可访问 AI 客服后台');
+        }
+    }
+};
+exports.SupportService = SupportService;
+exports.SupportService = SupportService = SupportService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        support_ai_service_1.SupportAiService])
+], SupportService);
+//# sourceMappingURL=support.service.js.map

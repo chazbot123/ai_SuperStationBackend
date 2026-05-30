@@ -1,0 +1,17 @@
+export declare class UpdateVideoDraftDto {
+    prompt?: string;
+    title?: string;
+    platformStyle?: string;
+    publishTitle?: string;
+    publishTags?: string[];
+    durationText?: string;
+    generatedScript?: string;
+    videoUrl?: string;
+    taskId?: string;
+    provider?: string;
+    model?: string;
+    errorMessage?: string;
+    status?: 'ready' | 'processing' | 'failed';
+    syncedToLeads?: boolean;
+    completedAt?: string;
+}

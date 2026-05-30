@@ -1,0 +1,164 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.KnowledgeStorageService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const node_crypto_1 = require("node:crypto");
+const node_path_1 = require("node:path");
+const minio_1 = require("minio");
+const knowledge_file_name_util_1 = require("./knowledge-file-name.util");
+const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+const ALLOWED_FILE_EXTENSIONS = new Set([
+    'pdf',
+    'docx',
+    'pptx',
+    'txt',
+    'md',
+    'png',
+    'jpg',
+    'jpeg',
+    'webp',
+]);
+let KnowledgeStorageService = class KnowledgeStorageService {
+    configService;
+    client;
+    bucketName;
+    publicBaseUrl;
+    ensureBucketPromise = null;
+    constructor(configService) {
+        this.configService = configService;
+        const endpoint = this.configService.get('MINIO_ENDPOINT') ?? 'localhost';
+        const port = Number(this.configService.get('MINIO_PORT') ?? '9000');
+        const useSSL = String(this.configService.get('MINIO_USE_SSL') ?? 'false') === 'true';
+        const accessKey = this.configService.get('MINIO_ACCESS_KEY');
+        const secretKey = this.configService.get('MINIO_SECRET_KEY');
+        const bucketName = this.configService.get('MINIO_BUCKET') ?? 'ai-superweb';
+        if (!accessKey || !secretKey) {
+            throw new common_1.InternalServerErrorException('MinIO 配置不完整');
+        }
+        this.client = new minio_1.Client({
+            endPoint: endpoint,
+            port,
+            useSSL,
+            accessKey,
+            secretKey,
+        });
+        this.bucketName = bucketName;
+        this.publicBaseUrl = this.buildPublicBaseUrl(endpoint, port, useSSL);
+    }
+    async uploadKnowledgeFile(userId, file) {
+        this.validateFile(file);
+        await this.ensureBucket();
+        const extension = this.resolveExtension(file);
+        const objectKey = this.buildObjectKey(userId, extension);
+        try {
+            await this.client.putObject(this.bucketName, objectKey, file.buffer, file.size, {
+                'Content-Type': file.mimetype,
+                'Cache-Control': 'private, max-age=0, no-cache',
+            });
+        }
+        catch {
+            throw new common_1.InternalServerErrorException('上传知识库文件到 MinIO 失败');
+        }
+        return {
+            bucket: this.bucketName,
+            objectKey,
+            fileExt: extension,
+            url: `${this.publicBaseUrl}/${this.bucketName}/${this.encodeObjectKey(objectKey)}`,
+        };
+    }
+    async removeKnowledgeFile(objectKey) {
+        await this.ensureBucket();
+        try {
+            await this.client.removeObject(this.bucketName, objectKey);
+        }
+        catch {
+            throw new common_1.InternalServerErrorException('删除知识库文件失败');
+        }
+    }
+    async getKnowledgeFileBuffer(objectKey) {
+        await this.ensureBucket();
+        try {
+            const stream = await this.client.getObject(this.bucketName, objectKey);
+            const chunks = [];
+            await new Promise((resolve, reject) => {
+                stream.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+                stream.on('end', () => resolve());
+                stream.on('error', reject);
+            });
+            return Buffer.concat(chunks);
+        }
+        catch {
+            throw new common_1.InternalServerErrorException('读取知识库文件失败');
+        }
+    }
+    validateFile(file) {
+        if (!file) {
+            throw new common_1.BadRequestException('请选择知识库文件');
+        }
+        if (file.size <= 0) {
+            throw new common_1.BadRequestException('知识库文件不能为空');
+        }
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+            throw new common_1.BadRequestException('知识库文件大小不能超过 20MB');
+        }
+        const extension = this.resolveExtension(file);
+        if (!ALLOWED_FILE_EXTENSIONS.has(extension)) {
+            throw new common_1.BadRequestException('仅支持 pdf、docx、pptx、txt、md、png、jpg、jpeg、webp 文件');
+        }
+    }
+    ensureBucket() {
+        if (!this.ensureBucketPromise) {
+            this.ensureBucketPromise = this.ensureBucketInternal();
+        }
+        return this.ensureBucketPromise;
+    }
+    async ensureBucketInternal() {
+        try {
+            const exists = await this.client.bucketExists(this.bucketName);
+            if (!exists) {
+                await this.client.makeBucket(this.bucketName);
+            }
+        }
+        catch {
+            this.ensureBucketPromise = null;
+            throw new common_1.InternalServerErrorException('初始化知识库 Bucket 失败');
+        }
+    }
+    buildObjectKey(userId, extension) {
+        const now = new Date();
+        const year = String(now.getFullYear());
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `knowledge/${userId}/${year}/${month}/${day}/${Date.now()}-${(0, node_crypto_1.randomUUID)()}.${extension}`;
+    }
+    resolveExtension(file) {
+        return (0, node_path_1.extname)((0, knowledge_file_name_util_1.normalizeUploadFileName)(file.originalname)).replace('.', '').toLowerCase() || 'bin';
+    }
+    buildPublicBaseUrl(endpoint, port, useSSL) {
+        const protocol = useSSL ? 'https' : 'http';
+        const isDefaultPort = (!useSSL && port === 80) || (useSSL && port === 443);
+        return `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}`;
+    }
+    encodeObjectKey(objectKey) {
+        return objectKey
+            .split('/')
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+    }
+};
+exports.KnowledgeStorageService = KnowledgeStorageService;
+exports.KnowledgeStorageService = KnowledgeStorageService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
+], KnowledgeStorageService);
+//# sourceMappingURL=knowledge-storage.service.js.map

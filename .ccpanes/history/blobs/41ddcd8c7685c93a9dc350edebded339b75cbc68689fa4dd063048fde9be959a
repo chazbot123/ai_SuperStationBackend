@@ -1,0 +1,501 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AiController = void 0;
+const common_1 = require("@nestjs/common");
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
+const ai_service_1 = require("./ai.service");
+const create_product_image_draft_dto_1 = require("./dto/create-product-image-draft.dto");
+const create_video_draft_dto_1 = require("./dto/create-video-draft.dto");
+const create_avatar_video_dto_1 = require("./dto/create-avatar-video.dto");
+const generate_copy_dto_1 = require("./dto/generate-copy.dto");
+const generate_images_dto_1 = require("./dto/generate-images.dto");
+const generate_platform_meta_dto_1 = require("./dto/generate-platform-meta.dto");
+const generate_video_dto_1 = require("./dto/generate-video.dto");
+const generate_social_post_dto_1 = require("./dto/generate-social-post.dto");
+const prompt_polish_dto_1 = require("./dto/prompt-polish.dto");
+const expand_avatar_video_script_dto_1 = require("./dto/expand-avatar-video-script.dto");
+const polish_prompt_dto_1 = require("./dto/polish-prompt.dto");
+const recommend_bgm_dto_1 = require("./dto/recommend-bgm.dto");
+const review_material_decision_dto_1 = require("./dto/review-material-decision.dto");
+const save_model_config_dto_1 = require("./dto/save-model-config.dto");
+const test_model_config_dto_1 = require("./dto/test-model-config.dto");
+const update_product_image_draft_dto_1 = require("./dto/update-product-image-draft.dto");
+const update_social_post_dto_1 = require("./dto/update-social-post.dto");
+const update_video_draft_dto_1 = require("./dto/update-video-draft.dto");
+let AiController = class AiController {
+    aiService;
+    constructor(aiService) {
+        this.aiService = aiService;
+    }
+    generateCopy(req, dto) {
+        return this.aiService.generateCopy(req.user, dto);
+    }
+    polishPrompt(req, dto) {
+        return this.aiService.polishPrompt(req.user, dto);
+    }
+    generatePlatformMeta(req, dto) {
+        return this.aiService.generatePlatformMeta(req.user, dto);
+    }
+    generateImages(req, dto) {
+        return this.aiService.generateImages(req.user, dto);
+    }
+    promptPolish(req, dto) {
+        return this.aiService.promptPolish(req.user, dto);
+    }
+    generateVideo(req, dto) {
+        return this.aiService.generateVideo(req.user, dto);
+    }
+    recommendBgm(req, dto) {
+        return this.aiService.recommendBgm(req.user, dto);
+    }
+    getVideoTask(req, taskId) {
+        return this.aiService.getVideoTask(req.user, taskId);
+    }
+    createAvatarVideoTask(req, dto) {
+        return this.aiService.createAvatarVideoTask(req.user, dto);
+    }
+    expandAvatarVideoScript(req, dto) {
+        return this.aiService.expandAvatarVideoScript(req.user, dto);
+    }
+    getAvatarVideoTask(req, id) {
+        return this.aiService.getAvatarVideoTask(req.user, id);
+    }
+    retryAvatarVideoTask(req, id) {
+        return this.aiService.retryAvatarVideoTask(req.user, id);
+    }
+    testModelConnection(type, dto) {
+        return this.aiService.testModelConnection(type, dto);
+    }
+    listActiveModelConfigs(req) {
+        return this.aiService.listActiveModelConfigs(req.user);
+    }
+    listSavedModelConfigs(req) {
+        return this.aiService.listSavedModelConfigs(req.user);
+    }
+    activateModelConfig(req, type, dto) {
+        return this.aiService.activateModelConfig(req.user, type, dto);
+    }
+    listSocialPosts(req) {
+        return this.aiService.listSocialPosts(req.user);
+    }
+    listProductImageDrafts(req) {
+        return this.aiService.listProductImageDrafts(req.user);
+    }
+    listVideoDrafts(req) {
+        return this.aiService.listVideoDrafts(req.user);
+    }
+    listReviewMaterials(req) {
+        return this.aiService.listReviewMaterials(req.user);
+    }
+    approveReviewMaterial(req, source, id) {
+        return this.aiService.approveReviewMaterial(req.user, source, id);
+    }
+    rejectReviewMaterial(req, source, id, dto) {
+        return this.aiService.rejectReviewMaterial(req.user, source, id, dto);
+    }
+    generateSocialPost(req, dto) {
+        return this.aiService.generateSocialPost(req.user, dto);
+    }
+    createProductImageDraft(req, dto) {
+        return this.aiService.createProductImageDraft(req.user, dto);
+    }
+    createVideoDraft(req, dto) {
+        return this.aiService.createVideoDraft(req.user, dto);
+    }
+    submitSocialPost(req, id) {
+        return this.aiService.submitSocialPost(req.user, id);
+    }
+    withdrawSocialPostReview(req, id) {
+        return this.aiService.withdrawSocialPostReview(req.user, id);
+    }
+    markSocialPostSynced(req, id) {
+        return this.aiService.markSocialPostSynced(req.user, id);
+    }
+    updateSocialPost(req, id, dto) {
+        return this.aiService.updateSocialPost(req.user, id, dto);
+    }
+    removeSocialPost(req, id) {
+        return this.aiService.removeSocialPost(req.user, id);
+    }
+    updateProductImageDraft(req, id, dto) {
+        return this.aiService.updateProductImageDraft(req.user, id, dto);
+    }
+    updateVideoDraft(req, id, dto) {
+        return this.aiService.updateVideoDraft(req.user, id, dto);
+    }
+    removeVideoDraft(req, id) {
+        return this.aiService.removeVideoDraft(req.user, id);
+    }
+    removeProductImageDraft(req, id) {
+        return this.aiService.removeProductImageDraft(req.user, id);
+    }
+    submitProductImageDraft(req, id) {
+        return this.aiService.submitProductImageDraft(req.user, id);
+    }
+    withdrawProductImageDraftReview(req, id) {
+        return this.aiService.withdrawProductImageDraftReview(req.user, id);
+    }
+    markProductImageDraftSynced(req, id) {
+        return this.aiService.markProductImageDraftSynced(req.user, id);
+    }
+    markProductImageDraftProductSynced(req, id) {
+        return this.aiService.markProductImageDraftProductSynced(req.user, id);
+    }
+    submitVideoDraft(req, id) {
+        return this.aiService.submitVideoDraft(req.user, id);
+    }
+    withdrawVideoDraftReview(req, id) {
+        return this.aiService.withdrawVideoDraftReview(req.user, id);
+    }
+    markVideoDraftSynced(req, id) {
+        return this.aiService.markVideoDraftSynced(req.user, id);
+    }
+};
+exports.AiController = AiController;
+__decorate([
+    (0, common_1.Post)('generate-copy'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, generate_copy_dto_1.GenerateCopyDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "generateCopy", null);
+__decorate([
+    (0, common_1.Post)('polish-prompt'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, polish_prompt_dto_1.PolishPromptDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "polishPrompt", null);
+__decorate([
+    (0, common_1.Post)('generate-platform-meta'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, generate_platform_meta_dto_1.GeneratePlatformMetaDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "generatePlatformMeta", null);
+__decorate([
+    (0, common_1.Post)('generate-images'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, generate_images_dto_1.GenerateImagesDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "generateImages", null);
+__decorate([
+    (0, common_1.Post)('prompt-polish'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, prompt_polish_dto_1.PromptPolishDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "promptPolish", null);
+__decorate([
+    (0, common_1.Post)('generate-video'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, generate_video_dto_1.GenerateVideoDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "generateVideo", null);
+__decorate([
+    (0, common_1.Post)('recommend-bgm'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, recommend_bgm_dto_1.RecommendBgmDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "recommendBgm", null);
+__decorate([
+    (0, common_1.Get)('video-tasks/:taskId'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('taskId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "getVideoTask", null);
+__decorate([
+    (0, common_1.Post)('avatar-video-tasks'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, create_avatar_video_dto_1.CreateAvatarVideoTaskDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "createAvatarVideoTask", null);
+__decorate([
+    (0, common_1.Post)('avatar-video-scripts/expand'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, expand_avatar_video_script_dto_1.ExpandAvatarVideoScriptDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "expandAvatarVideoScript", null);
+__decorate([
+    (0, common_1.Get)('avatar-video-tasks/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "getAvatarVideoTask", null);
+__decorate([
+    (0, common_1.Post)('avatar-video-tasks/:id/retry'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "retryAvatarVideoTask", null);
+__decorate([
+    (0, common_1.Post)('model-configs/:type/test-connection'),
+    __param(0, (0, common_1.Param)('type')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, test_model_config_dto_1.TestModelConfigDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "testModelConnection", null);
+__decorate([
+    (0, common_1.Get)('model-configs/active'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "listActiveModelConfigs", null);
+__decorate([
+    (0, common_1.Get)('model-configs/saved'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "listSavedModelConfigs", null);
+__decorate([
+    (0, common_1.Post)('model-configs/:type/activate'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('type')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, save_model_config_dto_1.SaveModelConfigDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "activateModelConfig", null);
+__decorate([
+    (0, common_1.Get)('social-posts'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "listSocialPosts", null);
+__decorate([
+    (0, common_1.Get)('product-image-drafts'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "listProductImageDrafts", null);
+__decorate([
+    (0, common_1.Get)('video-drafts'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "listVideoDrafts", null);
+__decorate([
+    (0, common_1.Get)('review-materials'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "listReviewMaterials", null);
+__decorate([
+    (0, common_1.Post)('review-materials/:source/:id/approve'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('source')),
+    __param(2, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "approveReviewMaterial", null);
+__decorate([
+    (0, common_1.Post)('review-materials/:source/:id/reject'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('source')),
+    __param(2, (0, common_1.Param)('id')),
+    __param(3, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, review_material_decision_dto_1.ReviewMaterialDecisionDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "rejectReviewMaterial", null);
+__decorate([
+    (0, common_1.Post)('social-posts/generate'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, generate_social_post_dto_1.GenerateSocialPostDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "generateSocialPost", null);
+__decorate([
+    (0, common_1.Post)('product-image-drafts'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, create_product_image_draft_dto_1.CreateProductImageDraftDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "createProductImageDraft", null);
+__decorate([
+    (0, common_1.Post)('video-drafts'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, create_video_draft_dto_1.CreateVideoDraftDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "createVideoDraft", null);
+__decorate([
+    (0, common_1.Post)('social-posts/:id/submit'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "submitSocialPost", null);
+__decorate([
+    (0, common_1.Post)('social-posts/:id/withdraw'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "withdrawSocialPostReview", null);
+__decorate([
+    (0, common_1.Post)('social-posts/:id/mark-synced'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "markSocialPostSynced", null);
+__decorate([
+    (0, common_1.Patch)('social-posts/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, update_social_post_dto_1.UpdateSocialPostDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "updateSocialPost", null);
+__decorate([
+    (0, common_1.Delete)('social-posts/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "removeSocialPost", null);
+__decorate([
+    (0, common_1.Patch)('product-image-drafts/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, update_product_image_draft_dto_1.UpdateProductImageDraftDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "updateProductImageDraft", null);
+__decorate([
+    (0, common_1.Patch)('video-drafts/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, update_video_draft_dto_1.UpdateVideoDraftDto]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "updateVideoDraft", null);
+__decorate([
+    (0, common_1.Delete)('video-drafts/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "removeVideoDraft", null);
+__decorate([
+    (0, common_1.Delete)('product-image-drafts/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "removeProductImageDraft", null);
+__decorate([
+    (0, common_1.Post)('product-image-drafts/:id/submit'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "submitProductImageDraft", null);
+__decorate([
+    (0, common_1.Post)('product-image-drafts/:id/withdraw'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "withdrawProductImageDraftReview", null);
+__decorate([
+    (0, common_1.Post)('product-image-drafts/:id/mark-synced'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "markProductImageDraftSynced", null);
+__decorate([
+    (0, common_1.Post)('product-image-drafts/:id/mark-product-synced'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "markProductImageDraftProductSynced", null);
+__decorate([
+    (0, common_1.Post)('video-drafts/:id/submit'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "submitVideoDraft", null);
+__decorate([
+    (0, common_1.Post)('video-drafts/:id/withdraw'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "withdrawVideoDraftReview", null);
+__decorate([
+    (0, common_1.Post)('video-drafts/:id/mark-synced'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AiController.prototype, "markVideoDraftSynced", null);
+exports.AiController = AiController = __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Controller)('ai'),
+    __metadata("design:paramtypes", [ai_service_1.AiService])
+], AiController);
+//# sourceMappingURL=ai.controller.js.map

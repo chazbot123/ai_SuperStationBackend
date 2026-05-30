@@ -1,0 +1,28 @@
+[OPEN] douyin-upload-route
+
+# Goal
+
+- 区分抖音图文发布失败到底是：
+- 进入 `content/upload` 后真实回跳 `home`
+- 还是停留在上传页但元素未就绪
+- 还是文件上传根本没有真正开始
+
+# Repro
+
+- 平台：抖音图文发布
+- 现象：用户看到进入编辑页后又退回，或自动化报未找到上传图文按钮
+
+# Hypotheses
+
+| ID | Hypothesis | Observation Point |
+|---|---|---|
+| H1 | 页面进入 `content/upload` 后被平台真实跳回 `home` | 进入上传页后的 URL/状态时间线 |
+| H2 | 页面没有回跳，只是停留在上传页但上传态元素没稳定出现 | 上传页轮询快照、ready/input/button 状态 |
+| H3 | `uploadFiles()` 没真正开始，文件输入框不可用 | `uploadFiles()` 入口、input 命中、set files 调度 |
+| H4 | 文件下载或注入失败，导致上传未开始 | 文件 URL、下载/注入结果、错误信息 |
+
+# Rules
+
+- 先加埋点，不改业务逻辑
+- 先收 pre-fix 证据，再决定是否修复
+- 修复后用 post-fix 日志对比验证

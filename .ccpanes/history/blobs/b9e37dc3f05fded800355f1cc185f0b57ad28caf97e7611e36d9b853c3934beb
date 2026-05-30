@@ -1,0 +1,63 @@
+import type { Prisma } from '@prisma/client';
+export declare const supportConversationInclude: {
+    assignedAgent: {
+        select: {
+            id: true;
+            username: true;
+            displayName: true;
+            role: true;
+        };
+    };
+    messages: {
+        orderBy: {
+            createdAt: "asc";
+        };
+    };
+    handoffs: {
+        orderBy: {
+            requestedAt: "desc";
+        };
+    };
+};
+export type SupportConversationWithRelations = Prisma.SupportConversationGetPayload<{
+    include: typeof supportConversationInclude;
+}>;
+export declare function serializeSupportConversation(item: SupportConversationWithRelations): {
+    id: string;
+    channel: string;
+    visitorSessionId: string;
+    visitorName: string | null;
+    visitorContact: string | null;
+    sourcePage: string | null;
+    status: import("@prisma/client").$Enums.SupportConversationStatus;
+    handoffRequestedAt: string | null;
+    humanTakenAt: string | null;
+    endedAt: string | null;
+    lastMessageAt: string;
+    createdAt: string;
+    updatedAt: string;
+    assignedAgent: {
+        id: string;
+        username: string;
+        displayName: string;
+        role: string;
+    } | null;
+    messages: {
+        id: string;
+        role: import("@prisma/client").$Enums.SupportMessageRole;
+        content: string;
+        confidence: number | null;
+        sources: Prisma.JsonValue;
+        agentUserId: string | null;
+        createdAt: string;
+    }[];
+    latestHandoff: {
+        id: string;
+        status: import("@prisma/client").$Enums.SupportHandoffStatus;
+        queueSerial: number | null;
+        requestedAt: string;
+        acceptedAt: string | null;
+        closedAt: string | null;
+        acceptedByUserId: string | null;
+    } | null;
+};

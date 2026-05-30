@@ -1,0 +1,7 @@
+import { TextModelConfigDto } from './generate-copy.dto';
+export declare class GeneratePlatformMetaDto {
+    text: string;
+    mode?: 'product_video' | 'avatar_video';
+    platformStyle?: 'douyin' | 'xiaohongshu' | 'wechat_mp';
+    modelConfig?: TextModelConfigDto;
+}

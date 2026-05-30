@@ -1,0 +1,22 @@
+import { ConfigService } from '@nestjs/config';
+export declare class DouyinShareSchemaService {
+    private readonly configService;
+    private readonly logger;
+    private cachedClientToken;
+    private cachedTicket;
+    constructor(configService: ConfigService);
+    generateShareSchema(input: {
+        title: string;
+        topics: string[];
+        videoUrl?: string | null;
+        imageUrls?: string[];
+        downloadType?: number;
+        privateStatus?: number;
+        shareId?: string;
+    }): Promise<string>;
+    private getOpenTicket;
+    private getClientToken;
+    private generateSignature;
+    private getClientKey;
+    private getClientSecret;
+}

@@ -2,7 +2,8 @@
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const debugPrefix = "[ai-superweb-publish]";
   //#region debug-point douyin-home-network-session
-  const publishDebugSessionId = "douyin-home-network";
+  const publishDebugSessionId = "douyin-upload-route";
+  const publishDebugRunId = "post-fix";
   //#endregion
   const fetchFileTimeoutMs = 15000;
   const randomBetween = (min, max) => {
@@ -26,11 +27,11 @@
   }
 
   function reportPublishAutomationDebug(hypothesisId, location, data) {
-    fetch("http://127.0.0.1:7777/event", {
+    fetch("http://127.0.0.1:7778/event", {
       method: "POST",
       body: JSON.stringify({
         sessionId: publishDebugSessionId,
-        runId: "pre-fix",
+        runId: publishDebugRunId,
         hypothesisId,
         location,
         msg: `[DEBUG] ${location}`,
@@ -39,6 +40,35 @@
       }),
     }).catch(() => {});
   }
+
+  //#region debug-point H3:global-error-listeners
+  window.addEventListener("error", (event) => {
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:window:error",
+      {
+        message: event?.message || "",
+        filename: event?.filename || "",
+        lineno: Number(event?.lineno || 0),
+        colno: Number(event?.colno || 0),
+        currentUrl: window.location.href,
+      },
+    );
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:window:unhandledrejection",
+      {
+        message: reason instanceof Error ? reason.message : String(reason || ""),
+        stack: reason instanceof Error ? String(reason.stack || "") : "",
+        currentUrl: window.location.href,
+      },
+    );
+  });
+  //#endregion
 
   function inferFileName(url, fallbackName) {
     try {
@@ -972,6 +1002,23 @@
     'input[type="file"]',
   ];
 
+  const douyinImageHomeEntrySelectors = [
+    'div.bg-tCBPTN:has-text("发布图文")',
+    'div[class*="bg-"]:has-text("发布图文")',
+    'div:has-text("发布图文")',
+    'text=发布图文',
+  ];
+
+  const douyinImageUploadButtonSelectors = [
+    'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4:has-text("上传图文")',
+    'button.container-drag-btn-k6XmB4:has-text("上传图文")',
+    'button.semi-button:has-text("上传图文")',
+    '[role="button"]:has-text("上传图文")',
+    'button:has-text("上传图文")',
+    'div:has-text("上传图文")',
+    'text=上传图文',
+  ];
+
   function getDouyinImageHomeEntryCard() {
     const titleNodes = Array.from(document.querySelectorAll("div.title-HvY9Az"));
     const matchedTitle = titleNodes.find(
@@ -985,13 +1032,29 @@
   }
 
   function getDouyinImageUploadButton() {
-    const buttonNodes = Array.from(document.querySelectorAll("button.container-drag-btn-k6XmB4"));
-    return (
-      buttonNodes.find(
-        (node) =>
-          node instanceof HTMLButtonElement && normalize(node.textContent || "").includes("上传图文"),
-      ) || null
+    const exactTextNode = Array.from(
+      document.querySelectorAll("button.container-drag-btn-k6XmB4 .semi-button-content-right"),
+    ).find(
+      (node) => node instanceof HTMLElement && normalize(node.textContent || "") === "上传图文",
     );
+    const exactClassButton =
+      exactTextNode instanceof HTMLElement
+        ? exactTextNode.closest(
+            'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4[type="button"]',
+          )
+        : null;
+    if (exactClassButton instanceof HTMLElement) {
+      return exactClassButton;
+    }
+    const exactButton = queryFirst(douyinImageUploadButtonSelectors, document, true);
+    if (exactButton instanceof HTMLElement) return exactButton;
+    const legacyButton = Array.from(document.querySelectorAll("button.container-drag-btn-k6XmB4"))
+      .find((node) => node instanceof HTMLButtonElement && normalize(node.textContent || "").includes("上传图文"));
+    if (legacyButton) return legacyButton;
+    const uploadDiv = document.querySelector('div[class*="container-"][class*="IRuUu2"]')
+      || Array.from(document.querySelectorAll('div[class*="container-"]'))
+          .find((el) => normalize(el.textContent || "").includes("点击上传"));
+    return uploadDiv || null;
   }
 
   function getDouyinVisibleButtonTexts(limit = 8) {
@@ -999,6 +1062,63 @@
       .map((node) => normalize(node.textContent || ""))
       .filter(Boolean)
       .slice(0, limit);
+  }
+
+  function buildDouyinUploadRouteSnapshot(job = null) {
+    return {
+      currentUrl: String(window.location.href || ""),
+      state: detectDouyinPublishState(job || { draftVideoUrl: null }),
+      hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
+      hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+      hasUploadButton: Boolean(getDouyinImageUploadButton()),
+      visibleButtonTexts: getDouyinVisibleButtonTexts(12),
+      pageTextPreview: normalize(document.body?.innerText || document.body?.textContent || "").slice(0, 240),
+    };
+  }
+
+  function isDouyinImageEditorPage() {
+    const currentUrl = String(window.location.href || "");
+    if (currentUrl.includes("/creator-micro/content/post/image")) {
+      return true;
+    }
+    const titleInput = queryFirst(
+      [
+        'input[placeholder="添加作品标题"]',
+        'input.semi-input[placeholder*="添加作品标题"]',
+        'input[placeholder*="作品标题"]',
+        'input[placeholder*="添加标题"]',
+        'textarea[placeholder*="标题"]',
+      ],
+      document,
+      true,
+    );
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    return (
+      titleInput instanceof HTMLElement
+      || pageText.includes("填写作品标题")
+      || pageText.includes("添加作品标题")
+      || pageText.includes("作品标题")
+    );
+  }
+
+  function scheduleDouyinUploadStateTimeline(job, tag, delays = [0, 500, 1200, 2500, 5000, 8000, 12000]) {
+    const startedAt = Date.now();
+    delays.forEach((delayMs) => {
+      window.setTimeout(() => {
+        //#region debug-point H1:douyin-upload-route-timeline
+        reportPublishAutomationDebug(
+          "H1",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinUploadStateTimeline",
+          {
+            tag,
+            delayMs,
+            elapsedMs: Date.now() - startedAt,
+            ...buildDouyinUploadRouteSnapshot(job),
+          },
+        );
+        //#endregion
+      }, delayMs);
+    });
   }
 
   function snapshotDouyinUploadRouteProbe(tag, step, startedAt) {
@@ -1035,7 +1155,7 @@
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
       const button = getDouyinImageUploadButton();
-      if (button instanceof HTMLButtonElement) {
+      if (button instanceof HTMLElement) {
         return button;
       }
       await sleep(200);
@@ -1262,23 +1382,105 @@
 
   async function uploadFiles(selectors, urls, kind, root = document) {
     if (!Array.isArray(urls) || urls.length === 0) {
+      //#region debug-point H3:upload-files-empty
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:empty-urls",
+        {
+          kind,
+          selectorCount: Array.isArray(selectors) ? selectors.length : 1,
+          currentUrl: window.location.href,
+        },
+      );
+      //#endregion
       return;
     }
+    //#region debug-point H3:upload-files-start
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:start",
+      {
+        kind,
+        urlCount: urls.length,
+        firstUrl: String(urls[0] || ""),
+        selectors,
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: kind === "video" ? urls[0] || null : null }),
+      },
+    );
+    //#endregion
     const input = await waitForVisible(selectors, 30000, root, false);
     if (!(input instanceof HTMLInputElement) || input.type !== "file") {
+      //#region debug-point H3:upload-files-invalid-input
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:invalid-input",
+        {
+          kind,
+          currentUrl: window.location.href,
+          tagName: input?.tagName || "",
+          inputType: input?.type || "",
+        },
+      );
+      //#endregion
       throw new Error("未找到可上传文件输入框");
     }
+    //#region debug-point H3:upload-files-input-ready
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:input-ready",
+      {
+        kind,
+        currentUrl: window.location.href,
+        accept: input.accept || "",
+        multiple: Boolean(input.multiple),
+        className: input.className || "",
+      },
+    );
+    //#endregion
 
     const files = [];
     for (let index = 0; index < urls.length; index += 1) {
       files.push(await fetchFile(urls[index], index, kind));
     }
+    //#region debug-point H4:upload-files-fetched
+    reportPublishAutomationDebug(
+      "H4",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:fetched-files",
+      {
+        kind,
+        currentUrl: window.location.href,
+        fileCount: files.length,
+        files: files.map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        })),
+      },
+    );
+    //#endregion
 
     const transfer = new DataTransfer();
     files.forEach((file) => transfer.items.add(file));
     input.files = transfer.files;
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
+    //#region debug-point H3:upload-files-dispatched
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:dispatched",
+      {
+        kind,
+        currentUrl: window.location.href,
+        assignedFileCount: input.files ? input.files.length : 0,
+        assignedFiles: Array.from(input.files || []).map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        })),
+      },
+    );
+    //#endregion
   }
 
   async function waitForHints(successHints, failureHints, timeoutErrorMessage, timeoutMs = 120000) {
@@ -1302,9 +1504,25 @@
       return;
     }
     debugLog("goto", "navigate", { currentUrl: window.location.href, targetUrl: url });
+    touchPendingPublishStoredAt();
     window.location.assign(url);
     await sleep(2500);
   }
+
+  function touchPendingPublishStoredAt() {
+    try {
+      const key = "AI_SUPERWEB_PENDING_BITBROWSER_PUBLISH";
+      const raw = window.sessionStorage?.getItem?.(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      parsed.storedAt = Date.now();
+      window.sessionStorage.setItem(key, JSON.stringify(parsed));
+    } catch (_) {}
+  }
+
+  window.addEventListener("beforeunload", () => {
+    touchPendingPublishStoredAt();
+  });
 
   async function ensureKuaishouPublishReady(isVideo) {
     await sleep(1500);
@@ -1398,8 +1616,26 @@
     );
   }
 
+  function isXiaohongshuAlreadyOnEditor() {
+    const url = String(window.location.href || "");
+    if (url.includes("/publish/publish")) {
+      return true;
+    }
+    const hasFileInput = Boolean(
+      queryFirst(['input[type="file"][accept*="image"]', 'input[type="file"][accept*="video"]', 'input[type="file"]'], document, false),
+    );
+    const hasTitleInput = Boolean(
+      queryFirst(['input[placeholder*="标题"]', 'textarea[placeholder*="标题"]'], document, true),
+    );
+    return hasFileInput || hasTitleInput;
+  }
+
   async function ensureXiaohongshuPublishReady(isVideo) {
     await sleep(1200);
+    if (isXiaohongshuAlreadyOnEditor()) {
+      debugLog("xiaohongshu", "already-on-editor", { url: window.location.href });
+      return;
+    }
     await clickFirst(
       [
         'button:has-text("发布笔记")',
@@ -1468,33 +1704,23 @@
     );
     //#endregion
     debugLog("douyin-image", "ensure-ready-start", { url: window.location.href });
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "ensure-ready-start");
     await sleep(1200);
     if (queryFirst(douyinImageReadySelectors, document, true)) {
       debugLog("douyin-image", "ready-indicator-detected-before-switch", { url: window.location.href });
       return;
     }
     const uploadButton = getDouyinImageUploadButton();
-    if (!(uploadButton instanceof HTMLButtonElement)) {
+    if (!(uploadButton instanceof HTMLElement)) {
       throw new Error("未找到抖音图文上传按钮");
     }
-    //#region debug-point douyin-home-click-cause-upload-button-before
-    reportPublishAutomationDebug(
-      "H2",
-      "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureDouyinImagePublishReady:before-upload-click",
-      {
-        currentUrl: window.location.href,
-        buttonClassName: uploadButton.className || "",
-        buttonText: normalize(uploadButton.textContent || ""),
-        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
-      },
-    );
-    //#endregion
     await humanClickElement(uploadButton, {
       ...douyinSlowActionClickOptions(),
       debugScope: "douyin-image",
       debugLabel: "upload-button",
     });
     scheduleDouyinUploadRouteProbe("after-upload-button-click");
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "after-upload-button-click");
     await waitForVisible(
       [...douyinImageUploadInputSelectors, ...douyinImageReadySelectors],
       10000,
@@ -1518,111 +1744,158 @@
     debugLog("douyin-image", "ensure-ready-finished", { url: window.location.href });
   }
 
+  function hasDouyinUnpublishedDraftPrompt() {
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    return pageText.includes("你还有上次未发布的图文") && pageText.includes("放弃");
+  }
+
+  async function dismissDouyinUnpublishedDraftPrompt() {
+    const promptPresent = hasDouyinUnpublishedDraftPrompt();
+    //#region debug-point douyin-draft-prompt-before-dismiss
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:dismissDouyinUnpublishedDraftPrompt:before",
+      {
+        currentUrl: window.location.href,
+        promptPresent,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+      },
+    );
+    //#endregion
+    if (!promptPresent) {
+      return false;
+    }
+
+    const clicked = await clickFirst(
+      [
+        'button:has-text("放弃")',
+        '[role="button"]:has-text("放弃")',
+        'span:has-text("放弃")',
+        'div:has-text("放弃")',
+        "text=放弃",
+      ],
+      5000,
+      document,
+      {
+        ...douyinSlowActionClickOptions(),
+        debugScope: "douyin-image",
+        debugLabel: "dismiss-unpublished-draft",
+      },
+    )
+      .then(() => true)
+      .catch(() => false);
+
+    if (clicked) {
+      await sleep(1200);
+    }
+
+    //#region debug-point douyin-draft-prompt-after-dismiss
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:dismissDouyinUnpublishedDraftPrompt:after",
+      {
+        currentUrl: window.location.href,
+        clicked,
+        promptStillPresent: hasDouyinUnpublishedDraftPrompt(),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+      },
+    );
+    //#endregion
+    return clicked;
+  }
+
   async function enterDouyinImagePublishFromHome(options = {}) {
     const currentUrl = String(window.location.href || "");
     const alreadyOnUploadRoute =
       currentUrl.includes("/creator-micro/content/upload") ||
-      currentUrl.includes("/creator-micro/content/publish");
+      currentUrl.includes("/creator-micro/content/publish") ||
+      currentUrl.includes("/creator-micro/content/post/");
     if (alreadyOnUploadRoute) {
-      //#region debug-point douyin-home-network-direct-route-skip
-      reportPublishAutomationDebug(
-        "H2",
-        "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinImagePublishFromHome:direct-route-skip",
-        {
-          currentUrl,
-          reason: "already-on-upload-route",
-          state: detectDouyinPublishState({ draftVideoUrl: null }),
-          hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
-          hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
-          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
-        },
-      );
-      //#endregion
       return;
     }
-    //#region debug-point douyin-home-fixed-chain-start
-    reportPublishAutomationDebug(
-      "H2",
-      "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinImagePublishFromHome:fixed-chain-start",
-      {
-        currentUrl,
-        targetUrl: "https://creator.douyin.com/creator-micro/home",
-      },
-    );
-    //#endregion
-    await gotoUrl("https://creator.douyin.com/creator-micro/home");
-    await sleep(1600);
-    const homeEntryCard = getDouyinImageHomeEntryCard();
-    if (!(homeEntryCard instanceof HTMLElement)) {
-      throw new Error("未找到抖音图文入口卡片");
+    const preferHomeEntry = Boolean(options?.preferHomeEntry);
+    if (!currentUrl.includes("/creator-micro/home") || preferHomeEntry) {
+      await gotoUrl("https://creator.douyin.com/creator-micro/home");
+      await sleep(1800);
     }
-    //#region debug-point douyin-home-click-cause-home-card-before
-    reportPublishAutomationDebug(
-      "H2",
-      "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinImagePublishFromHome:before-home-card-click",
-      {
-        currentUrl: window.location.href,
-        cardClassName: homeEntryCard.className || "",
-        cardText: normalize(homeEntryCard.textContent || ""),
-        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
-      },
-    );
-    //#endregion
-    await humanClickElement(homeEntryCard, {
+
+    const entryCard = getDouyinImageHomeEntryCard()
+      || (await waitForVisible(douyinImageHomeEntrySelectors, 10000, document, true).catch(() => null));
+    if (!(entryCard instanceof HTMLElement)) {
+      throw new Error("未找到抖音主页的发布图文入口");
+    }
+
+    await humanClickElement(entryCard, {
       ...douyinSlowClickOptions(),
       debugScope: "douyin-image",
       debugLabel: "home-entry-card",
     });
-    scheduleDouyinUploadRouteProbe("after-home-card-click");
-    const uploadButton = await waitForDouyinImageUploadButton(10000);
-    //#region debug-point douyin-home-click-cause-home-card-after
-    reportPublishAutomationDebug(
-      "H2",
-      "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinImagePublishFromHome:after-home-card-click",
-      {
-        currentUrl: window.location.href,
-        hasUploadButton: Boolean(uploadButton),
-        uploadButtonText:
-          uploadButton instanceof HTMLButtonElement ? normalize(uploadButton.textContent || "") : "",
-        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
-      },
-    );
-    //#endregion
-    await sleep(800);
-    //#region debug-point douyin-home-fixed-chain-end
-    reportPublishAutomationDebug(
-      "H2",
-      "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinImagePublishFromHome:fixed-chain-end",
-      {
-        currentUrl: window.location.href,
-        state: detectDouyinPublishState({ draftVideoUrl: null }),
-        hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
-        hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
-        hasUploadButton: Boolean(getDouyinImageUploadButton()),
-        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
-      },
-    );
-    //#endregion
+    scheduleDouyinUploadRouteProbe("after-home-entry-card-click");
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "after-home-entry-card-click");
+
+    await waitForVisible(
+      [...douyinImageUploadButtonSelectors, ...douyinImageUploadInputSelectors, ...douyinImageReadySelectors],
+      10000,
+      document,
+      false,
+    ).catch(() => null);
+    await sleep(1000);
   }
 
   async function openDouyinImageUpload() {
     debugLog("douyin-image", "open-upload-start", { url: window.location.href });
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "open-upload-start");
     const readyInput = queryFirst(douyinImageUploadInputSelectors, document, false);
     if (readyInput instanceof HTMLInputElement) {
       debugLog("douyin-image", "file-input-already-ready", {
         className: readyInput.className || "",
         accept: readyInput.accept || "",
       });
+      //#region debug-point H2:open-upload-input-already-ready
+      reportPublishAutomationDebug(
+        "H2",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:openDouyinImageUpload:input-already-ready",
+        {
+          ...buildDouyinUploadRouteSnapshot({ draftVideoUrl: null }),
+          accept: readyInput.accept || "",
+          className: readyInput.className || "",
+        },
+      );
+      //#endregion
       return;
     }
-    const uploadButton = getDouyinImageUploadButton();
+    let uploadButton = await waitForDouyinImageUploadButton(12000);
+    if (!(uploadButton instanceof HTMLElement)) {
+      const entryCard = getDouyinImageHomeEntryCard();
+      if (entryCard instanceof HTMLElement) {
+        await humanClickElement(entryCard, {
+          ...douyinSlowActionClickOptions(),
+          debugScope: "douyin-image",
+          debugLabel: "retry-home-entry-card",
+        }).catch(() => null);
+        await sleep(1200);
+      }
+      uploadButton = await waitForDouyinImageUploadButton(8000);
+    }
     debugLog("douyin-image", "upload-button-detected", {
       found: Boolean(uploadButton),
       className: uploadButton instanceof HTMLElement ? uploadButton.className : "",
       text: uploadButton instanceof HTMLElement ? normalize(uploadButton.textContent || "") : "",
       currentUrl: window.location.href,
     });
-    if (!(uploadButton instanceof HTMLButtonElement)) {
+    //#region debug-point H2:open-upload-button-detected
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openDouyinImageUpload:button-detected",
+      {
+        ...buildDouyinUploadRouteSnapshot({ draftVideoUrl: null }),
+        found: Boolean(uploadButton),
+        className: uploadButton instanceof HTMLElement ? uploadButton.className : "",
+        text: uploadButton instanceof HTMLElement ? normalize(uploadButton.textContent || "") : "",
+      },
+    );
+    //#endregion
+    if (!(uploadButton instanceof HTMLElement)) {
       throw new Error("未找到抖音图文上传按钮");
     }
     await humanClickElement(uploadButton, {
@@ -1631,28 +1904,36 @@
       debugLabel: "open-upload-button",
     });
     scheduleDouyinUploadRouteProbe("after-open-upload-button-click");
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "after-open-upload-button-click");
     const fileInput = await waitForVisible(douyinImageUploadInputSelectors, 10000, document, false).catch(() => null);
     debugLog("douyin-image", "open-upload-finished", {
       fileInputReady: Boolean(fileInput),
       currentUrl: window.location.href,
     });
+    //#region debug-point H2:open-upload-finished
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openDouyinImageUpload:finished",
+      {
+        ...buildDouyinUploadRouteSnapshot({ draftVideoUrl: null }),
+        fileInputReady: Boolean(fileInput),
+        inputAccept: fileInput instanceof HTMLInputElement ? fileInput.accept || "" : "",
+      },
+    );
+    //#endregion
     await sleep(700);
   }
 
   async function enterDouyinVideoPublishFromHome() {
-    await enterDouyinPublishFromHome(
-      [
-        'div.bg-tCBPTN:has-text("发布视频")',
-        'div[class*="bg-"]:has-text("发布视频")',
-        'div[class*="content"]:has-text("发布视频")',
-        'button:has-text("发布视频")',
-        '[role="button"]:has-text("发布视频")',
-        'div:has-text("发布视频")',
-        'text=发布视频',
-      ],
-      douyinVideoReadySelectors,
-      "douyin-video",
-    );
+    const currentUrl = String(window.location.href || "");
+    const alreadyOnVideoRoute =
+      currentUrl.includes("/creator-micro/content/post/video") ||
+      currentUrl.includes("/creator-micro/content/upload");
+    if (alreadyOnVideoRoute) {
+      return;
+    }
+    await gotoUrl("https://creator.douyin.com/creator-micro/content/post/video?enter_from=publish_page");
+    await sleep(2000);
   }
 
   async function openDouyinVideoUpload() {
@@ -1896,14 +2177,42 @@
       `text=${publishButtonText}`,
     ];
     const readyPage = queryFirst(readySelectors, document, true);
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:start",
+      {
+        currentUrl: window.location.href,
+        recentEntryText,
+        publishButtonText,
+        hasReadyPage: Boolean(readyPage),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
     if (readyPage) {
       await sleep(900);
       return;
     }
 
-    const visiblePublishButton = queryFirst(publishButtonSelectors, document, true);
-    if (visiblePublishButton) {
-      await humanClickElement(visiblePublishButton, {
+    const recentEntrySelectors = [
+      `a:has-text("${recentEntryText}")`,
+      `button:has-text("${recentEntryText}")`,
+      `[role="button"]:has-text("${recentEntryText}")`,
+      `div:has-text("${recentEntryText}")`,
+      `span:has-text("${recentEntryText}")`,
+      `text=${recentEntryText}`,
+    ];
+    const visibleRecentEntry = queryFirst(recentEntrySelectors, document, true);
+    if (visibleRecentEntry) {
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:recent-entry-visible",
+        {
+          currentUrl: window.location.href,
+          recentEntryText,
+          node: getElementDebugSnapshot(visibleRecentEntry),
+        },
+      );
+      await humanClickElement(visibleRecentEntry, {
         beforeMoveMin: 280,
         beforeMoveMax: 560,
         movePauseMin: 180,
@@ -1913,36 +2222,71 @@
         afterClickMin: 460,
         afterClickMax: 820,
       });
-      await sleep(1800);
-      return;
-    }
+      await sleep(1600);
+    } else {
+      const visiblePublishButton = queryFirst(publishButtonSelectors, document, true);
+      if (visiblePublishButton) {
+        reportPublishAutomationDebug(
+          "W1",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:publish-button-visible-before-recent",
+          {
+            currentUrl: window.location.href,
+            publishButtonText,
+            node: getElementDebugSnapshot(visiblePublishButton),
+          },
+        );
+        await humanClickElement(visiblePublishButton, {
+          beforeMoveMin: 280,
+          beforeMoveMax: 560,
+          movePauseMin: 180,
+          movePauseMax: 360,
+          holdPauseMin: 150,
+          holdPauseMax: 280,
+          afterClickMin: 460,
+          afterClickMax: 820,
+        });
+        await sleep(1800);
+        return;
+      }
 
-    await clickFirst(
-      [
-        `button:has-text("${recentEntryText}")`,
-        `a:has-text("${recentEntryText}")`,
-        `[role="button"]:has-text("${recentEntryText}")`,
-        `div:has-text("${recentEntryText}")`,
-        `span:has-text("${recentEntryText}")`,
-        `text=${recentEntryText}`,
-      ],
-      9000,
-      document,
-      {
-        beforeMoveMin: 280,
-        beforeMoveMax: 560,
-        movePauseMin: 180,
-        movePauseMax: 360,
-        holdPauseMin: 150,
-        holdPauseMax: 280,
-        afterClickMin: 460,
-        afterClickMax: 820,
-      },
-    );
-    await sleep(1600);
+      await clickFirst(
+        recentEntrySelectors,
+        9000,
+        document,
+        {
+          beforeMoveMin: 280,
+          beforeMoveMax: 560,
+          movePauseMin: 180,
+          movePauseMax: 360,
+          holdPauseMin: 150,
+          holdPauseMax: 280,
+          afterClickMin: 460,
+          afterClickMax: 820,
+        },
+      );
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:recent-entry-clicked",
+        {
+          currentUrl: window.location.href,
+          recentEntryText,
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+        },
+      );
+      await sleep(1600);
+    }
 
     const readyAfterRecentClick = queryFirst(readySelectors, document, true);
     if (readyAfterRecentClick) {
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:ready-after-recent-click",
+        {
+          currentUrl: window.location.href,
+          recentEntryText,
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+        },
+      );
       await sleep(900);
       return;
     }
@@ -1962,10 +2306,62 @@
         afterClickMax: 820,
       },
     );
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:publish-button-clicked",
+      {
+        currentUrl: window.location.href,
+        publishButtonText,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
     await sleep(1800);
   }
 
+  function isWechatMpEditorPage(isVideo) {
+    const currentUrl = String(window.location.href || "");
+    if (
+      currentUrl.includes("/platform/post/create") ||
+      currentUrl.includes("/platform/post/finderNewLifeCreate")
+    ) {
+      return true;
+    }
+
+    const titleSelectors = isVideo
+      ? []
+      : [
+          'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题，22个字符内"]',
+          'textarea[placeholder="填写标题，22个字符内"]',
+          'input[placeholder*="填写标题"]',
+          'input[placeholder*="标题"]',
+          'textarea[placeholder*="标题"]',
+        ];
+    const descSelectors = [
+      'div.post-desc-box div.input-editor[contenteditable]',
+      'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+      '[contenteditable][data-placeholder="添加描述"]',
+      'div.input-editor[contenteditable]',
+      'div[contenteditable="true"]',
+    ];
+    return Boolean(queryFirst([...titleSelectors, ...descSelectors], document, true));
+  }
+
   async function ensureWechatMpPublishReady(isVideo) {
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureWechatMpPublishReady:start",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        isEditorPage: isWechatMpEditorPage(isVideo),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    if (isWechatMpEditorPage(isVideo)) {
+      return;
+    }
     await sleep(1600);
     if (!isVideo) {
       await openWechatMpRecentEntry(
@@ -1984,6 +2380,16 @@
         ],
         9000,
       );
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureWechatMpPublishReady:after-image-entry",
+        {
+          currentUrl: window.location.href,
+          isVideo,
+          isEditorPage: isWechatMpEditorPage(isVideo),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+        },
+      );
       return;
     }
 
@@ -1996,6 +2402,16 @@
         '[contenteditable][data-placeholder="添加描述"]',
       ],
       7000,
+    );
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureWechatMpPublishReady:after-video-entry",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        isEditorPage: isWechatMpEditorPage(isVideo),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
     );
   }
 
@@ -2014,16 +2430,227 @@
     return parts.join("\n").trim();
   }
 
+  async function waitForXiaohongshuUploadComplete(timeoutMs = 60000) {
+    const startedAt = Date.now();
+    await sleep(2000);
+    while (Date.now() - startedAt < timeoutMs) {
+      const pageText = normalize(document.body?.innerText || "");
+      const hasProgress = pageText.includes("上传中") || pageText.includes("处理中") || pageText.includes("正在上传");
+      const progressBars = document.querySelectorAll('[class*="progress"], [class*="loading"], [class*="upload"][class*="ing"]');
+      const hasActiveProgress = Array.from(progressBars).some((node) => matchesVisibility(node));
+      if (!hasProgress && !hasActiveProgress) {
+        break;
+      }
+      await sleep(1500);
+    }
+    await sleep(1500);
+  }
+
+  function findXiaohongshuPublishButton(publishSelectors = []) {
+    const directButton = queryFirst(publishSelectors, document, true);
+    if (directButton instanceof HTMLElement) {
+      return directButton;
+    }
+    const candidates = queryCandidates(
+      [
+        "button",
+        '[role="button"]',
+        "a",
+        'div[role="button"]',
+        '[class*="button"]',
+        '[class*="btn"]',
+      ],
+      document,
+      true,
+    )
+      .map(resolveClickableCandidate)
+      .filter((node) => node instanceof HTMLElement);
+    const preferredTexts = new Set(["发布", "发布笔记"]);
+    return (
+      candidates.find((node) => preferredTexts.has(normalize(node.textContent || ""))) || null
+    );
+  }
+
+  function buildXiaohongshuTagCandidateSelectors(tag) {
+    const safeTag = escapeHasText(tag);
+    return [
+      `[role="option"]:has-text("${safeTag}")`,
+      `li[role="option"]:has-text("${safeTag}")`,
+      `[class*="suggest"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="topic"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="tag"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="mention"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="recommend"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="option"]:has-text("${safeTag}")`,
+      `div:has-text("${safeTag}")`,
+      `span:has-text("${safeTag}")`,
+    ];
+  }
+
+  async function clickFirstVisibleXiaohongshuTagCandidate(tag) {
+    const tagCandidate = await clickCandidatesUntil(buildXiaohongshuTagCandidateSelectors(tag), {
+      timeoutMs: 8000,
+      scope: "xiaohongshu-tag",
+      options: {
+        beforeMoveMin: 220,
+        beforeMoveMax: 420,
+        movePauseMin: 140,
+        movePauseMax: 260,
+        holdPauseMin: 120,
+        holdPauseMax: 220,
+        afterClickMin: 260,
+        afterClickMax: 520,
+      },
+      successCheck: () => {
+        const pageText = normalize(document.body?.innerText || "");
+        return !pageText.includes(`#${tag}`) || pageText.includes(tag);
+      },
+      postClickObserveMs: 1500,
+      postClickPollMs: 200,
+    }).catch(() => null);
+    if (!(tagCandidate instanceof HTMLElement)) {
+      throw new Error(`未找到小红书标签候选项：#${tag}`);
+    }
+    return tagCandidate;
+  }
+
+  async function fillXiaohongshuBodyAndTags(job) {
+    const editorSelectors = ['div.tiptap.ProseMirror', 'div[role="textbox"]', 'div[contenteditable="true"]'];
+    const editor = await waitForVisible(editorSelectors, 30000, document, true);
+    if (!(editor instanceof HTMLElement)) {
+      throw new Error("未找到小红书正文输入框");
+    }
+    await humanClickElement(editor, {
+      beforeMoveMin: 180,
+      beforeMoveMax: 360,
+      movePauseMin: 120,
+      movePauseMax: 240,
+      holdPauseMin: 120,
+      holdPauseMax: 220,
+      afterClickMin: 260,
+      afterClickMax: 520,
+    });
+    await sleep(randomBetween(180, 320));
+    clearEditable(editor);
+    await sleep(randomBetween(180, 320));
+
+    const body = String(job?.draftBody || "").trim();
+    const tags = normalizeTags(job?.draftTags);
+
+    if (body) {
+      await typeEditableTextHuman(editor, body, 80, 135);
+      await sleep(randomBetween(260, 420));
+    }
+
+    for (const [index, tag] of tags.entries()) {
+      await humanClickElement(editor, {
+        beforeMoveMin: 180,
+        beforeMoveMax: 360,
+        movePauseMin: 120,
+        movePauseMax: 240,
+        holdPauseMin: 120,
+        holdPauseMax: 220,
+        afterClickMin: 260,
+        afterClickMax: 520,
+      }).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+      if (body || index > 0) {
+        await pressEditableEnter(editor);
+      }
+      await appendText(
+        editorSelectors,
+        `#${tag}`,
+        8000,
+        document,
+        { preferHumanType: true, perCharMin: 105, perCharMax: 175 },
+      );
+      await sleep(randomBetween(620, 980));
+      await clickFirstVisibleXiaohongshuTagCandidate(tag);
+      await sleep(randomBetween(420, 760));
+    }
+    return editor;
+  }
+
+  async function cdpClick(element) {
+    element.scrollIntoView({ block: "center", inline: "center" });
+    await sleep(300);
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2 + window.screenX;
+    const y = rect.top + rect.height / 2 + window.screenY;
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: "AI_SUPERWEB_CDP_CLICK", payload: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } },
+        (resp) => {
+          void chrome.runtime.lastError;
+          resolve(resp);
+        },
+      );
+    });
+  }
+
+  async function xiaohongshuClickPublishButton(publishSelectors) {
+    const button =
+      findXiaohongshuPublishButton(publishSelectors)
+      || (await waitForVisible(publishSelectors, 30000, document, true).catch(() => null));
+    if (!(button instanceof HTMLElement)) {
+      throw new Error("未找到小红书发布按钮");
+    }
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 15000) {
+      if (button instanceof HTMLButtonElement && button.disabled) {
+        await sleep(800);
+        continue;
+      }
+      if (button.getAttribute("aria-disabled") === "true") {
+        await sleep(800);
+        continue;
+      }
+      if (button.classList.contains("is-disabled") || button.classList.contains("disabled")) {
+        await sleep(800);
+        continue;
+      }
+      break;
+    }
+
+    const cdpResp = await cdpClick(button);
+    debugLog("xiaohongshu", "cdp-click-result", cdpResp);
+    await sleep(1500);
+
+    const pageText = normalize(document.body?.innerText || "");
+    const published = ["发布成功", "笔记发布成功", "审核中", "发布中"].some((h) => pageText.includes(h));
+    if (!published) {
+      debugLog("xiaohongshu", "cdp-click-no-effect-fallback", { url: window.location.href });
+      await humanClickElement(button, {
+        beforeMoveMin: 320,
+        beforeMoveMax: 620,
+        movePauseMin: 200,
+        movePauseMax: 380,
+        holdPauseMin: 170,
+        holdPauseMax: 320,
+        afterClickMin: 520,
+        afterClickMax: 960,
+      });
+      await sleep(1200);
+    }
+    return button;
+  }
+
   async function publishXiaohongshu(job) {
     const isVideo = Boolean(job.draftVideoUrl);
-    const bodyWithTags = buildPublishPageBodyWithTags(job);
     const publishSelectors = [
       "button.ce-btn.bg-red",
       'button.bg-red:has-text("发布")',
+      'button.bg-red:has-text("发布笔记")',
       'button.ce-btn:has-text("发布")',
+      'button.ce-btn:has-text("发布笔记")',
       'button:has-text("发布")',
+      'button:has-text("发布笔记")',
       'div[role="button"]:has-text("发布")',
+      'div[role="button"]:has-text("发布笔记")',
+      'a:has-text("发布")',
       "text=发布",
+      "text=发布笔记",
     ];
     await gotoUrl("https://creator.xiaohongshu.com/");
     await ensureXiaohongshuPublishReady(isVideo);
@@ -2036,7 +2663,7 @@
       isVideo ? [job.draftVideoUrl] : job.draftImages,
       isVideo ? "video" : "image",
     );
-    await sleep(2000);
+    await waitForXiaohongshuUploadComplete();
     await fillFirst(
       ['input[placeholder*="标题"]', 'textarea[placeholder*="标题"]', 'input[type="text"]'],
       job.draftTitle,
@@ -2044,13 +2671,7 @@
       document,
       { preferHumanType: true, perCharMin: 110, perCharMax: 190 },
     );
-    await fillFirst(
-      ['div.tiptap.ProseMirror', 'div[role="textbox"]', 'div[contenteditable="true"]'],
-      bodyWithTags,
-      30000,
-      document,
-      { preferHumanType: true, perCharMin: 110, perCharMax: 180 },
-    );
+    await fillXiaohongshuBodyAndTags(job);
     //#region debug-point xiaohongshu-publish-submit-before-click
     reportPublishAutomationDebug(
       "H1",
@@ -2059,16 +2680,7 @@
     );
     //#endregion
     try {
-      const clickedNode = await clickFirst(publishSelectors, 30000, document, {
-        beforeMoveMin: 320,
-        beforeMoveMax: 620,
-        movePauseMin: 200,
-        movePauseMax: 380,
-        holdPauseMin: 170,
-        holdPauseMax: 320,
-        afterClickMin: 520,
-        afterClickMax: 960,
-      });
+      const clickedNode = await xiaohongshuClickPublishButton(publishSelectors);
       //#region debug-point xiaohongshu-publish-submit-after-click
       reportPublishAutomationDebug(
         "H2",
@@ -2121,22 +2733,171 @@
   }
 
   async function finalizeDouyinImagePublish(job) {
-    await sleep(3000);
-    await fillFirst(
+    //#region debug-point douyin-image-finalize-start
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:start",
+      {
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: null }),
+        hasTitleInput: Boolean(
+          queryFirst(
+            [
+              'input[placeholder="添加作品标题"]',
+              'input.semi-input[placeholder*="添加作品标题"]',
+              'input[placeholder*="作品标题"]',
+              'input[placeholder*="添加标题"]',
+              'textarea[placeholder*="标题"]',
+            ],
+            document,
+            true,
+          ),
+        ),
+        hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+      },
+    );
+    //#endregion
+    const editorReadyNode = await waitForVisible(
       [
         'input[placeholder="添加作品标题"]',
         'input.semi-input[placeholder*="添加作品标题"]',
         'input[placeholder*="作品标题"]',
         'input[placeholder*="添加标题"]',
         'textarea[placeholder*="标题"]',
+        ...douyinImageDescriptionSelectors,
+        ...douyinImageReadySelectors,
       ],
-      job.draftTitle,
-      30000,
+      15000,
       document,
-      { preferHumanType: true, perCharMin: 115, perCharMax: 190 },
+      true,
     ).catch(() => null);
-    await fillDouyinImageDescriptionAndTopics(job);
-    await selectDouyinNoDeclaration();
+    if (!(editorReadyNode instanceof HTMLElement)) {
+      throw new Error("抖音图文编辑页长时间停留在加载中");
+    }
+    await sleep(1200);
+    //#region debug-point douyin-image-finalize-after-sleep
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-sleep",
+      {
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: null }),
+        hasTitleInput: Boolean(
+          queryFirst(
+            [
+              'input[placeholder="添加作品标题"]',
+              'input.semi-input[placeholder*="添加作品标题"]',
+              'input[placeholder*="作品标题"]',
+              'input[placeholder*="添加标题"]',
+              'textarea[placeholder*="标题"]',
+            ],
+            document,
+            true,
+          ),
+        ),
+        hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+      },
+    );
+    //#endregion
+    try {
+      await fillFirst(
+        [
+          'input[placeholder="添加作品标题"]',
+          'input.semi-input[placeholder*="添加作品标题"]',
+          'input[placeholder*="作品标题"]',
+          'input[placeholder*="添加标题"]',
+          'textarea[placeholder*="标题"]',
+        ],
+        job.draftTitle,
+        30000,
+        document,
+        { preferHumanType: true, perCharMin: 115, perCharMax: 190 },
+      ).catch(() => null);
+      //#region debug-point douyin-image-finalize-after-title
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-title",
+        {
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+          titleValue:
+            (() => {
+              const titleInput = queryFirst(
+                [
+                  'input[placeholder="添加作品标题"]',
+                  'input.semi-input[placeholder*="添加作品标题"]',
+                  'input[placeholder*="作品标题"]',
+                  'input[placeholder*="添加标题"]',
+                  'textarea[placeholder*="标题"]',
+                ],
+                document,
+                true,
+              );
+              return titleInput instanceof HTMLInputElement || titleInput instanceof HTMLTextAreaElement
+                ? String(titleInput.value || "").slice(0, 120)
+                : "";
+            })(),
+          hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+        },
+      );
+      //#endregion
+      await fillDouyinImageDescriptionAndTopics(job);
+      //#region debug-point douyin-image-finalize-after-body
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-body",
+        {
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+        },
+      );
+      //#endregion
+      await selectDouyinNoDeclaration();
+      //#region debug-point douyin-image-finalize-after-declaration
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-declaration",
+        {
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+        },
+      );
+      //#endregion
+    } catch (error) {
+      //#region debug-point douyin-image-finalize-error
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:error",
+        {
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+          message: error instanceof Error ? error.message : String(error || ""),
+          stack: error instanceof Error ? String(error.stack || "") : "",
+          hasTitleInput: Boolean(
+            queryFirst(
+              [
+                'input[placeholder="添加作品标题"]',
+                'input.semi-input[placeholder*="添加作品标题"]',
+                'input[placeholder*="作品标题"]',
+                'input[placeholder*="添加标题"]',
+                'textarea[placeholder*="标题"]',
+              ],
+              document,
+              true,
+            ),
+          ),
+          hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+        },
+      );
+      //#endregion
+      throw error;
+    }
     //#region debug-point douyin-publish-submit-before-click
     reportPublishAutomationDebug(
       "H2",
@@ -2261,17 +3022,13 @@
     const hasVideo = Boolean(job?.draftVideoUrl);
     const currentUrl = String(window.location.href || "");
 
-    if (
-      pageText.includes("发布成功") ||
-      pageText.includes("作品发布成功") ||
-      pageText.includes("发布完成") ||
-      pageText.includes("内容管理") ||
-      pageText.includes("作品管理")
-    ) {
-      return "publish_result";
-    }
-
     if (hasVideo) {
+      if (currentUrl.includes("/creator-micro/content/post/video")) {
+        return "video_publish_page";
+      }
+      if (currentUrl.includes("/creator-micro/content/upload")) {
+        return "video_upload_ready";
+      }
       if (queryFirst(douyinVideoReadySelectors, document, true)) {
         return "video_form_ready";
       }
@@ -2282,6 +3039,16 @@
         return "video_publish_page";
       }
     } else {
+      if (currentUrl.includes("/creator-micro/content/post/image")) {
+        return queryFirst(douyinImageReadySelectors, document, true)
+          ? "image_form_ready"
+          : "image_publish_page";
+      }
+      if (currentUrl.includes("/creator-micro/content/upload")) {
+        return queryFirst(douyinImageUploadInputSelectors, document, false)
+          ? "image_upload_ready"
+          : "image_publish_page";
+      }
       if (queryFirst(douyinImageReadySelectors, document, true)) {
         return "image_form_ready";
       }
@@ -2295,6 +3062,15 @@
 
     if (currentUrl.includes("/creator-micro/home")) {
       return "home";
+    }
+
+    if (
+      pageText.includes("发布成功") ||
+      pageText.includes("作品发布成功") ||
+      pageText.includes("发布完成") ||
+      pageText.includes("审核中")
+    ) {
+      return "publish_result";
     }
 
     return "unknown";
@@ -2348,7 +3124,37 @@
       );
       //#endregion
       debugLog("douyin-adapter", "execute-image-start", this.getSnapshot(job));
+      if (isDouyinImageEditorPage()) {
+        //#region debug-point douyin-image-resume-editor
+        reportPublishAutomationDebug(
+          "H3",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:resume-editor",
+          {
+            currentUrl: window.location.href,
+            state: this.getSnapshot(job).state,
+            hasTitleInput: Boolean(
+              queryFirst(
+                [
+                  'input[placeholder="添加作品标题"]',
+                  'input.semi-input[placeholder*="添加作品标题"]',
+                  'input[placeholder*="作品标题"]',
+                  'input[placeholder*="添加标题"]',
+                  'textarea[placeholder*="标题"]',
+                ],
+                document,
+                true,
+              ),
+            ),
+            pageTextPreview: normalize(document.body?.innerText || "").slice(0, 200),
+          },
+        );
+        //#endregion
+        await finalizeDouyinImagePublish(job);
+        return;
+      }
+      scheduleDouyinUploadStateTimeline(job, "execute-image-start");
       await enterDouyinImagePublishFromHome({ preferHomeEntry });
+      await dismissDouyinUnpublishedDraftPrompt().catch(() => false);
       //#region debug-point douyin-home-network-execute-image-after-enter
       reportPublishAutomationDebug(
         "H2",
@@ -2360,7 +3166,9 @@
         },
       );
       //#endregion
+      scheduleDouyinUploadStateTimeline(job, "execute-image-after-enter");
       await ensureDouyinImagePublishReady().catch(() => null);
+      await dismissDouyinUnpublishedDraftPrompt().catch(() => false);
       //#region debug-point douyin-home-network-execute-image-after-ensure
       reportPublishAutomationDebug(
         "H2",
@@ -2373,6 +3181,7 @@
         },
       );
       //#endregion
+      scheduleDouyinUploadStateTimeline(job, "execute-image-after-ensure");
       await openDouyinImageUpload();
       //#region debug-point douyin-home-network-execute-image-after-open-upload
       reportPublishAutomationDebug(
@@ -2385,11 +3194,56 @@
         },
       );
       //#endregion
-      await uploadFiles(
-        ['input[type="file"][accept*="image"]', 'input[type="file"]'],
-        job.draftImages,
-        "image",
+      scheduleDouyinUploadStateTimeline(job, "execute-image-after-open-upload");
+      await dismissDouyinUnpublishedDraftPrompt().catch(() => false);
+      //#region debug-point H3:execute-image-before-upload-files
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:before-upload-files",
+        {
+          currentUrl: window.location.href,
+          state: this.getSnapshot(job).state,
+          imageCount: Array.isArray(job?.draftImages) ? job.draftImages.length : 0,
+          firstImageUrl: Array.isArray(job?.draftImages) ? String(job.draftImages[0] || "") : "",
+          hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+          continueDraftPromptPresent: normalize(document.body?.innerText || "").includes("你还有上次未发布的图文"),
+        },
       );
+      //#endregion
+      try {
+        await uploadFiles(
+          ['input[type="file"][accept*="image"]', 'input[type="file"]'],
+          job.draftImages,
+          "image",
+        );
+      } catch (error) {
+        //#region debug-point H3:execute-image-upload-files-error
+        reportPublishAutomationDebug(
+          "H3",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:upload-files-error",
+          {
+            currentUrl: window.location.href,
+            state: this.getSnapshot(job).state,
+            message: error instanceof Error ? error.message : String(error || ""),
+            stack: error instanceof Error ? String(error.stack || "") : "",
+            continueDraftPromptPresent: normalize(document.body?.innerText || "").includes("你还有上次未发布的图文"),
+          },
+        );
+        //#endregion
+        throw error;
+      }
+      //#region debug-point H3:execute-image-after-upload-files
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:after-upload-files",
+        {
+          currentUrl: window.location.href,
+          state: this.getSnapshot(job).state,
+          hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+          continueDraftPromptPresent: normalize(document.body?.innerText || "").includes("你还有上次未发布的图文"),
+        },
+      );
+      //#endregion
       debugLog("douyin-adapter", "image-upload-dispatched", this.getSnapshot(job));
       await finalizeDouyinImagePublish(job);
     },
@@ -2433,87 +3287,134 @@
   async function publishWechatMp(job) {
     const isVideo = Boolean(job.draftVideoUrl);
     const bodyWithTags = buildPublishPageBodyWithTags(job);
-    await gotoUrl("https://channels.weixin.qq.com/platform");
-    await ensureWechatMpPublishReady(isVideo);
-
-    if (!isVideo) {
-      await fillFirst(
-        [
-          'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
-          'input[placeholder="填写标题, 22个字符内"]',
-          'input[placeholder="填写标题，22个字符内"]',
-          'textarea[placeholder="填写标题，22个字符内"]',
-          'input[placeholder*="填写标题"]',
-          'input[placeholder*="标题"]',
-          'textarea[placeholder*="标题"]',
-          'input[type="text"]',
-        ],
-        job.draftTitle,
-        30000,
-        document,
-        { preferHumanType: true, perCharMin: 115, perCharMax: 185 },
-      ).catch(() => null);
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:start",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        imageCount: Array.isArray(job?.draftImages) ? job.draftImages.length : 0,
+        hasEditorPage: isWechatMpEditorPage(isVideo),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    if (!isWechatMpEditorPage(isVideo)) {
+      await gotoUrl("https://channels.weixin.qq.com/platform");
+      await sleep(3000);
+      await ensureWechatMpPublishReady(isVideo);
+    } else {
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:resume-editor",
+        {
+          currentUrl: window.location.href,
+          isVideo,
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+        },
+      );
     }
 
-    await fillFirst(
-      [
-        'div.post-desc-box div.input-editor[contenteditable]',
-        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
-        '[contenteditable][data-placeholder="添加描述"]',
-        'div[contenteditable="true"]',
-        'textarea[placeholder*="描述"]',
-        'textarea[placeholder*="内容"]',
-      ],
-      bodyWithTags,
+    const wechatMpFileInputSelectors = [
+      'input[type="file"][accept*="image"]',
+      'input[type="file"][accept*="video"]',
+      'input[type="file"]',
+    ];
+    const wechatMpTitleSelectors = [
+      'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+      'input[placeholder="填写标题, 22个字符内"]',
+      'input[placeholder="填写标题，22个字符内"]',
+      'textarea[placeholder="填写标题，22个字符内"]',
+      'input[placeholder*="填写标题"]',
+      'input[placeholder*="标题"]',
+      'textarea[placeholder*="标题"]',
+      'input.weui-desktop-form__input',
+      'input[type="text"]',
+    ];
+    const wechatMpDescSelectors = [
+      'div.post-desc-box div.input-editor[contenteditable]',
+      'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+      '[contenteditable][data-placeholder="添加描述"]',
+      'div.input-editor[contenteditable]',
+      'div[contenteditable="true"]',
+      'textarea[placeholder*="描述"]',
+      'textarea[placeholder*="内容"]',
+    ];
+
+    const editorReadyNode = await waitForVisible(
+      [...wechatMpTitleSelectors, ...wechatMpDescSelectors],
       30000,
       document,
-      { preferHumanType: true, perCharMin: 105, perCharMax: 170 },
-    );
-    await sleep(700);
-
-    await clickFirst(
-      isVideo
-        ? [
-            '.upload-content',
-            '.upload-content .center',
-            '.upload-content .upload-tip',
-            'button:has-text("上传视频")',
-            '[role="button"]:has-text("上传视频")',
-            'div:has-text("上传视频")',
-            'text=上传视频',
-          ]
-        : [
-            '.upload-content',
-            '.upload-content .center',
-            '.upload-content .upload-tip',
-            'button:has-text("上传图片")',
-            '[role="button"]:has-text("上传图片")',
-            'div:has-text("上传图片")',
-            'text=上传图片',
-            'div:has-text("发布图片动态")',
-            'text=发布图片动态',
-          ],
-      9000,
-      document,
-      {
-        beforeMoveMin: 260,
-        beforeMoveMax: 520,
-        movePauseMin: 160,
-        movePauseMax: 300,
-        holdPauseMin: 140,
-        holdPauseMax: 240,
-        afterClickMin: 380,
-        afterClickMax: 720,
-      },
+      true,
     ).catch(() => null);
-    await sleep(700);
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:after-editor-wait",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        hasEditorReadyNode: editorReadyNode instanceof HTMLElement,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    if (!(editorReadyNode instanceof HTMLElement)) {
+      throw new Error("未进入视频号可编辑发布页");
+    }
+    await waitForVisible(
+      [...wechatMpFileInputSelectors, ...wechatMpTitleSelectors, ...wechatMpDescSelectors],
+      30000,
+      document,
+      true,
+    );
+    await sleep(1200);
 
     await uploadFiles(
-      ['input[type="file"][accept*="image"]', 'input[type="file"][accept*="video"]', 'input[type="file"]'],
+      wechatMpFileInputSelectors,
       isVideo ? [job.draftVideoUrl] : job.draftImages,
       isVideo ? "video" : "image",
     );
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:after-upload-files",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
     await sleep(2200);
+
+    if (!isVideo && job.draftTitle) {
+      await fillFirst(
+        wechatMpTitleSelectors,
+        job.draftTitle,
+        15000,
+        document,
+        { preferHumanType: true, perCharMin: 115, perCharMax: 185 },
+      ).catch(() => null);
+      await sleep(600);
+    }
+
+    if (bodyWithTags) {
+      await fillFirst(
+        wechatMpDescSelectors,
+        bodyWithTags,
+        15000,
+        document,
+        { preferHumanType: true, perCharMin: 105, perCharMax: 170 },
+      ).catch(() => null);
+      await sleep(700);
+    }
+
+    await sleep(1500);
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:before-submit-click",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
     await clickFirst(
       ['button:has-text("发表")', '[role="button"]:has-text("发表")', 'button:has-text("发布")', 'text=发表'],
       30000,
@@ -2527,6 +3428,15 @@
         holdPauseMax: 260,
         afterClickMin: 420,
         afterClickMax: 760,
+      },
+    );
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:after-submit-click",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
       },
     );
     await waitForHints(

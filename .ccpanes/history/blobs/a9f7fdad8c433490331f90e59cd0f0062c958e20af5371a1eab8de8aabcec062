@@ -1,0 +1,77 @@
+import type { SessionUser } from '../auth/auth.types';
+import { CustomerManagementService } from './customer-management.service';
+import { CreateCustomerLeadDto } from './dto/create-customer-lead.dto';
+import { ListCustomerLeadsQueryDto } from './dto/list-customer-leads-query.dto';
+import { UpdateCustomerLeadDto } from './dto/update-customer-lead.dto';
+export declare class CustomerManagementController {
+    private readonly customerManagementService;
+    constructor(customerManagementService: CustomerManagementService);
+    list(req: {
+        user: SessionUser;
+    }, query: ListCustomerLeadsQueryDto): Promise<{
+        items: {
+            name: string | null;
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            phoneNumber: string | null;
+            address: string | null;
+            remark: string | null;
+            wechatId: string | null;
+            platformName: string | null;
+            sourcePlatform: import("@prisma/client").$Enums.CustomerSourcePlatform;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    create(req: {
+        user: SessionUser;
+    }, dto: CreateCustomerLeadDto): Promise<{
+        name: string | null;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        phoneNumber: string | null;
+        address: string | null;
+        remark: string | null;
+        wechatId: string | null;
+        platformName: string | null;
+        sourcePlatform: import("@prisma/client").$Enums.CustomerSourcePlatform;
+    }>;
+    getById(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        name: string | null;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        phoneNumber: string | null;
+        address: string | null;
+        remark: string | null;
+        wechatId: string | null;
+        platformName: string | null;
+        sourcePlatform: import("@prisma/client").$Enums.CustomerSourcePlatform;
+    }>;
+    update(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdateCustomerLeadDto): Promise<{
+        name: string | null;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        phoneNumber: string | null;
+        address: string | null;
+        remark: string | null;
+        wechatId: string | null;
+        platformName: string | null;
+        sourcePlatform: import("@prisma/client").$Enums.CustomerSourcePlatform;
+    }>;
+    remove(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        success: boolean;
+    }>;
+}

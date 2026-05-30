@@ -1,0 +1,55 @@
+import { SessionUser } from '../auth/auth.types';
+import { PrismaService } from '../prisma/prisma.service';
+import { UpdatePermissionMatrixDto } from './dto/update-permission-matrix.dto';
+import { CreateRoleDto, UpdateRoleDto } from './dto/update-role.dto';
+export declare class RbacService {
+    private readonly prisma;
+    constructor(prisma: PrismaService);
+    getRbac(): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    createRole(user: SessionUser, dto: CreateRoleDto): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    updateRole(user: SessionUser, key: string, dto: UpdateRoleDto): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    removeRole(user: SessionUser, key: string): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    updatePermission(user: SessionUser, dto: UpdatePermissionMatrixDto): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    private ensureMainCompany;
+    private ensureSeeded;
+}

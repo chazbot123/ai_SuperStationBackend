@@ -1,0 +1,29 @@
+import { ConfigService } from '@nestjs/config';
+export declare class AiVideoStorageService {
+    private readonly configService;
+    private readonly client;
+    private readonly bucketName;
+    private readonly publicBaseUrl;
+    private ensureBucketPromise;
+    constructor(configService: ConfigService);
+    uploadReferenceImage(userId: string, dataUrl: string): Promise<{
+        bucket: string;
+        objectKey: string;
+        url: string;
+    }>;
+    uploadVideoObject(opts: {
+        userId: string;
+        taskId: string;
+        fileName: string;
+        buffer: Buffer;
+    }): Promise<{
+        bucket: string;
+        objectKey: string;
+        url: string;
+    }>;
+    private ensureBucket;
+    private ensureBucketInternal;
+    private buildPublicReadPolicy;
+    private parseDataUrl;
+    private pickImageExtension;
+}

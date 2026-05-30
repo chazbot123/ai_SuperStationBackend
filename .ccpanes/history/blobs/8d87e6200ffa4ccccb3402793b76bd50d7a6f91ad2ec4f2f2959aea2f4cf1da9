@@ -1,0 +1,40 @@
+type KuaishouPublishResponse = {
+    result?: number;
+    video_info?: {
+        photo_id?: string;
+        caption?: string;
+        cover?: string;
+        play_url?: string;
+        pending?: boolean;
+    };
+    error_msg?: string;
+};
+export declare class KuaishouOpenApiService {
+    private readonly logger;
+    publishVideoFromUrl(input: {
+        appId: string;
+        appSecret: string;
+        accessToken: string;
+        refreshToken?: string | null;
+        videoUrl: string;
+        coverUrl: string;
+        caption: string;
+    }): Promise<{
+        token: {
+            accessToken: string;
+            refreshToken: string | null;
+        };
+        photoId: string;
+        playUrl: string | null;
+        pending: boolean;
+        raw: KuaishouPublishResponse;
+    }>;
+    private publishVideoFromUrlWithToken;
+    private startUpload;
+    private uploadVideo;
+    private publishVideo;
+    private refreshToken;
+    private requestText;
+    private parseJson;
+}
+export {};

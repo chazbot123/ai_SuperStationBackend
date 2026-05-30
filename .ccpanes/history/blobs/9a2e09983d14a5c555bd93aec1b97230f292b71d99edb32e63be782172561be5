@@ -1,0 +1,31 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createFileBackedBitBrowserModule = createFileBackedBitBrowserModule;
+const bitbrowser_file_store_1 = require("./bitbrowser.file-store");
+const bitbrowser_gateway_1 = require("./bitbrowser.gateway");
+const bitbrowser_extension_bridge_service_1 = require("./bitbrowser.extension-bridge.service");
+const bitbrowser_runtime_session_service_1 = require("./bitbrowser.runtime-session.service");
+const bitbrowser_service_1 = require("./bitbrowser.service");
+function createFileBackedBitBrowserModule(options) {
+    const repository = new bitbrowser_file_store_1.FileBitBrowserBindingRepository(options.storageFilePath);
+    const runtimeProvider = new bitbrowser_gateway_1.BitBrowserGatewayClient(options.gateway);
+    const service = new bitbrowser_service_1.BitBrowserProfileService(repository, runtimeProvider);
+    const runtimeSessionService = new bitbrowser_runtime_session_service_1.BitBrowserRuntimeSessionService(repository, service);
+    const extensionBridgeService = new bitbrowser_extension_bridge_service_1.BitBrowserExtensionBridgeService(runtimeSessionService);
+    return {
+        service,
+        runtimeSessionService,
+        extensionBridgeService,
+        prepare(creatorId, ownerId, platform, reason, expiresAt) {
+            return service.prepareOwnerRuntime({
+                creatorId,
+                ownerId,
+                platform,
+                reason,
+                expiresAt,
+                taskId: (0, bitbrowser_service_1.buildProfileTaskId)(ownerId, platform),
+            });
+        },
+    };
+}
+//# sourceMappingURL=bitbrowser.bootstrap.js.map

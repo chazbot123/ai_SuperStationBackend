@@ -1,0 +1,12 @@
+declare const PLATFORM_ACCOUNT_AUTH_TYPES: readonly ["cookie", "token"];
+declare const PLATFORM_ACCOUNT_STATUSES: readonly ["saved", "valid", "invalid", "disabled"];
+export declare class UpdatePlatformAccountDto {
+    authType?: (typeof PLATFORM_ACCOUNT_AUTH_TYPES)[number];
+    accountName?: string;
+    displayName?: string;
+    authPayload?: string;
+    remark?: string;
+    status?: (typeof PLATFORM_ACCOUNT_STATUSES)[number];
+    externalGroupId?: string;
+}
+export {};

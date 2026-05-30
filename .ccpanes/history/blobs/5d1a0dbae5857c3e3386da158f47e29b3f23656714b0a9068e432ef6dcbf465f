@@ -1,0 +1,9 @@
+import { TextModelConfigDto } from './generate-copy.dto';
+export declare class ExpandAvatarVideoScriptDto {
+    prompt: string;
+    targetSeconds: number;
+    platformStyle?: 'douyin' | 'xiaohongshu' | 'wechat_mp';
+    scene?: string;
+    style?: string;
+    modelConfig?: TextModelConfigDto;
+}

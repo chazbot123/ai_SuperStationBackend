@@ -1,0 +1,94 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.KnowledgeController = void 0;
+const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
+const list_knowledge_documents_query_dto_1 = require("./dto/list-knowledge-documents-query.dto");
+const search_knowledge_retrieval_dto_1 = require("./dto/search-knowledge-retrieval.dto");
+const upload_knowledge_document_dto_1 = require("./dto/upload-knowledge-document.dto");
+const knowledge_service_1 = require("./knowledge.service");
+let KnowledgeController = class KnowledgeController {
+    knowledgeService;
+    constructor(knowledgeService) {
+        this.knowledgeService = knowledgeService;
+    }
+    listDocuments(req, query) {
+        return this.knowledgeService.listDocuments(req.user, query);
+    }
+    uploadDocument(req, dto, file) {
+        return this.knowledgeService.uploadDocument(req.user, dto, file);
+    }
+    getDocumentById(req, id) {
+        return this.knowledgeService.getDocumentById(req.user, id);
+    }
+    removeDocument(req, id) {
+        return this.knowledgeService.removeDocument(req.user, id);
+    }
+    searchRetrieval(req, dto) {
+        return this.knowledgeService.searchRetrieval(req.user, dto);
+    }
+};
+exports.KnowledgeController = KnowledgeController;
+__decorate([
+    (0, common_1.Get)('documents'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, list_knowledge_documents_query_dto_1.ListKnowledgeDocumentsQueryDto]),
+    __metadata("design:returntype", void 0)
+], KnowledgeController.prototype, "listDocuments", null);
+__decorate([
+    (0, common_1.Post)('documents'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', {
+        limits: { fileSize: 20 * 1024 * 1024 },
+    })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFile)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, upload_knowledge_document_dto_1.UploadKnowledgeDocumentDto, Object]),
+    __metadata("design:returntype", void 0)
+], KnowledgeController.prototype, "uploadDocument", null);
+__decorate([
+    (0, common_1.Get)('documents/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], KnowledgeController.prototype, "getDocumentById", null);
+__decorate([
+    (0, common_1.Delete)('documents/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], KnowledgeController.prototype, "removeDocument", null);
+__decorate([
+    (0, common_1.Post)('retrieval/search'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, search_knowledge_retrieval_dto_1.SearchKnowledgeRetrievalDto]),
+    __metadata("design:returntype", void 0)
+], KnowledgeController.prototype, "searchRetrieval", null);
+exports.KnowledgeController = KnowledgeController = __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Controller)('knowledge'),
+    __metadata("design:paramtypes", [knowledge_service_1.KnowledgeService])
+], KnowledgeController);
+//# sourceMappingURL=knowledge.controller.js.map

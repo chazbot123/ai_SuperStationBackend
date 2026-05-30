@@ -1,0 +1,61 @@
+import { SessionUser } from '../auth/auth.types';
+import { RbacService } from './rbac.service';
+import { CreateRoleDto, UpdateRoleDto } from './dto/update-role.dto';
+import { UpdatePermissionMatrixDto } from './dto/update-permission-matrix.dto';
+export declare class RbacController {
+    private readonly rbacService;
+    constructor(rbacService: RbacService);
+    getRbac(): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    createRole(req: {
+        user: SessionUser;
+    }, dto: CreateRoleDto): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    updateRole(req: {
+        user: SessionUser;
+    }, key: string, dto: UpdateRoleDto): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    removeRole(req: {
+        user: SessionUser;
+    }, key: string): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+    updatePermissions(req: {
+        user: SessionUser;
+    }, dto: UpdatePermissionMatrixDto): Promise<{
+        roles: {
+            key: string;
+            name: string;
+            description: string;
+            isSystem: boolean;
+        }[];
+        permissionMatrix: Record<string, Record<"products" | "dashboard" | "studio" | "publishing" | "assets" | "customerManagement" | "videos" | "support" | "personalization" | "agents" | "rules" | "reviews" | "rbac", boolean>>;
+    }>;
+}

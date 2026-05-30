@@ -1,0 +1,43 @@
+import { ConfigService } from '@nestjs/config';
+import type { LeadPublishJob, LeadPlatformAccount } from '@prisma/client';
+export declare class WechatOfficialPublishService {
+    private readonly configService;
+    private readonly logger;
+    constructor(configService: ConfigService);
+    publishMpNewsFromJob(input: {
+        job: Pick<LeadPublishJob, 'draftTitle' | 'draftBody' | 'draftImages' | 'draftVideoUrl'>;
+        leadContent: {
+            title: string;
+            body: string;
+            images: string[];
+            coverImage: string | null;
+        };
+        account: Pick<LeadPlatformAccount, 'authPayloadEncrypted' | 'authType'>;
+        componentAccessToken: string;
+        componentAppId: string;
+    }): Promise<{
+        result: {
+            mediaId: string;
+            url: string | null;
+            status: string;
+        };
+        token: {
+            accessToken: string;
+            refreshToken: string | null;
+        } | null;
+    }>;
+    private readTokenPayload;
+    private refreshAuthorizerToken;
+    private uploadCoverImageAsMaterial;
+    private uploadArticleImage;
+    private uploadNews;
+    private submitPublish;
+    private queryPublish;
+    private buildArticleHtml;
+    private escapeHtml;
+    private pickFirstUrl;
+    private fetchBytes;
+    private requestJson;
+    private decryptAuthPayload;
+    private getPlatformAccountSecretKey;
+}

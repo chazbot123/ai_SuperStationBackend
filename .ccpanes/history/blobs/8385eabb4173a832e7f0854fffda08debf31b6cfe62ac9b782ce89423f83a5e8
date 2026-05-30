@@ -1,0 +1,53 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AppModule = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const app_controller_1 = require("./app.controller");
+const ai_module_1 = require("./modules/ai/ai.module");
+const agents_module_1 = require("./modules/agents/agents.module");
+const auth_module_1 = require("./modules/auth/auth.module");
+const customer_management_module_1 = require("./modules/customer-management/customer-management.module");
+const knowledge_module_1 = require("./modules/knowledge/knowledge.module");
+const publishing_module_1 = require("./modules/publishing/publishing.module");
+const prisma_module_1 = require("./modules/prisma/prisma.module");
+const products_module_1 = require("./modules/products/products.module");
+const rbac_module_1 = require("./modules/rbac/rbac.module");
+const rules_module_1 = require("./modules/rules/rules.module");
+const support_module_1 = require("./modules/support/support.module");
+const super_site_settings_module_1 = require("./modules/super-site-settings/super-site-settings.module");
+const users_module_1 = require("./modules/users/users.module");
+let AppModule = class AppModule {
+};
+exports.AppModule = AppModule;
+exports.AppModule = AppModule = __decorate([
+    (0, common_1.Module)({
+        imports: [
+            config_1.ConfigModule.forRoot({
+                isGlobal: true,
+                envFilePath: ['.env', '.env.local'],
+            }),
+            ai_module_1.AiModule,
+            prisma_module_1.PrismaModule,
+            auth_module_1.AuthModule,
+            agents_module_1.AgentsModule,
+            knowledge_module_1.KnowledgeModule,
+            publishing_module_1.PublishingModule,
+            products_module_1.ProductsModule,
+            customer_management_module_1.CustomerManagementModule,
+            rbac_module_1.RbacModule,
+            rules_module_1.RulesModule,
+            support_module_1.SupportModule,
+            super_site_settings_module_1.SuperSiteSettingsModule,
+            users_module_1.UsersModule,
+        ],
+        controllers: [app_controller_1.AppController],
+    })
+], AppModule);
+//# sourceMappingURL=app.module.js.map

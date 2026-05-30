@@ -1,0 +1,100 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.encodeObjectKeyForPublicUrl = encodeObjectKeyForPublicUrl;
+exports.resolvePublicBucketBaseUrl = resolvePublicBucketBaseUrl;
+exports.resolvePublicObjectUrl = resolvePublicObjectUrl;
+exports.rewriteManagedPublicObjectUrl = rewriteManagedPublicObjectUrl;
+function trimTrailingSlash(value) {
+    return value.replace(/\/+$/, '');
+}
+function appendBucketIfMissing(baseUrl, bucketName) {
+    const normalizedBaseUrl = trimTrailingSlash(baseUrl);
+    const bucketSuffix = `/${bucketName}`;
+    return normalizedBaseUrl.endsWith(bucketSuffix) ? normalizedBaseUrl : `${normalizedBaseUrl}${bucketSuffix}`;
+}
+function buildEndpointOrigin(config) {
+    const endpoint = config.endpoint?.trim();
+    if (!endpoint) {
+        return null;
+    }
+    const protocol = config.useSSL ? 'https' : 'http';
+    const port = config.port ?? (config.useSSL ? 443 : 80);
+    const isDefaultPort = (!config.useSSL && port === 80) || (config.useSSL && port === 443);
+    return `${protocol}://${endpoint}${isDefaultPort ? '' : `:${port}`}`;
+}
+function buildKnownBucketBaseUrls(config) {
+    const values = [
+        config.fileBaseUrl?.trim(),
+        config.minioPublicBaseUrl?.trim(),
+        buildEndpointOrigin(config),
+    ].filter((value) => Boolean(value));
+    return Array.from(new Set(values.map((value) => appendBucketIfMissing(value, config.bucketName))));
+}
+function encodeObjectKeyForPublicUrl(objectKey) {
+    return objectKey
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+}
+function resolvePublicBucketBaseUrl(config) {
+    const explicitFileBaseUrl = config.fileBaseUrl?.trim();
+    if (explicitFileBaseUrl) {
+        return appendBucketIfMissing(explicitFileBaseUrl, config.bucketName);
+    }
+    const explicitMinioPublicBaseUrl = config.minioPublicBaseUrl?.trim();
+    if (explicitMinioPublicBaseUrl) {
+        return appendBucketIfMissing(explicitMinioPublicBaseUrl, config.bucketName);
+    }
+    const endpointOrigin = buildEndpointOrigin(config);
+    if (!endpointOrigin) {
+        return null;
+    }
+    return appendBucketIfMissing(endpointOrigin, config.bucketName);
+}
+function resolvePublicObjectUrl(config, objectKey) {
+    const publicBucketBaseUrl = resolvePublicBucketBaseUrl(config);
+    if (!publicBucketBaseUrl) {
+        return null;
+    }
+    return `${publicBucketBaseUrl}/${encodeObjectKeyForPublicUrl(objectKey)}`;
+}
+function rewriteManagedPublicObjectUrl(config, inputUrl) {
+    const trimmedUrl = inputUrl?.trim();
+    if (!trimmedUrl) {
+        return inputUrl ?? null;
+    }
+    const targetPublicBucketBaseUrl = resolvePublicBucketBaseUrl(config);
+    if (!targetPublicBucketBaseUrl) {
+        return trimmedUrl;
+    }
+    const knownBucketBaseUrls = buildKnownBucketBaseUrls(config);
+    const matchedBaseUrl = knownBucketBaseUrls.find((baseUrl) => trimmedUrl.startsWith(`${baseUrl}/`));
+    if (matchedBaseUrl) {
+        const objectKey = decodeURIComponent(trimmedUrl.slice(matchedBaseUrl.length + 1));
+        return resolvePublicObjectUrl(config, objectKey) ?? trimmedUrl;
+    }
+    try {
+        const parsed = new URL(trimmedUrl);
+        const pathSegments = parsed.pathname
+            .split('/')
+            .map((segment) => segment.trim())
+            .filter(Boolean);
+        const bucketIndex = pathSegments.indexOf(config.bucketName);
+        if (bucketIndex < 0 || bucketIndex === pathSegments.length - 1) {
+            return trimmedUrl;
+        }
+        const isLocalLikeHost = parsed.hostname === 'localhost' ||
+            parsed.hostname === '127.0.0.1' ||
+            parsed.hostname === '0.0.0.0' ||
+            parsed.hostname === '::1';
+        if (!isLocalLikeHost) {
+            return trimmedUrl;
+        }
+        const objectKey = pathSegments.slice(bucketIndex + 1).map(decodeURIComponent).join('/');
+        return resolvePublicObjectUrl(config, objectKey) ?? trimmedUrl;
+    }
+    catch {
+        return trimmedUrl;
+    }
+}
+//# sourceMappingURL=public-asset-url.util.js.map

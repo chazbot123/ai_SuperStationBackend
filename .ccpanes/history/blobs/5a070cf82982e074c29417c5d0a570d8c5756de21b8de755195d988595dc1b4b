@@ -1,0 +1,14 @@
+declare const CONTENT_STATUSES: readonly ["active", "archived", "deleted"];
+declare const CONTENT_TYPES: readonly ["copy", "image_text", "video", "product_asset"];
+declare const SOURCE_TYPES: readonly ["social", "product", "video", "manual"];
+declare const PUBLISH_PLATFORMS: readonly ["xiaohongshu", "douyin", "wechat_mp", "kuaishou"];
+export declare class ListPublishingContentsQueryDto {
+    q?: string;
+    status?: (typeof CONTENT_STATUSES)[number];
+    contentType?: (typeof CONTENT_TYPES)[number];
+    sourceType?: (typeof SOURCE_TYPES)[number];
+    platformStyle?: (typeof PUBLISH_PLATFORMS)[number];
+    page: number;
+    limit: number;
+}
+export {};

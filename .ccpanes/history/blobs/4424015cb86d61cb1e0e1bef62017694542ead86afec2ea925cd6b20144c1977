@@ -1,0 +1,104 @@
+import { SessionUser } from '../auth/auth.types';
+import type { ProductUploadFile } from '../products/product-image.types';
+import { CreateSuperSiteIndustryItemDto } from './dto/create-super-site-industry-item.dto';
+import { ListSuperSiteIndustryItemsQueryDto } from './dto/list-super-site-industry-items-query.dto';
+import { ReorderSuperSiteIndustryItemsDto } from './dto/reorder-super-site-industry-items.dto';
+import { SyncSuperSiteIndustryDto } from './dto/sync-super-site-industry.dto';
+import { UpdateSuperSiteSettingDto } from './dto/update-super-site-setting.dto';
+import { UpdateSuperSiteIndustryItemDto } from './dto/update-super-site-industry-item.dto';
+import { SuperSiteIndustryService } from './super-site-industry.service';
+import { SuperSiteSettingsService } from './super-site-settings.service';
+export declare class SuperSiteSettingsController {
+    private readonly superSiteSettingsService;
+    private readonly superSiteIndustryService;
+    constructor(superSiteSettingsService: SuperSiteSettingsService, superSiteIndustryService: SuperSiteIndustryService);
+    getMySettings(req: {
+        user: SessionUser;
+    }): Promise<{
+        enterpriseName: string;
+        superSiteBaseUrl: string;
+        siteTemplate: string;
+        siteModules: import("./dto/update-super-site-setting.dto").SuperSiteModuleDto[];
+        siteMetrics: import("./dto/update-super-site-setting.dto").SuperSiteMetricDto[];
+        specialOfferTitle: string;
+        specialOfferSubtitle: string;
+        specialOffers: import("./dto/update-super-site-setting.dto").SuperSiteSpecialOfferDto[];
+        siteImageSlots: import("./dto/update-super-site-setting.dto").SuperSiteImageSlotDto[];
+        siteVideoSettings: import("./dto/update-super-site-setting.dto").SuperSiteVideoSettingsDto;
+        industrySourceConfigs: import("./super-site-industry.types").SuperSiteIndustrySourceConfig[];
+        industryKeywords: string[];
+        industryRefreshConfig: import("./super-site-industry.types").SuperSiteIndustryRefreshConfig;
+        industryLastSyncAt: string | null;
+        industryLastSyncStatus: string | null;
+        industryLastSyncError: string | null;
+    }>;
+    updateMySettings(req: {
+        user: SessionUser;
+    }, dto: UpdateSuperSiteSettingDto): Promise<{
+        enterpriseName: string;
+        superSiteBaseUrl: string;
+        siteTemplate: string;
+        siteModules: import("./dto/update-super-site-setting.dto").SuperSiteModuleDto[];
+        siteMetrics: import("./dto/update-super-site-setting.dto").SuperSiteMetricDto[];
+        specialOfferTitle: string;
+        specialOfferSubtitle: string;
+        specialOffers: import("./dto/update-super-site-setting.dto").SuperSiteSpecialOfferDto[];
+        siteImageSlots: import("./dto/update-super-site-setting.dto").SuperSiteImageSlotDto[];
+        siteVideoSettings: import("./dto/update-super-site-setting.dto").SuperSiteVideoSettingsDto;
+        industrySourceConfigs: import("./super-site-industry.types").SuperSiteIndustrySourceConfig[];
+        industryKeywords: string[];
+        industryRefreshConfig: import("./super-site-industry.types").SuperSiteIndustryRefreshConfig;
+        industryLastSyncAt: string | null;
+        industryLastSyncStatus: string | null;
+        industryLastSyncError: string | null;
+    }>;
+    uploadMyImage(req: {
+        user: SessionUser;
+    }, file?: ProductUploadFile): Promise<{
+        url: string;
+    }>;
+    uploadMyVideo(req: {
+        user: SessionUser;
+    }, file?: ProductUploadFile): Promise<{
+        url: string;
+    }>;
+    listMyIndustryItems(req: {
+        user: SessionUser;
+    }, query: ListSuperSiteIndustryItemsQueryDto): Promise<{
+        items: import("./super-site-industry.types").SuperSiteIndustryItemView[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    createMyIndustryItem(req: {
+        user: SessionUser;
+    }, dto: CreateSuperSiteIndustryItemDto): Promise<import("./super-site-industry.types").SuperSiteIndustryItemView>;
+    updateMyIndustryItem(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdateSuperSiteIndustryItemDto): Promise<import("./super-site-industry.types").SuperSiteIndustryItemView>;
+    deleteMyIndustryItem(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        success: boolean;
+    }>;
+    reorderMyIndustryItems(req: {
+        user: SessionUser;
+    }, dto: ReorderSuperSiteIndustryItemsDto): Promise<{
+        items: import("./super-site-industry.types").SuperSiteIndustryItemView[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    syncMyIndustryItems(req: {
+        user: SessionUser;
+    }, dto: SyncSuperSiteIndustryDto): Promise<{
+        errors: string[];
+        createdCount: number;
+        updatedCount: number;
+        totalFetched: number;
+    }>;
+}

@@ -1,0 +1,33 @@
+import { ConfigService } from '@nestjs/config';
+import { ProductUploadFile } from './product-image.types';
+type StoredPublicAsset = {
+    bucket: string;
+    objectKey: string;
+    url: string;
+};
+export declare class ProductImageStorageService {
+    private readonly configService;
+    private readonly client;
+    private readonly bucketName;
+    private readonly publicBaseUrl;
+    private ensureBucketPromise;
+    constructor(configService: ConfigService);
+    uploadProductImage(userId: string, file?: ProductUploadFile): Promise<StoredPublicAsset>;
+    isManagedPublicUrl(url?: string | null): boolean;
+    mirrorRemoteAsset(userId: string, sourceUrl: string, folder?: string): Promise<StoredPublicAsset>;
+    private validateImage;
+    private storePublicAsset;
+    private ensureBucket;
+    private ensureBucketInternal;
+    private buildObjectKey;
+    private resolveExtension;
+    private resolvePublicBaseUrl;
+    private buildDefaultPublicBaseUrl;
+    private encodeObjectKey;
+    private resolveExtensionFromMimeType;
+    private normalizeMimeType;
+    private buildRemoteOriginalName;
+    private parseDataUrl;
+    private buildPublicReadPolicy;
+}
+export {};

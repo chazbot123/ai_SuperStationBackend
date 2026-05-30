@@ -1,0 +1,25 @@
+import type { BitBrowserBindingRepository, BitBrowserRuntimeProvider, PreparedBitBrowserRuntime } from './bitbrowser.contracts';
+import type { BindBitBrowserProfileInput, CreateBusinessOwnerInput, PlatformType, PrepareOwnerRuntimeInput, RegisterPlatformAccountInput, ReleaseProfileLockInput } from './bitbrowser.types';
+export declare class BitBrowserOwnershipError extends Error {
+}
+export declare class BitBrowserLockConflictError extends Error {
+}
+export declare class BitBrowserProfileService {
+    private readonly repository;
+    private readonly runtimeProvider;
+    constructor(repository: BitBrowserBindingRepository, runtimeProvider: BitBrowserRuntimeProvider);
+    createOwner(input: CreateBusinessOwnerInput): Promise<import("./bitbrowser.types").BusinessOwner>;
+    bindProfile(input: BindBitBrowserProfileInput): Promise<import("./bitbrowser.types").BrowserProfileBinding>;
+    registerPlatformAccount(input: RegisterPlatformAccountInput): Promise<import("./bitbrowser.types").PlatformAccountBinding>;
+    prepareOwnerRuntime(input: PrepareOwnerRuntimeInput): Promise<PreparedBitBrowserRuntime>;
+    private prepareOwnerRuntimeWithRecovery;
+    releaseOwnerRuntime(input: ReleaseProfileLockInput): Promise<void>;
+    listOwnerAccounts(creatorId: string, ownerId: string): Promise<import("./bitbrowser.types").PlatformAccountBinding[]>;
+    private buildRuntimeContext;
+    private acquireExclusiveProfileLock;
+    private findProfileBindingById;
+    private assertOwnerExists;
+    private isMissingProfileError;
+    private buildBrowserCreatePayload;
+}
+export declare function buildProfileTaskId(ownerId: string, platform: PlatformType): string;

@@ -1,0 +1,66 @@
+export declare class SuperSiteModuleDto {
+    key: string;
+    label: string;
+    enabled: boolean;
+}
+export declare class SuperSiteMetricDto {
+    key: string;
+    label: string;
+    enabled: boolean;
+    valueMode: string;
+    startValue: string;
+    tickInterval: string;
+    incrementMin: string;
+    incrementMax: string;
+    fixedValue: string;
+    suffix: string;
+    highlight: string;
+}
+export declare class SuperSiteSpecialOfferDto {
+    id: string;
+    name: string;
+    summary: string;
+    tag: string;
+    priceText: string;
+    originalPriceText: string;
+    ctaText: string;
+    images: string[];
+    enabled: boolean;
+}
+export declare class SuperSiteImageSlotDto {
+    slotKey: string;
+    moduleKey: string;
+    imageUrl: string;
+    sourceContentId?: string | null;
+    updatedAt?: string | null;
+}
+export declare class SuperSiteVideoSettingsDto {
+    videoUrl: string;
+    posterUrl: string;
+}
+export declare class SuperSiteIndustrySourceConfigDto {
+    key: string;
+    label: string;
+    sourceType: 'rss' | 'html';
+    enabled: boolean;
+}
+export declare class SuperSiteIndustryRefreshConfigDto {
+    enabled: boolean;
+    frequency: 'daily';
+    dailyTime: string;
+}
+export declare class UpdateSuperSiteSettingDto {
+    enterpriseName?: string;
+    superSiteBaseUrl?: string;
+    siteTemplate?: string;
+    siteModules?: SuperSiteModuleDto[];
+    siteMetrics?: SuperSiteMetricDto[];
+    specialOfferTitle?: string;
+    specialOfferSubtitle?: string;
+    specialOffers?: SuperSiteSpecialOfferDto[];
+    siteImageSlots?: SuperSiteImageSlotDto[];
+    siteVideoSettings?: SuperSiteVideoSettingsDto;
+    industrySourceConfigs?: SuperSiteIndustrySourceConfigDto[];
+    industryKeywords?: string[];
+    industryRefreshConfig?: SuperSiteIndustryRefreshConfigDto;
+}

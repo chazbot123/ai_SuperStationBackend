@@ -1,0 +1,154 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AiVideoStorageService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const node_crypto_1 = require("node:crypto");
+const minio_1 = require("minio");
+const public_asset_url_util_1 = require("../shared/public-asset-url.util");
+let AiVideoStorageService = class AiVideoStorageService {
+    configService;
+    client;
+    bucketName;
+    publicBaseUrl;
+    ensureBucketPromise = null;
+    constructor(configService) {
+        this.configService = configService;
+        const endpoint = this.configService.get('MINIO_ENDPOINT') ?? 'localhost';
+        const port = Number(this.configService.get('MINIO_PORT') ?? '9000');
+        const useSSL = String(this.configService.get('MINIO_USE_SSL') ?? 'false') === 'true';
+        const accessKey = this.configService.get('MINIO_ACCESS_KEY');
+        const secretKey = this.configService.get('MINIO_SECRET_KEY');
+        const bucketName = this.configService.get('MINIO_BUCKET') ?? 'ai-superweb';
+        if (!accessKey || !secretKey) {
+            throw new common_1.InternalServerErrorException('MinIO 配置不完整');
+        }
+        this.client = new minio_1.Client({
+            endPoint: endpoint,
+            port,
+            useSSL,
+            accessKey,
+            secretKey,
+        });
+        this.bucketName = bucketName;
+        this.publicBaseUrl =
+            (0, public_asset_url_util_1.resolvePublicBucketBaseUrl)({
+                bucketName,
+                fileBaseUrl: this.configService.get('FILE_BASE_URL'),
+                minioPublicBaseUrl: this.configService.get('MINIO_PUBLIC_BASE_URL'),
+                endpoint,
+                port,
+                useSSL,
+            }) ?? '';
+    }
+    async uploadReferenceImage(userId, dataUrl) {
+        const parsed = this.parseDataUrl(dataUrl);
+        if (!parsed || !parsed.mimeType.startsWith('image/')) {
+            throw new common_1.InternalServerErrorException('参考图格式不支持');
+        }
+        await this.ensureBucket();
+        const extension = this.pickImageExtension(parsed.mimeType);
+        const objectKey = `videos/${userId}/reference/${Date.now()}-${(0, node_crypto_1.randomUUID)()}.${extension}`;
+        const buffer = Buffer.from(parsed.data, 'base64');
+        try {
+            await this.client.putObject(this.bucketName, objectKey, buffer, buffer.length, {
+                'Content-Type': parsed.mimeType,
+                'Cache-Control': 'public, max-age=31536000, immutable',
+            });
+        }
+        catch {
+            throw new common_1.InternalServerErrorException('上传参考图到 MinIO 失败');
+        }
+        return {
+            bucket: this.bucketName,
+            objectKey,
+            url: `${this.publicBaseUrl}/${(0, public_asset_url_util_1.encodeObjectKeyForPublicUrl)(objectKey)}`,
+        };
+    }
+    async uploadVideoObject(opts) {
+        await this.ensureBucket();
+        const objectKey = `videos/${opts.userId}/${opts.taskId}/${Date.now()}-${(0, node_crypto_1.randomUUID)()}-${opts.fileName}`;
+        try {
+            await this.client.putObject(this.bucketName, objectKey, opts.buffer, opts.buffer.length, {
+                'Content-Type': 'video/mp4',
+                'Cache-Control': 'public, max-age=31536000, immutable',
+            });
+        }
+        catch {
+            throw new common_1.InternalServerErrorException('上传视频到 MinIO 失败');
+        }
+        return {
+            bucket: this.bucketName,
+            objectKey,
+            url: `${this.publicBaseUrl}/${(0, public_asset_url_util_1.encodeObjectKeyForPublicUrl)(objectKey)}`,
+        };
+    }
+    ensureBucket() {
+        if (!this.ensureBucketPromise) {
+            this.ensureBucketPromise = this.ensureBucketInternal();
+        }
+        return this.ensureBucketPromise;
+    }
+    async ensureBucketInternal() {
+        try {
+            const exists = await this.client.bucketExists(this.bucketName);
+            if (!exists) {
+                await this.client.makeBucket(this.bucketName);
+            }
+            await this.client.setBucketPolicy(this.bucketName, JSON.stringify(this.buildPublicReadPolicy()));
+        }
+        catch {
+            this.ensureBucketPromise = null;
+            throw new common_1.InternalServerErrorException('初始化 MinIO Bucket 失败');
+        }
+    }
+    buildPublicReadPolicy() {
+        return {
+            Version: '2012-10-17',
+            Statement: [
+                {
+                    Effect: 'Allow',
+                    Principal: { AWS: ['*'] },
+                    Action: ['s3:GetBucketLocation', 's3:ListBucket'],
+                    Resource: [`arn:aws:s3:::${this.bucketName}`],
+                },
+                {
+                    Effect: 'Allow',
+                    Principal: { AWS: ['*'] },
+                    Action: ['s3:GetObject'],
+                    Resource: [`arn:aws:s3:::${this.bucketName}/*`],
+                },
+            ],
+        };
+    }
+    parseDataUrl(value) {
+        const match = /^data:([^;]+);base64,(.+)$/i.exec(value);
+        if (!match)
+            return null;
+        return { mimeType: match[1], data: match[2] };
+    }
+    pickImageExtension(mimeType) {
+        const map = {
+            'image/png': 'png',
+            'image/jpeg': 'jpg',
+            'image/jpg': 'jpg',
+            'image/webp': 'webp',
+        };
+        return map[mimeType] ?? 'png';
+    }
+};
+exports.AiVideoStorageService = AiVideoStorageService;
+exports.AiVideoStorageService = AiVideoStorageService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
+], AiVideoStorageService);
+//# sourceMappingURL=ai-video-storage.service.js.map

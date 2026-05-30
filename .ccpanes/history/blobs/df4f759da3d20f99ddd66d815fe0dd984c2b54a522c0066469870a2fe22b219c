@@ -1,0 +1,3 @@
+import { TestModelConfigDto } from './test-model-config.dto';
+export declare class SaveModelConfigDto extends TestModelConfigDto {
+}

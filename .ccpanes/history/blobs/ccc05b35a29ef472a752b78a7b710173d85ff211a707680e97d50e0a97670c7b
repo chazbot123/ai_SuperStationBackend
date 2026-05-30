@@ -1,0 +1,11 @@
+export declare class UpdateStoreSearchConfigDto {
+    keywords: string[];
+    provinceAdcode?: string;
+    provinceName?: string;
+    cityAdcode?: string;
+    cityName?: string;
+    districtAdcode?: string;
+    districtName?: string;
+    streetAdcode?: string;
+    streetName?: string;
+}

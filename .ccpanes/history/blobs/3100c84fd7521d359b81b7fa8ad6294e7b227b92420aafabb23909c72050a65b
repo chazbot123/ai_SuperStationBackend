@@ -1,0 +1,13 @@
+export declare class CreateProductDto {
+    name: string;
+    englishName?: string;
+    summary?: string;
+    priceText?: string;
+    specialOfferEnabled?: boolean;
+    originalPriceText?: string;
+    specialPriceText?: string;
+    specialTag?: string;
+    category?: string;
+    images?: string[];
+    description?: string;
+}

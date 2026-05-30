@@ -1,0 +1,70 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BitBrowserHttpApi = void 0;
+exports.createBitBrowserHttpApi = createBitBrowserHttpApi;
+const bitbrowser_http_controller_1 = require("./bitbrowser.http-controller");
+function createRouteKey(method, path) {
+    return `${method.toUpperCase()} ${path}`;
+}
+class BitBrowserHttpApi {
+    controller;
+    routes;
+    constructor(facade) {
+        this.controller = new bitbrowser_http_controller_1.BitBrowserHttpController(facade);
+        this.routes = this.createRoutes();
+    }
+    async handle(request) {
+        const route = this.routes.get(createRouteKey(request.method, this.normalizePath(request.path)));
+        if (!route) {
+            return {
+                status: 404,
+                body: {
+                    success: false,
+                    error: `route not found: ${request.method.toUpperCase()} ${request.path}`,
+                },
+            };
+        }
+        ;
+        try {
+            return await route(request);
+        }
+        catch (error) {
+            return this.controller.error(error);
+        }
+    }
+    listRoutes() {
+        return Array.from(this.routes.keys());
+    }
+    createRoutes() {
+        const routes = new Map();
+        routes.set(createRouteKey('POST', '/api/bitbrowser/owners'), (request) => this.controller.createOwner(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/platform-accounts'), (request) => this.controller.registerPlatformAccount(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/runtime/open-session'), (request) => this.controller.openRuntimeSession(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/runtime/close-session'), (request) => this.controller.closeRuntimeSession(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/runtime/get-session'), (request) => this.controller.getRuntimeSession(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/runtime/list-commands'), (request) => this.controller.listSessionCommands(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/ready'), (request) => this.controller.registerExtensionReady(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/page-ready-bind'), (request) => this.controller.pageReadyBind(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/heartbeat'), (request) => this.controller.heartbeat(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/queue-login-prepare'), (request) => this.controller.queueLoginPrepare(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/queue-login-execute'), (request) => this.controller.queueLoginExecute(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/queue-publish'), (request) => this.controller.queuePublishCommand(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/pull-command'), (request) => this.controller.pullNextCommand(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/ack-command'), (request) => this.controller.ackCommand(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/complete-command'), (request) => this.controller.completeCommand(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/extension/fail-command'), (request) => this.controller.failCommand(request));
+        routes.set(createRouteKey('POST', '/api/bitbrowser/debug/event'), (request) => this.controller.writeDebugEvent(request));
+        return routes;
+    }
+    normalizePath(path) {
+        if (!path) {
+            return '/';
+        }
+        return path.startsWith('/') ? path : `/${path}`;
+    }
+}
+exports.BitBrowserHttpApi = BitBrowserHttpApi;
+function createBitBrowserHttpApi(facade) {
+    return new BitBrowserHttpApi(facade);
+}
+//# sourceMappingURL=bitbrowser.http-api.js.map

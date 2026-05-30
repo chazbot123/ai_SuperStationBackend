@@ -266,3 +266,14 @@ pm run check，结果均通过。
 - [2026-05-29 00:00:00] 已修改 `scripts/browser-extension/platform-login-helper/content.js`，视频号资料提取与平台标签判定共享同一套前缀剥离逻辑。
 - [2026-05-29 00:00:00] 已新增 `publishing.service.spec.ts` 中的视频号回归测试，定向 `Wechat Channels` 测试通过。
 - [2026-05-29 00:00:00] 已执行后端 `npm run build`，结果通过；全量 `publishing.service.spec.ts` 仍有 2 条历史失败用例，与本次修复无关。
+- [2026-05-30 00:00:00] 已恢复规划文件并确认新任务：按抖音修复思路处理视频号发布，先补链路埋点，再修复编辑页恢复与自打断问题。
+- [2026-05-30 00:00:00] 已确认关键根因：视频号真实编辑页是 `https://channels.weixin.qq.com/platform/post/finderNewLifeCreate`，旧恢复逻辑仅识别 `platform/post/create`。
+- [2026-05-30 00:00:00] 已修改 `scripts/browser-extension/platform-login-helper/content.js`，允许 `finderNewLifeCreate` 作为视频号待发布恢复页继续执行。
+- [2026-05-30 00:00:00] 已修改 `scripts/browser-extension/platform-login-helper/publish-automation.js`，视频号当前若已在编辑页则直接续跑，不再强制跳回 `platform` 重走首页入口。
+- [2026-05-30 00:00:00] 已给视频号链路补埋点：覆盖入口点击、编辑页识别、上传后、提交前后等关键步骤。
+- [2026-05-30 00:00:00] 已执行 `GetDiagnostics`，`content.js / publish-automation.js` 诊断均为 `0`；并已核对两个目标文件真实存在于仓库内。
+- [2026-05-30 00:00:00] 已恢复规划文件并确认新任务：按用户指定步骤把视频号图文入口改为 `platform -> 最近图文 -> 发表图文 -> 编辑页`，再执行上传与填写。
+- [2026-05-30 00:00:00] 已确认 `publish-automation.js` 现状：`publishWechatMp()` 仍直达 `platform/post/create`，但文件内已存在 `openWechatMpRecentEntry()` 与 `ensureWechatMpPublishReady()` 可复用。
+- [2026-05-30 00:00:00] 已完成入口改造：`publishWechatMp()` 改为先进入 `https://channels.weixin.qq.com/platform`，再调用 `ensureWechatMpPublishReady(isVideo)` 进入编辑页。
+- [2026-05-30 00:00:00] 已同步收紧步骤顺序：`openWechatMpRecentEntry()` 现优先点击“最近图文/最近视频”，之后再点“发表图文/发表视频”。
+- [2026-05-30 00:00:00] 已执行 `GetDiagnostics`，`publish-automation.js` 诊断为 `0`；并已核对目标文件真实存在于仓库内。

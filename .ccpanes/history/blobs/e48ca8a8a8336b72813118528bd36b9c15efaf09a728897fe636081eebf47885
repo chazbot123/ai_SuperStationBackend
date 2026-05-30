@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.resolveAmapWebServiceKey = resolveAmapWebServiceKey;
+const common_1 = require("@nestjs/common");
+function resolveAmapWebServiceKey(configService) {
+    const envKey = configService.get('AMAP_WEB_SERVICE_KEY')?.trim() || '';
+    if (!envKey) {
+        throw new common_1.ServiceUnavailableException('未配置高德地图服务密钥');
+    }
+    return envKey;
+}
+//# sourceMappingURL=amap.config.js.map

@@ -1,0 +1,46 @@
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateSuperSiteIndustryItemDto } from './dto/create-super-site-industry-item.dto';
+import { ListSuperSiteIndustryItemsQueryDto } from './dto/list-super-site-industry-items-query.dto';
+import { ReorderSuperSiteIndustryItemsDto } from './dto/reorder-super-site-industry-items.dto';
+import { SyncSuperSiteIndustryDto } from './dto/sync-super-site-industry.dto';
+import { UpdateSuperSiteIndustryItemDto } from './dto/update-super-site-industry-item.dto';
+import { SuperSiteIndustryCrawlerService } from './super-site-industry-crawler.service';
+import type { SuperSiteIndustryItemView } from './super-site-industry.types';
+type SuperSiteIndustryItemListResult = {
+    items: SuperSiteIndustryItemView[];
+    pagination: {
+        page: number;
+        limit: number;
+        total: number;
+    };
+};
+export declare class SuperSiteIndustryService {
+    private readonly prisma;
+    private readonly superSiteIndustryCrawlerService;
+    constructor(prisma: PrismaService, superSiteIndustryCrawlerService: SuperSiteIndustryCrawlerService);
+    listMyIndustryItems(userId: string, query: ListSuperSiteIndustryItemsQueryDto): Promise<SuperSiteIndustryItemListResult>;
+    listPublicIndustryItems(userId: string, query: ListSuperSiteIndustryItemsQueryDto): Promise<SuperSiteIndustryItemListResult>;
+    createMyIndustryItem(userId: string, dto: CreateSuperSiteIndustryItemDto): Promise<SuperSiteIndustryItemView>;
+    updateMyIndustryItem(userId: string, itemId: string, dto: UpdateSuperSiteIndustryItemDto): Promise<SuperSiteIndustryItemView>;
+    deleteMyIndustryItem(userId: string, itemId: string): Promise<{
+        success: boolean;
+    }>;
+    reorderMyIndustryItems(userId: string, dto: ReorderSuperSiteIndustryItemsDto): Promise<SuperSiteIndustryItemListResult>;
+    syncMyIndustryItems(userId: string, dto?: SyncSuperSiteIndustryDto): Promise<{
+        errors: string[];
+        createdCount: number;
+        updatedCount: number;
+        totalFetched: number;
+    }>;
+    private listIndustryItems;
+    private ensureItemOwner;
+    private getNextSortOrder;
+    private upsertCrawledItems;
+    private buildCrawlHash;
+    private updateSyncState;
+    private readIndustrySourceConfigs;
+    private readIndustryKeywords;
+    private serializeItem;
+    private buildPublishedAtFilter;
+}
+export {};

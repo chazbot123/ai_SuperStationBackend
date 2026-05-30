@@ -1,0 +1,65 @@
+import { SessionUser } from '../auth/auth.types';
+import { CreateUserDto } from './dto/create-user.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { UsersService } from './users.service';
+export declare class UsersController {
+    private readonly usersService;
+    constructor(usersService: UsersService);
+    list(req: {
+        user: SessionUser;
+    }, query: ListUsersQueryDto): Promise<{
+        items: {
+            role: string;
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            username: string;
+            displayName: string;
+            companyName: string | null;
+        }[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+    create(req: {
+        user: SessionUser;
+    }, dto: CreateUserDto): Promise<{
+        role: string;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        username: string;
+        displayName: string;
+        companyName: string | null;
+    }>;
+    getById(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        role: string;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        username: string;
+        displayName: string;
+        companyName: string | null;
+    }>;
+    update(req: {
+        user: SessionUser;
+    }, id: string, dto: UpdateUserDto): Promise<{
+        role: string;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        username: string;
+        displayName: string;
+        companyName: string | null;
+    }>;
+    remove(req: {
+        user: SessionUser;
+    }, id: string): Promise<{
+        success: boolean;
+    }>;
+}

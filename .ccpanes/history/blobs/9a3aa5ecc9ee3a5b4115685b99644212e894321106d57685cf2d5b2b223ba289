@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_BITBROWSER_STORAGE_FILE = exports.BITBROWSER_STORAGE_VERSION = void 0;
+exports.createEmptyBitBrowserStore = createEmptyBitBrowserStore;
+exports.BITBROWSER_STORAGE_VERSION = 1;
+exports.DEFAULT_BITBROWSER_STORAGE_FILE = 'server/src/modules/bitbrowser/bitbrowser.store.json';
+function createEmptyBitBrowserStore() {
+    return {
+        version: exports.BITBROWSER_STORAGE_VERSION,
+        owners: [],
+        profileBindings: [],
+        platformAccounts: [],
+        locks: [],
+        runtimeSessions: [],
+        runtimeCommands: [],
+    };
+}
+//# sourceMappingURL=bitbrowser.persistence.js.map

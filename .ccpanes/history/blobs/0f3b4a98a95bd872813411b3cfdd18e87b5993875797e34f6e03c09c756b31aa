@@ -1,0 +1,5 @@
+export declare class ListUsersQueryDto {
+    q?: string;
+    page: number;
+    limit: number;
+}

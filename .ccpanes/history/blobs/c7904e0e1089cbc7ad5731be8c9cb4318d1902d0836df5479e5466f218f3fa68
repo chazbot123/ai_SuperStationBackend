@@ -1,0 +1,34 @@
+import { ConfigService } from '@nestjs/config';
+export declare class BilibiliOpenApiService {
+    private readonly configService;
+    private readonly logger;
+    constructor(configService: ConfigService);
+    publishVideoFromUrl(input: {
+        clientId: string;
+        clientSecret: string;
+        accessToken: string;
+        videoUrl: string;
+        coverUrl: string;
+        title: string;
+        desc: string;
+        tags: string[];
+        tid?: number;
+        copyright?: 1 | 2;
+        source?: string;
+        noReprint?: 0 | 1;
+    }): Promise<{
+        resourceId: string;
+        playUrl: string;
+    }>;
+    private getDefaultTid;
+    private buildTagValue;
+    private initUpload;
+    private uploadVideoByParts;
+    private completeUpload;
+    private uploadCover;
+    private submitArchive;
+    private buildSignedHeaders;
+    private fetchBytes;
+    private parseJson;
+    private requestJson;
+}

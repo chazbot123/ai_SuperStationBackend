@@ -1,0 +1,10 @@
+export declare const RBAC_PAGE_KEYS: readonly ["dashboard", "studio", "publishing", "products", "assets", "customerManagement", "videos", "support", "personalization", "agents", "rules", "reviews", "rbac"];
+export type RbacPageKey = (typeof RBAC_PAGE_KEYS)[number];
+export declare class UpdatePermissionItemDto {
+    roleKey: string;
+    pageKey: RbacPageKey;
+    allowed: boolean;
+}
+export declare class UpdatePermissionMatrixDto {
+    items: UpdatePermissionItemDto[];
+}

@@ -1,0 +1,10 @@
+export declare class CreateRoleDto {
+    key: string;
+    name: string;
+    description?: string;
+}
+export declare class UpdateRoleDto {
+    name?: string;
+    description?: string;
+    isSystem?: boolean;
+}

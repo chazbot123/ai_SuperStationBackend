@@ -1,0 +1,49 @@
+import { AiVideoStorageService } from '../ai/ai-video-storage.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { ProductImageStorageService } from '../products/product-image-storage.service';
+import type { ProductUploadFile } from '../products/product-image.types';
+import { SuperSiteImageSlotDto, UpdateSuperSiteSettingDto, type SuperSiteMetricDto, type SuperSiteModuleDto, type SuperSiteSpecialOfferDto, type SuperSiteVideoSettingsDto } from './dto/update-super-site-setting.dto';
+import { type SuperSiteIndustryRefreshConfig, type SuperSiteIndustrySourceConfig } from './super-site-industry.types';
+import { SuperSiteIndustryQueueService } from './super-site-industry-queue.service';
+type SuperSiteSettingsView = {
+    enterpriseName: string;
+    superSiteBaseUrl: string;
+    siteTemplate: string;
+    siteModules: SuperSiteModuleDto[];
+    siteMetrics: SuperSiteMetricDto[];
+    specialOfferTitle: string;
+    specialOfferSubtitle: string;
+    specialOffers: SuperSiteSpecialOfferDto[];
+    siteImageSlots: SuperSiteImageSlotDto[];
+    siteVideoSettings: SuperSiteVideoSettingsDto;
+    industrySourceConfigs: SuperSiteIndustrySourceConfig[];
+    industryKeywords: string[];
+    industryRefreshConfig: SuperSiteIndustryRefreshConfig;
+    industryLastSyncAt: string | null;
+    industryLastSyncStatus: string | null;
+    industryLastSyncError: string | null;
+};
+export type PublicSuperSiteSettingsView = Pick<SuperSiteSettingsView, 'enterpriseName' | 'superSiteBaseUrl' | 'siteTemplate' | 'siteModules' | 'siteMetrics' | 'specialOfferTitle' | 'specialOfferSubtitle' | 'specialOffers' | 'siteImageSlots' | 'siteVideoSettings'>;
+export declare class SuperSiteSettingsService {
+    private readonly prisma;
+    private readonly productImageStorage;
+    private readonly aiVideoStorage;
+    private readonly superSiteIndustryQueueService?;
+    constructor(prisma: PrismaService, productImageStorage: ProductImageStorageService, aiVideoStorage: AiVideoStorageService, superSiteIndustryQueueService?: SuperSiteIndustryQueueService | undefined);
+    getMySettings(userId: string): Promise<SuperSiteSettingsView>;
+    updateMySettings(userId: string, dto: UpdateSuperSiteSettingDto): Promise<SuperSiteSettingsView>;
+    getPublicSettings(userId: string): Promise<PublicSuperSiteSettingsView>;
+    uploadSiteImage(userId: string, file?: ProductUploadFile): Promise<{
+        url: string;
+    }>;
+    uploadSiteVideo(userId: string, file?: ProductUploadFile): Promise<{
+        url: string;
+    }>;
+    private buildDefaultSettings;
+    private mergeSettings;
+    private readJsonArray;
+    private readJsonObject;
+    private validateVideoFile;
+    private normalizeVideoFileName;
+}
+export {};

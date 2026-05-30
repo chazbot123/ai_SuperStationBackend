@@ -1,0 +1,5 @@
+declare const PUBLISH_PLATFORMS: readonly ["xiaohongshu", "douyin", "wechat_mp", "kuaishou"];
+export declare class StartMcpPlatformLoginDto {
+    platform: (typeof PUBLISH_PLATFORMS)[number];
+}
+export {};

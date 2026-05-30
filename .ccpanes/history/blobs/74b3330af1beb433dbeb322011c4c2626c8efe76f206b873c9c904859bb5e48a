@@ -1,0 +1,24 @@
+export declare class VideoModelConfigDto {
+    enabled?: boolean;
+    providerName?: string;
+    providerKey?: string;
+    baseUrl?: string;
+    taskQueryUrlTemplate?: string;
+    apiKey?: string;
+    modelName?: string;
+}
+export declare class GenerateVideoDto {
+    prompt?: string;
+    ttsText?: string;
+    subtitleEnabled?: boolean;
+    referenceImages?: string[];
+    voiceId?: string;
+    bgmUrl?: string;
+    bgmVolume?: number;
+    movementAmplitude?: 'auto' | 'low' | 'medium' | 'high';
+    aspectRatio?: '16:9' | '9:16' | '1:1';
+    resolution?: '360p' | '540p' | '720p' | '1080p';
+    durationSeconds?: number;
+    modelConfig?: VideoModelConfigDto;
+}
+export type VideoModelConfigInput = VideoModelConfigDto;

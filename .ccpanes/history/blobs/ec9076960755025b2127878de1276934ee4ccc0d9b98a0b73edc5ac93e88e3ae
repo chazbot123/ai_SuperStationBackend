@@ -1,0 +1,17 @@
+import { ListSuperSiteIndustryItemsQueryDto } from './dto/list-super-site-industry-items-query.dto';
+import { SuperSiteIndustryService } from './super-site-industry.service';
+import { SuperSiteSettingsService } from './super-site-settings.service';
+export declare class SuperSiteSettingsPublicController {
+    private readonly superSiteIndustryService;
+    private readonly superSiteSettingsService;
+    constructor(superSiteIndustryService: SuperSiteIndustryService, superSiteSettingsService: SuperSiteSettingsService);
+    getPublicSettings(userId: string): Promise<import("./super-site-settings.service").PublicSuperSiteSettingsView>;
+    listPublicIndustryItems(userId: string, query: ListSuperSiteIndustryItemsQueryDto): Promise<{
+        items: import("./super-site-industry.types").SuperSiteIndustryItemView[];
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+        };
+    }>;
+}

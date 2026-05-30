@@ -1,0 +1,63 @@
+import { ConfigService } from '@nestjs/config';
+export type SubtitleCue = {
+    startSeconds: number;
+    endSeconds: number;
+    text: string;
+};
+export type ConcatCrossfadeStep = {
+    leftIndex: number;
+    rightIndex: number;
+    durationSeconds: number;
+    offsetSeconds: number;
+};
+export declare function buildConcatCrossfadePlan(durations: number[], desiredTransitionSeconds: number): ConcatCrossfadeStep[];
+export declare class AiVideoConcatService {
+    private readonly configService;
+    constructor(configService: ConfigService);
+    concatMp4Files(inputFiles: string[], opts?: {
+        transitionSeconds?: number;
+    }): Promise<Buffer<ArrayBuffer>>;
+    muxMp4WithAudio(opts: {
+        videoBuffer: Buffer;
+        audioBuffer: Buffer;
+        audioExtension?: string;
+    }): Promise<Buffer<ArrayBuffer>>;
+    muxMp4WithAudioMix(opts: {
+        videoBuffer: Buffer;
+        voiceAudioBuffer?: Buffer | null;
+        voiceAudioExtension?: string;
+        bgmAudioBuffer?: Buffer | null;
+        bgmAudioExtension?: string;
+        bgmVolume?: number;
+        voiceVolume?: number;
+    }): Promise<Buffer<ArrayBuffer>>;
+    getVideoDuration(filePath: string): Promise<number>;
+    getMediaSummary(filePath: string): Promise<{
+        durationSeconds: number;
+        hasAudio: boolean;
+    }>;
+    getVideoFrameSize(filePath: string): Promise<{
+        width: number;
+        height: number;
+    }>;
+    burnSubtitles(opts: {
+        videoBuffer: Buffer;
+        cues: SubtitleCue[];
+    }): Promise<Buffer<ArrayBufferLike>>;
+    private runConcat;
+    private runReencode;
+    private runCrossfade;
+    private runMux;
+    private runMuxReencode;
+    private runMuxLoopBgm;
+    private runMuxWithMix;
+    private runBurnSubtitles;
+    private getSubtitleMarginV;
+    private getSubtitleMarginH;
+    private resolveBinaryPath;
+    private buildSrt;
+    private wrapSubtitleTextForSrt;
+    private wrapSubtitleLine;
+    private countSubtitleChars;
+    private formatSrtTime;
+}

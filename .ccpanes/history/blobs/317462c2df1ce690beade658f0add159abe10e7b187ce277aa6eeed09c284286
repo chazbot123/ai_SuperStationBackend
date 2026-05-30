@@ -1,0 +1,8 @@
+declare const INDEX_STATUSES: readonly ["pending", "indexing", "ready", "failed"];
+export declare class ListKnowledgeDocumentsQueryDto {
+    q?: string;
+    indexStatus?: (typeof INDEX_STATUSES)[number];
+    page: number;
+    limit: number;
+}
+export {};

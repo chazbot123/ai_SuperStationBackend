@@ -1,0 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PROFILE_BINDING_MODE_DEDICATED_BY_ACCOUNT = exports.BITBROWSER_PROVIDER = void 0;
+exports.BITBROWSER_PROVIDER = 'bitbrowser';
+exports.PROFILE_BINDING_MODE_DEDICATED_BY_ACCOUNT = 'dedicated_by_account';
+//# sourceMappingURL=bitbrowser.types.js.map

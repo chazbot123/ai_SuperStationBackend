@@ -1,0 +1,50 @@
+# Debug Session: bitbrowser-cookie-persist
+
+## Status
+
+- State: OPEN
+- Phase: evidence collection
+
+## Symptom
+
+- 用户完成登录后窗口会关闭
+- 观察到 BitBrowser 窗口页里没有看到 cookie
+- 怀疑 profile 没有持久化，后续页面回退到 home
+
+## Hypotheses
+
+1. 登录完成后 runtime 被正常自动关闭，但 cookie/profile 没有成功写回账号
+2. cookie 已写回后端，但后续没复用同一个 profileId
+3. 登录完成判定过早，扩展还没同步完 cookie 就结束了会话
+4. cookie 已保存到后端，但没有正确恢复到 BitBrowser 持久窗口
+5. 登录成功判断命中了错误状态，导致提早关闭
+
+## Next Steps
+
+- 检查登录完成后的关闭链路
+- 检查 cookie/profile/profileId 的落库与复用链路
+- 只加埋点，不先改业务逻辑
+
+## Evidence Analysis
+
+| ID | Hypothesis | Status | Evidence Summary |
+|---|---|---|---|
+| A | 登录完成后 runtime 正常关闭，但 cookie/profile 没有写回账号 | ❌ Rejected | 日志 1-3、47-48 证明扩展收集到了 cookie，后端也写入了 `profileId=63c4970e2b60490581736e5656ff5932` 且 `hasCookiePayload=true` |
+| B | cookie 已写回后端，但后续打开发布页时没有复用同一个 profileId | ❌ Rejected | 日志 50 证明发布时复用的仍是同一个 `profileId=63c4970e2b60490581736e5656ff5932` |
+| C | 登录页关闭过早，扩展还没同步完 cookie | ❌ Rejected | 日志 49 发生在日志 48 之后，说明先完成保存，再关闭登录 tab |
+| D | cookie 已保存到后端，但没有正确注入或恢复到发布运行时 | ✅ Confirmed | 日志 50 显示 `accountCookiePayloadLength=0`，但日志 48 显示账号里已保存 `hasCookiePayload=true`，说明发布启动阶段没有把已存 cookiePayload 带入 |
+| E | 登录成功判断命中了错误页面状态 | ⏳ Inconclusive | 这轮证据没有显示提早误判导致失败，主问题已落在发布侧 cookiePayload 丢失 |
+
+## Root Cause
+
+- 登录完成后自动关闭是正常行为
+- `profileId` 和 `cookiePayload` 都已经成功持久化到平台账号
+- 发布链路虽然复用了同一个 `profileId`
+- 但启动发布 runtime 时传入的 `accountCookiePayloadLength=0`
+- 导致运行时没有拿到已保存的完整 cookie 快照
+- 这会造成页面又回到 home，或表现为登录态没有真正恢复到发布页
+
+## Current Phase
+
+- Root cause confirmed
+- Next action: trace and fix why publish startup drops saved cookiePayload

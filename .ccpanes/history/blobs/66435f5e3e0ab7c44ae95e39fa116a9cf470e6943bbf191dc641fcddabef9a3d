@@ -1,0 +1,13 @@
+export declare class CreateAvatarVideoTaskDto {
+    fullScript: string;
+    referenceImageDataUrl: string;
+    referenceImages?: string[];
+    voice?: string;
+    voiceId?: string;
+    style?: string;
+    backgroundLock?: boolean;
+    aspectRatio?: '16:9' | '9:16' | '1:1';
+    resolution?: '540p' | '720p' | '1080p';
+    segmentDurationSeconds?: number;
+    segmentMaxChars?: number;
+}

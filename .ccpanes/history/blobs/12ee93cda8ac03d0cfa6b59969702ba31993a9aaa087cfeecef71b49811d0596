@@ -1,0 +1,136 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+var KnowledgeParserService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.KnowledgeParserService = void 0;
+const common_1 = require("@nestjs/common");
+const jszip_1 = __importDefault(require("jszip"));
+const mammoth_1 = __importDefault(require("mammoth"));
+const pdf_parse_1 = require("pdf-parse");
+const tesseract_js_1 = require("tesseract.js");
+let KnowledgeParserService = class KnowledgeParserService {
+    static { KnowledgeParserService_1 = this; }
+    static MIN_PDF_TEXT_LENGTH = 20;
+    async extractText(fileExt, buffer) {
+        const normalizedExt = fileExt.toLowerCase();
+        if (normalizedExt === 'txt' || normalizedExt === 'md') {
+            return buffer.toString('utf8');
+        }
+        if (normalizedExt === 'pdf') {
+            return this.extractPdfText(buffer);
+        }
+        if (normalizedExt === 'docx') {
+            return this.extractDocxText(buffer);
+        }
+        if (normalizedExt === 'pptx') {
+            return this.extractPptxText(buffer);
+        }
+        if (['png', 'jpg', 'jpeg', 'webp'].includes(normalizedExt)) {
+            return this.extractImageText(buffer);
+        }
+        throw new Error(`当前索引器暂不支持 ${normalizedExt}`);
+    }
+    async extractPdfText(buffer) {
+        const parser = new pdf_parse_1.PDFParse({ data: new Uint8Array(buffer) });
+        try {
+            const result = await parser.getText();
+            const extractedText = this.normalizeExtractedText(result.text ?? '');
+            if (this.hasUsablePdfText(extractedText)) {
+                return extractedText;
+            }
+            const screenshots = await parser.getScreenshot({
+                imageBuffer: true,
+                imageDataUrl: false,
+                scale: 2,
+            });
+            return this.extractTextFromPdfScreenshots(screenshots.pages);
+        }
+        finally {
+            await parser.destroy();
+        }
+    }
+    async extractDocxText(buffer) {
+        const result = await mammoth_1.default.extractRawText({ buffer });
+        return result.value ?? '';
+    }
+    async extractPptxText(buffer) {
+        const zip = await jszip_1.default.loadAsync(buffer);
+        const slidePaths = Object.keys(zip.files)
+            .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
+            .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+        const slideTexts = await Promise.all(slidePaths.map(async (slidePath) => {
+            const xml = await zip.file(slidePath)?.async('text');
+            if (!xml) {
+                return '';
+            }
+            return xml
+                .replace(/<a:br\s*\/>/gi, '\n')
+                .replace(/<\/a:p>/gi, '\n')
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        }));
+        return slideTexts
+            .map((text, index) => (text ? `第 ${index + 1} 页\n${text}` : ''))
+            .filter(Boolean)
+            .join('\n\n');
+    }
+    async extractImageText(buffer) {
+        const worker = await (0, tesseract_js_1.createWorker)('chi_sim+eng');
+        try {
+            return this.recognizeWithWorker(worker, buffer);
+        }
+        finally {
+            await worker.terminate();
+        }
+    }
+    async extractTextFromPdfScreenshots(pages) {
+        if (pages.length === 0) {
+            return '';
+        }
+        const worker = await (0, tesseract_js_1.createWorker)('chi_sim+eng');
+        try {
+            const pageTexts = [];
+            for (const page of pages) {
+                const pageText = await this.recognizeWithWorker(worker, Buffer.from(page.data));
+                const normalizedPageText = this.normalizeExtractedText(pageText);
+                if (normalizedPageText) {
+                    pageTexts.push(`第 ${page.pageNumber} 页\n${normalizedPageText}`);
+                }
+            }
+            return pageTexts.join('\n\n');
+        }
+        finally {
+            await worker.terminate();
+        }
+    }
+    async recognizeWithWorker(worker, buffer) {
+        const result = await worker.recognize(buffer);
+        return result.data.text ?? '';
+    }
+    hasUsablePdfText(text) {
+        const contentLength = text.replace(/\s+/g, '').length;
+        return contentLength >= KnowledgeParserService_1.MIN_PDF_TEXT_LENGTH;
+    }
+    normalizeExtractedText(text) {
+        return text
+            .replace(/\r\n/g, '\n')
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
+};
+exports.KnowledgeParserService = KnowledgeParserService;
+exports.KnowledgeParserService = KnowledgeParserService = KnowledgeParserService_1 = __decorate([
+    (0, common_1.Injectable)()
+], KnowledgeParserService);
+//# sourceMappingURL=knowledge-parser.service.js.map

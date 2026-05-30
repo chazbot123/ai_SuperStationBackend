@@ -1,0 +1,5 @@
+export declare class CreateAgentDto {
+    code: string;
+    name: string;
+    ruleId?: string;
+}

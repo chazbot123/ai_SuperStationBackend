@@ -1,0 +1,16 @@
+declare const SOURCE_TYPES: readonly ["social", "product", "video", "manual"];
+declare const CONTENT_TYPES: readonly ["copy", "image_text", "video", "product_asset"];
+declare const PUBLISH_PLATFORMS: readonly ["xiaohongshu", "douyin", "wechat_mp", "kuaishou"];
+export declare class SyncPublishingContentDto {
+    sourceType: (typeof SOURCE_TYPES)[number];
+    sourceId?: string;
+    title: string;
+    body: string;
+    tags?: string[];
+    contentType: (typeof CONTENT_TYPES)[number];
+    platformStyle: (typeof PUBLISH_PLATFORMS)[number];
+    coverImage?: string;
+    images?: string[];
+    videoUrl?: string;
+}
+export {};

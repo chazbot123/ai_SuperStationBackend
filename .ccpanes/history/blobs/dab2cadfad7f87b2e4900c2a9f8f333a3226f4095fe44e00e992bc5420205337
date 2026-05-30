@@ -1,0 +1,9 @@
+export declare class ListSuperSiteIndustryItemsQueryDto {
+    page: number;
+    limit: number;
+    q?: string;
+    sourceType?: string;
+    sourceKey?: string;
+    startDate?: string;
+    endDate?: string;
+}

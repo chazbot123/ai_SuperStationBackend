@@ -366,6 +366,42 @@ export class PublishingBitBrowserService implements OnModuleInit {
       reason: 'publish',
       taskId: `publishing-job:${input.job.id}:${Date.now()}`,
     });
+    // #region debug-point B5:publish-runtime-profile
+    this.reportDebugEvent(
+      'B5',
+      'pre-fix',
+      'publishing-bitbrowser.service:startPublishRuntime:profile-reused',
+      {
+        platform: input.platform,
+        accountId: input.accountId,
+        jobId: input.job.id,
+        runtimeSessionId: opened.session.id,
+        profileId: opened.context.profileBinding.profileId,
+        accountCookiePayloadLength: input.accountCookiePayload ? input.accountCookiePayload.length : 0,
+        accountAuthPayloadLength: input.accountAuthPayload ? input.accountAuthPayload.length : 0,
+      },
+    );
+    void fetch('http://127.0.0.1:7777/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: 'bitbrowser-cookie-persist',
+        runId: 'post-fix',
+        hypothesisId: 'B',
+        location: 'server/src/modules/publishing/publishing-bitbrowser.service.ts:startPublishRuntime:profile-reused',
+        msg: '[DEBUG] publish runtime profile reused',
+        data: {
+          platform: input.platform,
+          accountId: input.accountId,
+          jobId: input.job.id,
+          runtimeSessionId: opened.session.id,
+          profileId: opened.context.profileBinding.profileId,
+          accountCookiePayloadLength: input.accountCookiePayload ? input.accountCookiePayload.length : 0,
+          accountAuthPayloadLength: input.accountAuthPayload ? input.accountAuthPayload.length : 0,
+        },
+        ts: Date.now(),
+      }),
+    }).catch(() => undefined);
+    // #endregion
 
     try {
       const targetUrl = this.getPlatformPublishUrl(input.platform, input.job);

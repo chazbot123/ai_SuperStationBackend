@@ -1,0 +1,18 @@
+export declare class TextModelConfigDto {
+    enabled?: boolean;
+    providerName?: string;
+    providerKey?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    modelName?: string;
+}
+export declare class GenerateCopyDto {
+    prompt?: string;
+    productName?: string;
+    sellingPoints?: string;
+    audience?: string;
+    style?: 'xhs' | 'douyin' | 'wechat';
+    format?: 'text' | 'html';
+    modelConfig?: TextModelConfigDto;
+}
+export type TextModelConfigInput = TextModelConfigDto;

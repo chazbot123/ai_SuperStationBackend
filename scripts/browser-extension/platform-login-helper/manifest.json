@@ -3,7 +3,7 @@
   "name": "AI SuperWeb Platform Login Helper",
   "version": "0.1.0",
   "description": "Capture platform login cookies and sync them back to AI SuperWeb.",
-  "permissions": ["cookies", "tabs", "storage"],
+  "permissions": ["cookies", "tabs", "storage", "debugger"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

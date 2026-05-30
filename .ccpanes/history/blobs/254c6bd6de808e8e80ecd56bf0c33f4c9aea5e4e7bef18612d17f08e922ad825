@@ -1,0 +1,276 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PublishingBitBrowserController = void 0;
+const common_1 = require("@nestjs/common");
+const node_fs_1 = require("node:fs");
+const promises_1 = require("node:fs/promises");
+const node_path_1 = require("node:path");
+const bitbrowser_http_api_1 = require("../bitbrowser/bitbrowser.http-api");
+const publishing_bitbrowser_service_1 = require("./publishing-bitbrowser.service");
+let PublishingBitBrowserController = class PublishingBitBrowserController {
+    publishingBitBrowserService;
+    localClientZipPath = this.resolveLocalClientZipPath();
+    constructor(publishingBitBrowserService) {
+        this.publishingBitBrowserService = publishingBitBrowserService;
+    }
+    getHealth(res) {
+        const api = this.createApi();
+        return res.status(200).json({
+            success: true,
+            data: {
+                status: 'ok',
+                routes: api.listRoutes(),
+            },
+        });
+    }
+    async downloadLocalClient(res) {
+        if (!(0, node_fs_1.existsSync)(this.localClientZipPath)) {
+            throw new common_1.NotFoundException('本地客户端安装包不存在，请先构建客户端');
+        }
+        const [fileBuffer, fileStat] = await Promise.all([
+            (0, promises_1.readFile)(this.localClientZipPath),
+            (0, promises_1.stat)(this.localClientZipPath),
+        ]);
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Length', String(fileStat.size));
+        res.setHeader('Content-Disposition', 'attachment; filename="AI-SuperWeb-Local-Agent.zip"');
+        return res.end(fileBuffer);
+    }
+    createOwner(body, res) {
+        return this.forward('POST', '/api/bitbrowser/owners', body, res);
+    }
+    registerPlatformAccount(body, res) {
+        return this.forward('POST', '/api/bitbrowser/platform-accounts', body, res);
+    }
+    openRuntimeSession(body, res) {
+        return this.forward('POST', '/api/bitbrowser/runtime/open-session', body, res);
+    }
+    closeRuntimeSession(body, res) {
+        return this.forward('POST', '/api/bitbrowser/runtime/close-session', body, res);
+    }
+    getRuntimeSession(body, res) {
+        return this.forward('POST', '/api/bitbrowser/runtime/get-session', body, res);
+    }
+    listRuntimeCommands(body, res) {
+        return this.forward('POST', '/api/bitbrowser/runtime/list-commands', body, res);
+    }
+    registerExtensionReady(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/ready', body, res);
+    }
+    bindRuntimeByPageReady(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/page-ready-bind', body, res);
+    }
+    heartbeat(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/heartbeat', body, res);
+    }
+    queueLoginPrepare(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/queue-login-prepare', body, res);
+    }
+    queueLoginExecute(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/queue-login-execute', body, res);
+    }
+    queuePublish(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/queue-publish', body, res);
+    }
+    pullCommand(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/pull-command', body, res);
+    }
+    ackCommand(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/ack-command', body, res);
+    }
+    completeCommand(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/complete-command', body, res);
+    }
+    failCommand(body, res) {
+        return this.forward('POST', '/api/bitbrowser/extension/fail-command', body, res);
+    }
+    writeDebugEvent(body, res) {
+        return this.forward('POST', '/api/bitbrowser/debug/event', body, res);
+    }
+    createApi() {
+        return (0, bitbrowser_http_api_1.createBitBrowserHttpApi)(this.publishingBitBrowserService.getBridgeFacade());
+    }
+    resolveLocalClientZipPath() {
+        const fileRelativePath = (0, node_path_1.join)(__dirname, '..', '..', '..', '.runtime', 'downloads', 'AI-SuperWeb-Local-Agent.zip');
+        return (0, node_path_1.resolve)(fileRelativePath);
+    }
+    async forward(method, path, body, res) {
+        const response = await this.createApi().handle({
+            method,
+            path,
+            body,
+        });
+        for (const [key, value] of Object.entries(response.headers ?? {})) {
+            res.setHeader(key, value);
+        }
+        return res.status(response.status).json(response.body);
+    }
+};
+exports.PublishingBitBrowserController = PublishingBitBrowserController;
+__decorate([
+    (0, common_1.Get)('health'),
+    __param(0, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "getHealth", null);
+__decorate([
+    (0, common_1.Get)('local-client/download'),
+    __param(0, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], PublishingBitBrowserController.prototype, "downloadLocalClient", null);
+__decorate([
+    (0, common_1.Post)('owners'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "createOwner", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "registerPlatformAccount", null);
+__decorate([
+    (0, common_1.Post)('runtime/open-session'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "openRuntimeSession", null);
+__decorate([
+    (0, common_1.Post)('runtime/close-session'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "closeRuntimeSession", null);
+__decorate([
+    (0, common_1.Post)('runtime/get-session'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "getRuntimeSession", null);
+__decorate([
+    (0, common_1.Post)('runtime/list-commands'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "listRuntimeCommands", null);
+__decorate([
+    (0, common_1.Post)('extension/ready'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "registerExtensionReady", null);
+__decorate([
+    (0, common_1.Post)('extension/page-ready-bind'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "bindRuntimeByPageReady", null);
+__decorate([
+    (0, common_1.Post)('extension/heartbeat'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "heartbeat", null);
+__decorate([
+    (0, common_1.Post)('extension/queue-login-prepare'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "queueLoginPrepare", null);
+__decorate([
+    (0, common_1.Post)('extension/queue-login-execute'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "queueLoginExecute", null);
+__decorate([
+    (0, common_1.Post)('extension/queue-publish'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "queuePublish", null);
+__decorate([
+    (0, common_1.Post)('extension/pull-command'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "pullCommand", null);
+__decorate([
+    (0, common_1.Post)('extension/ack-command'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "ackCommand", null);
+__decorate([
+    (0, common_1.Post)('extension/complete-command'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "completeCommand", null);
+__decorate([
+    (0, common_1.Post)('extension/fail-command'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "failCommand", null);
+__decorate([
+    (0, common_1.Post)('debug/event'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], PublishingBitBrowserController.prototype, "writeDebugEvent", null);
+exports.PublishingBitBrowserController = PublishingBitBrowserController = __decorate([
+    (0, common_1.Controller)('bitbrowser'),
+    __metadata("design:paramtypes", [publishing_bitbrowser_service_1.PublishingBitBrowserService])
+], PublishingBitBrowserController);
+//# sourceMappingURL=publishing-bitbrowser.controller.js.map

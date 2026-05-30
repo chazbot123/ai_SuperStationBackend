@@ -1,0 +1,93 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SupportAdminController = void 0;
+const common_1 = require("@nestjs/common");
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
+const close_support_conversation_dto_1 = require("./dto/close-support-conversation.dto");
+const list_support_conversations_query_dto_1 = require("./dto/list-support-conversations-query.dto");
+const reply_support_conversation_dto_1 = require("./dto/reply-support-conversation.dto");
+const take_support_conversation_dto_1 = require("./dto/take-support-conversation.dto");
+const support_service_1 = require("./support.service");
+let SupportAdminController = class SupportAdminController {
+    supportService;
+    constructor(supportService) {
+        this.supportService = supportService;
+    }
+    listConversations(req, query) {
+        return this.supportService.listAdminConversations(req.user, query);
+    }
+    getConversation(req, id) {
+        return this.supportService.getAdminConversation(req.user, id);
+    }
+    takeConversation(req, id, dto) {
+        return this.supportService.takeAdminConversation(req.user, id, dto);
+    }
+    replyConversation(req, id, dto) {
+        return this.supportService.replyAdminConversation(req.user, id, dto);
+    }
+    closeConversation(req, id, dto) {
+        return this.supportService.closeAdminConversation(req.user, id, dto);
+    }
+};
+exports.SupportAdminController = SupportAdminController;
+__decorate([
+    (0, common_1.Get)('conversations'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, list_support_conversations_query_dto_1.ListSupportConversationsQueryDto]),
+    __metadata("design:returntype", void 0)
+], SupportAdminController.prototype, "listConversations", null);
+__decorate([
+    (0, common_1.Get)('conversations/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], SupportAdminController.prototype, "getConversation", null);
+__decorate([
+    (0, common_1.Post)('conversations/:id/take'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, take_support_conversation_dto_1.TakeSupportConversationDto]),
+    __metadata("design:returntype", void 0)
+], SupportAdminController.prototype, "takeConversation", null);
+__decorate([
+    (0, common_1.Post)('conversations/:id/reply'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, reply_support_conversation_dto_1.ReplySupportConversationDto]),
+    __metadata("design:returntype", void 0)
+], SupportAdminController.prototype, "replyConversation", null);
+__decorate([
+    (0, common_1.Post)('conversations/:id/close'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, close_support_conversation_dto_1.CloseSupportConversationDto]),
+    __metadata("design:returntype", void 0)
+], SupportAdminController.prototype, "closeConversation", null);
+exports.SupportAdminController = SupportAdminController = __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Controller)('support'),
+    __metadata("design:paramtypes", [support_service_1.SupportService])
+], SupportAdminController);
+//# sourceMappingURL=support-admin.controller.js.map

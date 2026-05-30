@@ -1,0 +1,125 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CustomerManagementService = void 0;
+const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../prisma/prisma.service");
+const rbac_constants_1 = require("../rbac/rbac.constants");
+let CustomerManagementService = class CustomerManagementService {
+    prisma;
+    constructor(prisma) {
+        this.prisma = prisma;
+    }
+    async list(user, query) {
+        this.ensureMainCompany(user);
+        const trimmedQuery = query.q?.trim();
+        const where = {
+            ...(query.sourcePlatform ? { sourcePlatform: query.sourcePlatform } : {}),
+            ...(trimmedQuery
+                ? {
+                    OR: [
+                        { name: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { phoneNumber: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { address: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { remark: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { wechatId: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { platformName: { contains: trimmedQuery, mode: 'insensitive' } },
+                    ],
+                }
+                : {}),
+        };
+        const [items, total] = await Promise.all([
+            this.prisma.customerLead.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (query.page - 1) * query.limit,
+                take: query.limit,
+            }),
+            this.prisma.customerLead.count({ where }),
+        ]);
+        return {
+            items,
+            pagination: {
+                page: query.page,
+                limit: query.limit,
+                total,
+            },
+        };
+    }
+    async create(user, dto) {
+        this.ensureMainCompany(user);
+        return this.prisma.customerLead.create({
+            data: {
+                name: this.normalizeNullable(dto.name),
+                phoneNumber: this.normalizeNullable(dto.phoneNumber),
+                address: this.normalizeNullable(dto.address),
+                remark: this.normalizeNullable(dto.remark),
+                wechatId: this.normalizeNullable(dto.wechatId),
+                platformName: this.normalizeNullable(dto.platformName),
+                sourcePlatform: dto.sourcePlatform,
+            },
+        });
+    }
+    async getById(user, id) {
+        this.ensureMainCompany(user);
+        return this.findOrThrow(id);
+    }
+    async update(user, id, dto) {
+        this.ensureMainCompany(user);
+        await this.findOrThrow(id);
+        return this.prisma.customerLead.update({
+            where: { id },
+            data: {
+                ...(dto.name !== undefined ? { name: this.normalizeNullable(dto.name) } : {}),
+                ...(dto.phoneNumber !== undefined
+                    ? { phoneNumber: this.normalizeNullable(dto.phoneNumber) }
+                    : {}),
+                ...(dto.address !== undefined ? { address: this.normalizeNullable(dto.address) } : {}),
+                ...(dto.remark !== undefined ? { remark: this.normalizeNullable(dto.remark) } : {}),
+                ...(dto.wechatId !== undefined ? { wechatId: this.normalizeNullable(dto.wechatId) } : {}),
+                ...(dto.platformName !== undefined
+                    ? { platformName: this.normalizeNullable(dto.platformName) }
+                    : {}),
+                ...(dto.sourcePlatform !== undefined ? { sourcePlatform: dto.sourcePlatform } : {}),
+            },
+        });
+    }
+    async remove(user, id) {
+        this.ensureMainCompany(user);
+        await this.findOrThrow(id);
+        await this.prisma.customerLead.delete({ where: { id } });
+        return { success: true };
+    }
+    async findOrThrow(id) {
+        const item = await this.prisma.customerLead.findUnique({
+            where: { id },
+        });
+        if (!item) {
+            throw new common_1.NotFoundException('客户信息不存在');
+        }
+        return item;
+    }
+    ensureMainCompany(user) {
+        if (user.role !== rbac_constants_1.MAIN_COMPANY_ROLE_KEY) {
+            throw new common_1.ForbiddenException('仅主公司可管理客户信息');
+        }
+    }
+    normalizeNullable(value) {
+        const trimmed = value?.trim();
+        return trimmed ? trimmed : null;
+    }
+};
+exports.CustomerManagementService = CustomerManagementService;
+exports.CustomerManagementService = CustomerManagementService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+], CustomerManagementService);
+//# sourceMappingURL=customer-management.service.js.map

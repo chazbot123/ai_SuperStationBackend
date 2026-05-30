@@ -115,6 +115,8 @@
 - [completed] 阶段 206：删除 `shared_by_owner`、owner 级 binding 查询与锁回退等底层兼容结构
 - [completed] 阶段 207：执行共享结构删除后的二次诊断与构建验证
 - [completed] 阶段 208：修复视频号登录识别未入平台列表的问题
+- [completed] 阶段 209：将视频号图文发布入口改为平台首页“最近图文 -> 发表图文”
+- [completed] 阶段 210：按抖音修复思路补视频号发布埋点并修复编辑页恢复
 
 ## 当前决定
 - 保留现有 `personalization` 路由与权限键，优先改展示文案，避免扩大 RBAC 影响面
@@ -188,6 +190,9 @@
 - 本轮对外能力边界调整为：BitBrowser runtime 必须绑定具体平台账号；不再保留共享 profile 创建入口，也不再允许 owner 级共享 binding 参与登录/发布主链路
 - 本轮进一步删除底层 legacy shared 结构：`ProfileBindingMode` 仅保留 `dedicated_by_account`，仓储接口不再提供 owner 级 profile binding 查询和 owner 级锁回退
 - 视频号登录链路当前新增约束：后端与扩展侧都会先剥离 `视频号ID/视频号名称/微信视频号` 前缀，再做平台标签过滤，避免把真实账号文本误判为空
+- 视频号图文发布入口本轮以用户提供的真实页面步骤为准：先进入 `https://channels.weixin.qq.com/platform`，点击“最近图文”，再点击“发表图文”，进入编辑页后才开始上传和填写内容
+- 视频号发布最新真实编辑页不是旧的 `platform/post/create`，而是 `platform/post/finderNewLifeCreate`；恢复逻辑和发布逻辑都必须识别这个真实页面
+- 视频号发布链路需要像抖音一样支持“已在编辑页时直接续跑”，不能每次恢复后都重新跳回 `platform` 再走入口，否则会把自己从编辑页打回首页
 
 ## 风险
 - 当前 `Personalization` 仍同时承载布局、运营指标、行业招商，继续加逻辑仍可能变重，需要适度拆分
@@ -227,6 +232,8 @@
 - 已完成共享窗口主链路清理：运行时代码现在强制要求 `platformAccountId`，平台登录页文案已统一改为“账号专属 profile”，删除平台账号时也只清理当前账号对应 profile 资源，不再按 owner 整组清理
 - 已完成共享底层结构清理：内存仓储、文件仓储和类型定义都已去掉 owner 级共享 binding 模式，二次诊断和前后端最小构建均通过
 - 已完成视频号识别修复：新增 `wechat_mp` 身份前缀剥离逻辑，定向回归测试通过，后端构建通过
+- 已完成视频号图文入口改造：扩展发布脚本现从 `platform` 首页进入“最近图文 -> 发表图文”后再继续编辑页上传与填写
+- 已完成视频号发布续跑修复：`content.js` 已允许在 `finderNewLifeCreate` 恢复，`publish-automation.js` 已支持命中视频号编辑页时直接续跑并补齐运行时埋点
 - BitBrowser 模块当前仍有 owner 级 binding、共享 profile API 与少量共享命名残留；若清理不完整，后续仍可能出现误用旧接口或旧数据兼容回退
 - BitBrowser 仓储层仍保留少量 owner / legacy binding 兼容结构用于读取历史数据；后续若要彻底删除历史结构，需要补存量 `.runtime/bitbrowser.store.json` 数据迁移
 - 当前主仓运行代码已不再保留 `shared_by_owner`、`getProfileBindingByOwnerId()`、`/api/bitbrowser/profiles` 这类共享实现；剩余 owner 结构主要用于账号归属分组，不再表示共享窗口能力

@@ -1,0 +1,498 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ProductsService = void 0;
+const common_1 = require("@nestjs/common");
+const client_1 = require("@prisma/client");
+const ai_service_1 = require("../ai/ai.service");
+const prisma_service_1 = require("../prisma/prisma.service");
+const rbac_constants_1 = require("../rbac/rbac.constants");
+const product_image_storage_service_1 = require("./product-image-storage.service");
+const productInclude = {
+    creator: {
+        select: { id: true, username: true, displayName: true, role: true },
+    },
+    images: {
+        orderBy: { sortOrder: 'asc' },
+    },
+};
+let ProductsService = class ProductsService {
+    prisma;
+    productImageStorageService;
+    aiService;
+    constructor(prisma, productImageStorageService, aiService) {
+        this.prisma = prisma;
+        this.productImageStorageService = productImageStorageService;
+        this.aiService = aiService;
+    }
+    uploadImage(user, file) {
+        return this.productImageStorageService.uploadProductImage(user.userId, file);
+    }
+    async list(user, query) {
+        const trimmedQuery = query.q?.trim();
+        const where = {
+            ...(this.isMainCompany(user) ? {} : { creatorId: user.userId }),
+            ...(trimmedQuery
+                ? {
+                    OR: [
+                        { name: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { englishName: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { summary: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { description: { contains: trimmedQuery, mode: 'insensitive' } },
+                    ],
+                }
+                : {}),
+        };
+        const [items, total] = await Promise.all([
+            this.prisma.product.findMany({
+                where,
+                orderBy: [{ sortOrder: 'asc' }, { updatedAt: 'desc' }],
+                skip: (query.page - 1) * query.limit,
+                take: query.limit,
+                include: productInclude,
+            }),
+            this.prisma.product.count({ where }),
+        ]);
+        return {
+            items: items.map((item) => this.serializeProduct(item)),
+            pagination: { page: query.page, limit: query.limit, total },
+        };
+    }
+    async listPublicByUser(userId) {
+        const items = await this.prisma.product.findMany({
+            where: {
+                creatorId: userId,
+                status: client_1.ProductStatus.live,
+            },
+            orderBy: [{ sortOrder: 'asc' }, { updatedAt: 'desc' }],
+            include: productInclude,
+        });
+        return {
+            items: items.map((item) => this.serializePublicProduct(item)),
+        };
+    }
+    async create(user, dto) {
+        const nextEnglishName = dto.englishName?.trim() || this.buildEnglishNameFallback(dto.name);
+        this.validatePriceFields({
+            specialOfferEnabled: dto.specialOfferEnabled ?? false,
+            priceText: dto.priceText?.trim() || '',
+            originalPriceText: dto.originalPriceText?.trim() || '',
+            specialPriceText: dto.specialPriceText?.trim() || '',
+        });
+        const nextSortOrder = await this.getNextSortOrder();
+        const created = await this.prisma.product.create({
+            data: {
+                creatorId: user.userId,
+                name: dto.name.trim(),
+                englishName: nextEnglishName,
+                summary: dto.summary?.trim() || '请补充商品卖点',
+                priceText: dto.specialOfferEnabled ? '' : dto.priceText?.trim() || '0',
+                specialOfferEnabled: dto.specialOfferEnabled ?? false,
+                originalPriceText: dto.specialOfferEnabled ? dto.originalPriceText?.trim() || '' : null,
+                specialPriceText: dto.specialOfferEnabled ? dto.specialPriceText?.trim() || '' : null,
+                specialTag: dto.specialOfferEnabled ? dto.specialTag?.trim() || '' : null,
+                category: dto.category?.trim() || '居家',
+                description: dto.description?.trim() || null,
+                status: client_1.ProductStatus.draft,
+                sortOrder: nextSortOrder,
+                images: {
+                    create: (dto.images ?? []).map((imageUrl, index) => ({
+                        imageUrl,
+                        sortOrder: index,
+                    })),
+                },
+            },
+            include: productInclude,
+        });
+        return this.serializeProduct(created);
+    }
+    async getById(user, id) {
+        await this.findAccessibleProduct(user, id);
+        const product = await this.findProductWithRelations(id);
+        return this.serializeProduct(product);
+    }
+    async update(user, id, dto) {
+        const existing = await this.findAccessibleProduct(user, id);
+        this.ensureEditable(user, existing.status);
+        const nextName = dto.name?.trim() || existing.name;
+        const nextEnglishName = dto.englishName !== undefined
+            ? dto.englishName.trim() || (await this.buildEnglishName(nextName, user.userId))
+            : dto.name !== undefined
+                ? await this.buildEnglishName(nextName, user.userId)
+                : existing.englishName;
+        const nextSpecialOfferEnabled = dto.specialOfferEnabled ?? existing.specialOfferEnabled;
+        this.validatePriceFields({
+            specialOfferEnabled: nextSpecialOfferEnabled,
+            priceText: dto.priceText?.trim() ??
+                existing.priceText ??
+                '',
+            originalPriceText: dto.originalPriceText?.trim() ??
+                existing.originalPriceText ??
+                '',
+            specialPriceText: dto.specialPriceText?.trim() ??
+                existing.specialPriceText ??
+                '',
+        });
+        const updated = await this.prisma.product.update({
+            where: { id },
+            data: {
+                ...(dto.name !== undefined ? { name: nextName } : {}),
+                englishName: nextEnglishName,
+                ...(dto.summary !== undefined
+                    ? { summary: dto.summary.trim() || '请补充商品卖点' }
+                    : {}),
+                ...(dto.priceText !== undefined || dto.specialOfferEnabled !== undefined
+                    ? {
+                        priceText: nextSpecialOfferEnabled
+                            ? ''
+                            : dto.priceText?.trim() || existing.priceText || '0',
+                    }
+                    : {}),
+                ...(dto.specialOfferEnabled !== undefined
+                    ? { specialOfferEnabled: nextSpecialOfferEnabled }
+                    : {}),
+                ...(dto.originalPriceText !== undefined || dto.specialOfferEnabled !== undefined
+                    ? {
+                        originalPriceText: nextSpecialOfferEnabled
+                            ? dto.originalPriceText?.trim() ?? existing.originalPriceText ?? ''
+                            : null,
+                    }
+                    : {}),
+                ...(dto.specialPriceText !== undefined || dto.specialOfferEnabled !== undefined
+                    ? {
+                        specialPriceText: nextSpecialOfferEnabled
+                            ? dto.specialPriceText?.trim() ?? existing.specialPriceText ?? ''
+                            : null,
+                    }
+                    : {}),
+                ...(dto.specialTag !== undefined || dto.specialOfferEnabled !== undefined
+                    ? {
+                        specialTag: nextSpecialOfferEnabled
+                            ? dto.specialTag?.trim() ?? existing.specialTag ?? ''
+                            : null,
+                    }
+                    : {}),
+                ...(dto.category !== undefined
+                    ? { category: dto.category.trim() || '居家' }
+                    : {}),
+                ...(dto.description !== undefined
+                    ? { description: dto.description.trim() || null }
+                    : {}),
+                ...(dto.images !== undefined
+                    ? {
+                        images: {
+                            deleteMany: {},
+                            create: dto.images.map((imageUrl, index) => ({
+                                imageUrl,
+                                sortOrder: index,
+                            })),
+                        },
+                    }
+                    : {}),
+            },
+            include: productInclude,
+        });
+        return this.serializeProduct(updated);
+    }
+    async remove(user, id) {
+        const existing = await this.findAccessibleProduct(user, id);
+        this.ensureRemovable(user, existing.status);
+        await this.prisma.product.delete({ where: { id } });
+        return { success: true };
+    }
+    async submit(user, id) {
+        const existing = await this.findAccessibleProduct(user, id);
+        if (this.isMainCompany(user)) {
+            throw new common_1.ForbiddenException('主公司商品无需提审，可直接上架');
+        }
+        if (existing.status !== client_1.ProductStatus.draft &&
+            existing.status !== client_1.ProductStatus.rejected) {
+            throw new common_1.ForbiddenException('当前状态不可提审');
+        }
+        const product = await this.prisma.product.update({
+            where: { id },
+            data: {
+                status: client_1.ProductStatus.submitted,
+                submittedAt: new Date(),
+                rejectReason: null,
+            },
+            include: productInclude,
+        });
+        return this.serializeProduct(product);
+    }
+    async withdrawSubmission(user, id) {
+        const existing = await this.findAccessibleProduct(user, id);
+        if (this.isMainCompany(user)) {
+            throw new common_1.ForbiddenException('主公司商品无需撤销审核');
+        }
+        if (existing.status !== client_1.ProductStatus.submitted) {
+            throw new common_1.ForbiddenException('仅待审核商品可撤销审核');
+        }
+        const product = await this.prisma.product.update({
+            where: { id },
+            data: {
+                status: client_1.ProductStatus.draft,
+                submittedAt: null,
+            },
+            include: productInclude,
+        });
+        return this.serializeProduct(product);
+    }
+    async publish(user, id) {
+        this.ensureMainCompanyUser(user);
+        const existing = await this.findAccessibleProduct(user, id);
+        if (existing.status !== client_1.ProductStatus.draft &&
+            existing.status !== client_1.ProductStatus.offline) {
+            throw new common_1.ForbiddenException('当前状态不可上架');
+        }
+        const product = await this.prisma.product.update({
+            where: { id },
+            data: {
+                status: client_1.ProductStatus.live,
+                reviewedAt: new Date(),
+                rejectReason: null,
+            },
+            include: productInclude,
+        });
+        return this.serializeProduct(product);
+    }
+    async unpublish(user, id) {
+        this.ensureMainCompanyUser(user);
+        const existing = await this.findAccessibleProduct(user, id);
+        if (existing.status !== client_1.ProductStatus.live) {
+            throw new common_1.ForbiddenException('当前状态不可下架');
+        }
+        const product = await this.prisma.product.update({
+            where: { id },
+            data: {
+                status: client_1.ProductStatus.offline,
+            },
+            include: productInclude,
+        });
+        return this.serializeProduct(product);
+    }
+    async approve(user, id) {
+        this.ensureMainCompanyUser(user);
+        const existing = await this.findAccessibleProduct(user, id);
+        if (existing.status !== client_1.ProductStatus.submitted) {
+            throw new common_1.ForbiddenException('仅待审核商品可通过');
+        }
+        const product = await this.prisma.product.update({
+            where: { id },
+            data: {
+                status: client_1.ProductStatus.live,
+                reviewedAt: new Date(),
+                rejectReason: null,
+            },
+            include: productInclude,
+        });
+        return this.serializeProduct(product);
+    }
+    async reject(user, id, dto) {
+        this.ensureMainCompanyUser(user);
+        const existing = await this.findAccessibleProduct(user, id);
+        if (existing.status !== client_1.ProductStatus.submitted) {
+            throw new common_1.ForbiddenException('仅待审核商品可驳回');
+        }
+        const product = await this.prisma.product.update({
+            where: { id },
+            data: {
+                status: client_1.ProductStatus.rejected,
+                reviewedAt: new Date(),
+                rejectReason: dto.reason?.trim() || '请补充商品信息后重新提交',
+            },
+            include: productInclude,
+        });
+        return this.serializeProduct(product);
+    }
+    async inferEnglishName(user, name) {
+        return { englishName: await this.buildEnglishName(name, user.userId) };
+    }
+    async findAccessibleProduct(user, id) {
+        const product = await this.prisma.product.findUnique({ where: { id } });
+        if (!product)
+            throw new common_1.NotFoundException('商品不存在');
+        if (!this.isMainCompany(user) && product.creatorId !== user.userId) {
+            throw new common_1.ForbiddenException('无权访问该商品');
+        }
+        return product;
+    }
+    findProductWithRelations(id) {
+        return this.prisma.product.findUniqueOrThrow({
+            where: { id },
+            include: productInclude,
+        });
+    }
+    isMainCompany(user) {
+        return user.role === rbac_constants_1.MAIN_COMPANY_ROLE_KEY;
+    }
+    ensureMainCompanyUser(user) {
+        if (!this.isMainCompany(user)) {
+            throw new common_1.ForbiddenException('仅主公司可操作该商品状态');
+        }
+    }
+    ensureEditable(user, status) {
+        if (this.isMainCompany(user)) {
+            return;
+        }
+        if (status !== client_1.ProductStatus.draft &&
+            status !== client_1.ProductStatus.rejected) {
+            throw new common_1.ForbiddenException('仅草稿或驳回商品允许编辑');
+        }
+    }
+    ensureRemovable(user, status) {
+        if (this.isMainCompany(user)) {
+            return;
+        }
+        if (status !== client_1.ProductStatus.draft &&
+            status !== client_1.ProductStatus.rejected &&
+            status !== client_1.ProductStatus.offline) {
+            throw new common_1.ForbiddenException('仅草稿、驳回或已下架商品允许删除');
+        }
+    }
+    async getNextSortOrder() {
+        const result = await this.prisma.product.aggregate({
+            _max: { sortOrder: true },
+        });
+        return (result._max.sortOrder ?? -1) + 1;
+    }
+    serializeProduct(product) {
+        return {
+            id: product.id,
+            ownerUserId: product.creatorId,
+            ownerName: product.creator.displayName,
+            ownerRoleKey: product.creator.role,
+            name: product.name,
+            englishName: product.englishName,
+            summary: product.summary,
+            priceText: product.priceText,
+            specialOfferEnabled: product.specialOfferEnabled,
+            originalPriceText: product.originalPriceText,
+            specialPriceText: product.specialPriceText,
+            specialTag: product.specialTag,
+            category: product.category,
+            images: product.images.map((img) => img.imageUrl),
+            status: product.status,
+            rejectReason: product.rejectReason,
+            submittedAt: product.submittedAt,
+            reviewedAt: product.reviewedAt,
+            description: product.description,
+            sortOrder: product.sortOrder,
+            createdAt: product.createdAt,
+            updatedAt: product.updatedAt,
+        };
+    }
+    serializePublicProduct(product) {
+        return {
+            id: product.id,
+            ownerUserId: product.creatorId,
+            name: product.name,
+            englishName: product.englishName,
+            summary: product.summary,
+            priceText: product.priceText,
+            specialOfferEnabled: product.specialOfferEnabled,
+            originalPriceText: product.originalPriceText,
+            specialPriceText: product.specialPriceText,
+            specialTag: product.specialTag,
+            category: product.category,
+            description: product.description,
+            images: product.images.map((image) => image.imageUrl),
+            sortOrder: product.sortOrder,
+            updatedAt: product.updatedAt,
+        };
+    }
+    validatePriceFields(input) {
+        if (!input.specialOfferEnabled && !input.priceText.trim()) {
+            throw new common_1.ForbiddenException('售价不能为空');
+        }
+        if (input.specialOfferEnabled) {
+            if (!input.originalPriceText.trim()) {
+                throw new common_1.ForbiddenException('启用特价后必须填写原价');
+            }
+            if (!input.specialPriceText.trim()) {
+                throw new common_1.ForbiddenException('启用特价后必须填写特惠价');
+            }
+        }
+    }
+    async buildEnglishName(name, userId) {
+        const aiEnglishName = await this.buildEnglishNameWithAi(name, userId);
+        if (aiEnglishName) {
+            return aiEnglishName;
+        }
+        return this.buildEnglishNameFallback(name);
+    }
+    async buildEnglishNameWithAi(name, userId) {
+        const raw = name.trim();
+        if (!raw) {
+            return '';
+        }
+        try {
+            const response = await this.aiService.generateTextReply({
+                system: [
+                    '你是产品英文命名助手。',
+                    '请把给定的中文产品名翻译成自然、简洁、适合商品展示的英文产品名。',
+                    '输出必须是英文，不要拼音，不要解释，不要引号，不要序号，不要多行。',
+                    '只保留 2 到 6 个英文单词。',
+                    '结果统一使用小写英文单词并用短横线连接，例如 graphene-heating-bed。',
+                ].join(''),
+                user: `产品名：${raw}`,
+                errorLabel: '产品英文名生成失败',
+                userId,
+            });
+            return this.normalizeEnglishName(response.text);
+        }
+        catch {
+            return '';
+        }
+    }
+    normalizeEnglishName(value) {
+        const normalized = value
+            .trim()
+            .split(/\r?\n/)
+            .map((item) => item.trim())
+            .filter(Boolean)[0]
+            ?.replace(/^english-name\s*[:：-]\s*/i, '')
+            ?.replace(/^product-name\s*[:：-]\s*/i, '')
+            ?.replace(/^name\s*[:：-]\s*/i, '')
+            ?.replace(/["'`]/g, '')
+            ?.toLowerCase()
+            ?.replace(/&/g, ' and ')
+            ?.replace(/[^a-z0-9\s-]/g, ' ')
+            ?.replace(/[\s_-]+/g, '-')
+            ?.replace(/-+/g, '-')
+            ?.replace(/^-+|-+$/g, '');
+        return normalized || '';
+    }
+    buildEnglishNameFallback(name) {
+        const normalized = name
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (normalized) {
+            return normalized.replace(/\s+/g, '-');
+        }
+        return `product-${Date.now()}`;
+    }
+};
+exports.ProductsService = ProductsService;
+exports.ProductsService = ProductsService = __decorate([
+    (0, common_1.Injectable)(),
+    __param(2, (0, common_1.Inject)((0, common_1.forwardRef)(() => ai_service_1.AiService))),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        product_image_storage_service_1.ProductImageStorageService,
+        ai_service_1.AiService])
+], ProductsService);
+//# sourceMappingURL=products.service.js.map

@@ -1,0 +1,59 @@
+import { AuthService } from './auth.service';
+import { SessionUser } from './auth.types';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { LoginDto } from './dto/login.dto';
+export declare class AuthController {
+    private readonly authService;
+    constructor(authService: AuthService);
+    login(dto: LoginDto): Promise<{
+        accessToken: string;
+        user: {
+            id: string;
+            username: string;
+            displayName: string;
+            companyName: string | null;
+            role: string;
+        };
+        session: {
+            id: string;
+            deviceId: string;
+            deviceName: string | null;
+            loggedInAt: Date;
+            status: import("@prisma/client").$Enums.SessionStatus;
+        };
+    }>;
+    getMe(req: {
+        user: SessionUser;
+    }): Promise<{
+        agentId: string | null;
+        agentBinding: undefined;
+        role: string;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        username: string;
+        displayName: string;
+        companyName: string | null;
+    }>;
+    logout(req: {
+        user: SessionUser;
+    }): Promise<{
+        success: boolean;
+    }>;
+    changePassword(req: {
+        user: SessionUser;
+    }, dto: ChangePasswordDto): Promise<{
+        success: boolean;
+    }>;
+    getSessions(req: {
+        user: SessionUser;
+    }): Promise<{
+        status: import("@prisma/client").$Enums.SessionStatus;
+        id: string;
+        deviceId: string;
+        deviceName: string | null;
+        loggedInAt: Date;
+        revokedAt: Date | null;
+        replacedById: string | null;
+    }[]>;
+}

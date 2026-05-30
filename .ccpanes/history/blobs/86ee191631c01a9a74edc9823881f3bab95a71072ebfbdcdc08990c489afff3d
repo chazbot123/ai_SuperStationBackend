@@ -1,0 +1,5 @@
+export declare class ListRulesQueryDto {
+    q?: string;
+    page: number;
+    limit: number;
+}

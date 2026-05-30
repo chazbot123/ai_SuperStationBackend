@@ -1209,6 +1209,31 @@ export class PublishingService {
       const finalFollowerCount =
         followerCount !== null ? followerCount : fallbackProfile?.followerCount ?? null;
       const finalSourceUrl = dto.sourceUrl?.trim() || fallbackProfile?.sourceUrl || null;
+      // #region debug-point B3:cookie-profile-input
+      void fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'bitbrowser-cookie-persist',
+          runId: 'post-fix',
+          hypothesisId: 'A',
+          location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:cookie-profile-input',
+          msg: '[DEBUG] extension login persistence input',
+          data: {
+            sessionId: session.sessionId,
+            platform: session.platform,
+            runtimeSessionId,
+            profileId: session.profileId ?? null,
+            authPayloadLength: authPayload.length,
+            cookiePayloadLength: cookiePayload ? cookiePayload.length : 0,
+            finalAccountName,
+            finalExternalAccountId,
+            finalDisplayName,
+            finalSourceUrl,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => undefined);
+      // #endregion
       // #region debug-point P4:extension-login-input
       void fetch('http://127.0.0.1:7777/event', {
         method: 'POST',
@@ -1244,7 +1269,6 @@ export class PublishingService {
         }),
       }).catch(() => undefined);
       // #endregion
-
       const resolvedAccountName = this.resolveExtensionAccountName({
         platform: session.platform,
         authPayload,
@@ -1366,6 +1390,38 @@ export class PublishingService {
 
       session.accountId = saved.id;
       session.syncedAccountId = saved.id;
+      // #region debug-point B4:cookie-profile-saved
+      void fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'bitbrowser-cookie-persist',
+          runId: 'post-fix',
+          hypothesisId: 'A',
+          location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:cookie-profile-saved',
+          msg: '[DEBUG] extension login persistence saved',
+          data: {
+            sessionId: session.sessionId,
+            platform: session.platform,
+            accountId: saved.id,
+            accountName: saved.accountName,
+            profileId:
+              saved.externalMeta &&
+              typeof saved.externalMeta === 'object' &&
+              !Array.isArray(saved.externalMeta)
+                ? String((saved.externalMeta as Record<string, unknown>).profileId || '')
+                : '',
+            hasCookiePayload:
+              Boolean(
+                saved.externalMeta &&
+                  typeof saved.externalMeta === 'object' &&
+                  !Array.isArray(saved.externalMeta) &&
+                  String((saved.externalMeta as Record<string, unknown>).cookiePayload || '').trim(),
+              ),
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => undefined);
+      // #endregion
       // #region debug-point P6:extension-login-saved
       void fetch('http://127.0.0.1:7777/event', {
         method: 'POST',
@@ -2482,6 +2538,7 @@ export class PublishingService {
         externalGroupId: this.requireExternalGroupId(platformAccount, current.platform),
         sessionToken: session.sessionToken,
         accountAuthPayload: session.accountAuthPayload,
+        accountCookiePayload: session.accountCookiePayload ?? undefined,
         job: session.job,
       });
     } catch (error) {

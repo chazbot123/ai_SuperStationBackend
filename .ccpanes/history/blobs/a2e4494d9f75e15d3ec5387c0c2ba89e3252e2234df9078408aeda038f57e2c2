@@ -1,0 +1,952 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var KnowledgeService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.KnowledgeService = void 0;
+const common_1 = require("@nestjs/common");
+const client_1 = require("@prisma/client");
+const ai_service_1 = require("../ai/ai.service");
+const prisma_service_1 = require("../prisma/prisma.service");
+const rbac_constants_1 = require("../rbac/rbac.constants");
+const knowledge_file_name_util_1 = require("./knowledge-file-name.util");
+const knowledge_parser_service_1 = require("./knowledge-parser.service");
+const knowledge_storage_service_1 = require("./knowledge-storage.service");
+const knowledgeInclude = {
+    creator: {
+        select: { id: true, username: true, displayName: true, role: true },
+    },
+    jobs: {
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+    },
+};
+const EMBEDDING_DIM = 1024;
+const CHUNK_TARGET_SIZE = 800;
+const CHUNK_OVERLAP = 120;
+const SMART_CHUNK_BATCH_TARGET = 5000;
+const SMART_CHUNK_MAX_COUNT = 24;
+let KnowledgeService = KnowledgeService_1 = class KnowledgeService {
+    prisma;
+    knowledgeStorageService;
+    knowledgeParserService;
+    aiService;
+    logger = new common_1.Logger(KnowledgeService_1.name);
+    constructor(prisma, knowledgeStorageService, knowledgeParserService, aiService) {
+        this.prisma = prisma;
+        this.knowledgeStorageService = knowledgeStorageService;
+        this.knowledgeParserService = knowledgeParserService;
+        this.aiService = aiService;
+    }
+    async uploadDocument(user, dto, file) {
+        this.ensureMainCompanyUser(user);
+        const uploaded = await this.knowledgeStorageService.uploadKnowledgeFile(user.userId, file);
+        const fileName = (0, knowledge_file_name_util_1.normalizeUploadFileName)(file?.originalname ?? '');
+        const title = dto.title?.trim() || this.buildTitle(fileName);
+        const created = await this.prisma.knowledgeDocument.create({
+            data: {
+                creatorId: user.userId,
+                kbScope: dto.scope ?? 'company',
+                title,
+                fileName,
+                fileExt: uploaded.fileExt,
+                mimeType: file?.mimetype ?? 'application/octet-stream',
+                fileSize: file?.size ?? 0,
+                bucket: uploaded.bucket,
+                objectKey: uploaded.objectKey,
+                storageUrl: uploaded.url,
+                parseStatus: client_1.KnowledgeDocumentParseStatus.pending,
+                indexStatus: client_1.KnowledgeDocumentIndexStatus.pending,
+                jobs: {
+                    create: {
+                        jobType: client_1.KnowledgeDocumentJobType.parse,
+                    },
+                },
+            },
+            include: knowledgeInclude,
+        });
+        this.startIndexDocument(created.id);
+        return this.serializeDocument(created);
+    }
+    async listDocuments(user, query) {
+        this.ensureMainCompanyUser(user);
+        const trimmedQuery = query.q?.trim();
+        const where = {
+            ...(trimmedQuery
+                ? {
+                    OR: [
+                        { title: { contains: trimmedQuery, mode: 'insensitive' } },
+                        { fileName: { contains: trimmedQuery, mode: 'insensitive' } },
+                    ],
+                }
+                : {}),
+            ...(query.indexStatus ? { indexStatus: query.indexStatus } : {}),
+        };
+        const [items, total] = await Promise.all([
+            this.prisma.knowledgeDocument.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (query.page - 1) * query.limit,
+                take: query.limit,
+                include: knowledgeInclude,
+            }),
+            this.prisma.knowledgeDocument.count({ where }),
+        ]);
+        return {
+            items: items.map((item) => this.serializeDocument(item)),
+            pagination: { page: query.page, limit: query.limit, total },
+        };
+    }
+    async getDocumentById(user, id) {
+        this.ensureMainCompanyUser(user);
+        const document = await this.prisma.knowledgeDocument.findUnique({
+            where: { id },
+            include: {
+                ...knowledgeInclude,
+                chunks: {
+                    orderBy: { chunkIndex: 'asc' },
+                },
+            },
+        });
+        if (!document) {
+            throw new common_1.NotFoundException('知识文档不存在');
+        }
+        return this.serializeDocument(document);
+    }
+    async removeDocument(user, id) {
+        this.ensureMainCompanyUser(user);
+        const document = await this.findDocumentOrThrow(id);
+        await this.knowledgeStorageService.removeKnowledgeFile(document.objectKey);
+        await this.prisma.knowledgeDocument.delete({ where: { id } });
+        return { success: true };
+    }
+    async searchRetrieval(user, dto) {
+        this.ensureMainCompanyUser(user);
+        const query = dto.query.trim();
+        const scope = dto.scope ?? 'company';
+        const hits = await this.retrieveRelevantChunks(query, scope, dto.topK);
+        return {
+            query,
+            scope,
+            hits,
+            answer: hits.length > 0
+                ? hits
+                    .slice(0, 3)
+                    .map((item, index) => `${index + 1}. ${item.snippet}`)
+                    .join('\n')
+                : '当前知识库未检索到相关内容。',
+        };
+    }
+    async retrieveRelevantChunks(query, scope = 'company', topK = 5) {
+        const normalizedQuery = query.trim();
+        if (!normalizedQuery) {
+            return [];
+        }
+        const vectorLiteral = this.toVectorLiteral(this.buildEmbedding(normalizedQuery));
+        const rows = await this.prisma.$queryRawUnsafe(`
+        SELECT
+          c.id AS "chunkId",
+          c."documentId" AS "documentId",
+          d.title AS "documentTitle",
+          c.content AS "content",
+          c."contentPreview" AS "contentPreview",
+          1 - (c.embedding <=> CAST($1 AS vector)) AS "score"
+        FROM "KnowledgeDocumentChunk" c
+        INNER JOIN "KnowledgeDocument" d ON d.id = c."documentId"
+        WHERE d."indexStatus" = 'ready'
+          AND d."kbScope" = $2
+        ORDER BY c.embedding <=> CAST($1 AS vector)
+        LIMIT $3
+      `, vectorLiteral, scope, topK);
+        return rows.map((row) => ({
+            chunkId: row.chunkId,
+            documentId: row.documentId,
+            documentTitle: row.documentTitle,
+            score: Number(row.score ?? 0),
+            content: row.content,
+            snippet: row.contentPreview || row.content.slice(0, 200),
+        }));
+    }
+    async findDocumentOrThrow(id) {
+        const document = await this.prisma.knowledgeDocument.findUnique({
+            where: { id },
+            include: knowledgeInclude,
+        });
+        if (!document) {
+            throw new common_1.NotFoundException('知识库文档不存在');
+        }
+        return document;
+    }
+    startIndexDocument(documentId) {
+        void this.indexDocument(documentId).catch(async (error) => {
+            const message = error instanceof Error ? error.message : '知识库索引失败';
+            this.logger.error(`知识库索引任务异常: ${message}`, error instanceof Error ? error.stack : undefined);
+            try {
+                await this.prisma.knowledgeDocument.update({
+                    where: { id: documentId },
+                    data: {
+                        parseStatus: client_1.KnowledgeDocumentParseStatus.failed,
+                        indexStatus: client_1.KnowledgeDocumentIndexStatus.failed,
+                        errorMessage: message,
+                    },
+                });
+                await this.prisma.knowledgeDocumentJob.updateMany({
+                    where: {
+                        documentId,
+                        status: {
+                            in: [client_1.KnowledgeDocumentJobStatus.pending, client_1.KnowledgeDocumentJobStatus.running],
+                        },
+                    },
+                    data: {
+                        status: client_1.KnowledgeDocumentJobStatus.failed,
+                        errorMessage: message,
+                        finishedAt: new Date(),
+                    },
+                });
+            }
+            catch (persistError) {
+                this.logger.error('知识库索引异常状态写回失败', persistError instanceof Error ? persistError.stack : undefined);
+            }
+        });
+    }
+    async indexDocument(documentId) {
+        const document = await this.findDocumentOrThrow(documentId);
+        const parseJob = document.jobs.find((job) => job.jobType === client_1.KnowledgeDocumentJobType.parse);
+        const parseJobId = parseJob?.id;
+        await this.prisma.knowledgeDocument.update({
+            where: { id: documentId },
+            data: {
+                parseStatus: client_1.KnowledgeDocumentParseStatus.parsing,
+                indexStatus: client_1.KnowledgeDocumentIndexStatus.indexing,
+                errorMessage: null,
+            },
+        });
+        if (parseJobId) {
+            await this.prisma.knowledgeDocumentJob.update({
+                where: { id: parseJobId },
+                data: {
+                    status: client_1.KnowledgeDocumentJobStatus.running,
+                    startedAt: new Date(),
+                },
+            });
+        }
+        try {
+            const parsedText = await this.extractDocumentText(document);
+            const normalizedText = this.normalizeText(parsedText);
+            const chunks = await this.buildChunks(normalizedText);
+            await this.prisma.knowledgeDocumentJob.updateMany({
+                where: { id: parseJobId },
+                data: {
+                    status: client_1.KnowledgeDocumentJobStatus.success,
+                    finishedAt: new Date(),
+                },
+            });
+            const chunkJob = await this.prisma.knowledgeDocumentJob.create({
+                data: {
+                    documentId,
+                    jobType: client_1.KnowledgeDocumentJobType.chunk,
+                    status: client_1.KnowledgeDocumentJobStatus.running,
+                    startedAt: new Date(),
+                },
+            });
+            const chunkPayloads = chunks.map((content, index) => ({
+                chunkIndex: index,
+                content,
+                contentPreview: content.slice(0, 200),
+                charCount: content.length,
+                keywords: this.extractKeywords(content),
+                embeddingModel: 'local_hash_v1',
+                embeddingDim: EMBEDDING_DIM,
+                embedding: this.buildEmbedding(content),
+            }));
+            await this.prisma.knowledgeDocumentChunk.deleteMany({
+                where: { documentId },
+            });
+            for (const chunk of chunkPayloads) {
+                const vectorLiteral = this.toVectorLiteral(chunk.embedding);
+                await this.prisma.$executeRawUnsafe(`
+            INSERT INTO "KnowledgeDocumentChunk"
+            (
+              id,
+              "documentId",
+              "chunkIndex",
+              content,
+              "contentPreview",
+              "tokenCount",
+              "charCount",
+              "pageNumber",
+              "sectionTitle",
+              keywords,
+              "embeddingModel",
+              "embeddingDim",
+              embedding,
+              "createdAt",
+              "updatedAt"
+            )
+            VALUES
+            (
+              gen_random_uuid()::text,
+              $1,
+              $2,
+              $3,
+              $4,
+              $5,
+              $6,
+              NULL,
+              NULL,
+              $7,
+              $8,
+              $9,
+              CAST($10 AS vector),
+              NOW(),
+              NOW()
+            )
+          `, documentId, chunk.chunkIndex, chunk.content, chunk.contentPreview, this.countTokens(chunk.content), chunk.charCount, chunk.keywords, chunk.embeddingModel, chunk.embeddingDim, vectorLiteral);
+            }
+            await this.prisma.knowledgeDocumentJob.update({
+                where: { id: chunkJob.id },
+                data: {
+                    status: client_1.KnowledgeDocumentJobStatus.success,
+                    finishedAt: new Date(),
+                },
+            });
+            await this.prisma.knowledgeDocumentJob.create({
+                data: {
+                    documentId,
+                    jobType: client_1.KnowledgeDocumentJobType.embed,
+                    status: client_1.KnowledgeDocumentJobStatus.success,
+                    startedAt: new Date(),
+                    finishedAt: new Date(),
+                },
+            });
+            await this.prisma.knowledgeDocument.update({
+                where: { id: documentId },
+                data: {
+                    parseStatus: client_1.KnowledgeDocumentParseStatus.ready,
+                    indexStatus: client_1.KnowledgeDocumentIndexStatus.ready,
+                    chunkCount: chunkPayloads.length,
+                    charCount: normalizedText.length,
+                    summary: normalizedText.slice(0, 300),
+                    errorMessage: null,
+                    lastIndexedAt: new Date(),
+                },
+            });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : '知识库索引失败';
+            await this.prisma.knowledgeDocument.update({
+                where: { id: documentId },
+                data: {
+                    parseStatus: client_1.KnowledgeDocumentParseStatus.failed,
+                    indexStatus: client_1.KnowledgeDocumentIndexStatus.failed,
+                    errorMessage: message,
+                },
+            });
+            if (parseJobId) {
+                await this.prisma.knowledgeDocumentJob.updateMany({
+                    where: { id: parseJobId, status: { not: client_1.KnowledgeDocumentJobStatus.success } },
+                    data: {
+                        status: client_1.KnowledgeDocumentJobStatus.failed,
+                        errorMessage: message,
+                        finishedAt: new Date(),
+                    },
+                });
+            }
+        }
+    }
+    ensureMainCompanyUser(user) {
+        if (user.role !== rbac_constants_1.MAIN_COMPANY_ROLE_KEY) {
+            throw new common_1.ForbiddenException('仅主公司可管理知识库');
+        }
+    }
+    serializeDocument(document) {
+        return {
+            id: document.id,
+            scope: document.kbScope,
+            title: document.title,
+            fileName: document.fileName,
+            fileExt: document.fileExt,
+            mimeType: document.mimeType,
+            fileSize: document.fileSize,
+            bucket: document.bucket,
+            objectKey: document.objectKey,
+            storageUrl: document.storageUrl,
+            parseStatus: document.parseStatus,
+            indexStatus: document.indexStatus,
+            chunkCount: document.chunkCount,
+            charCount: document.charCount,
+            language: document.language,
+            summary: document.summary,
+            errorMessage: document.errorMessage,
+            lastIndexedAt: document.lastIndexedAt,
+            createdAt: document.createdAt,
+            updatedAt: document.updatedAt,
+            creator: document.creator,
+            jobs: document.jobs.map((job) => ({
+                id: job.id,
+                jobType: job.jobType,
+                status: job.status,
+                attemptCount: job.attemptCount,
+                errorMessage: job.errorMessage,
+                startedAt: job.startedAt,
+                finishedAt: job.finishedAt,
+                createdAt: job.createdAt,
+                updatedAt: job.updatedAt,
+            })),
+            chunks: 'chunks' in document
+                ? document.chunks.map((chunk) => ({
+                    id: chunk.id,
+                    chunkIndex: chunk.chunkIndex,
+                    content: chunk.content,
+                    contentPreview: chunk.contentPreview,
+                    charCount: chunk.charCount,
+                    tokenCount: chunk.tokenCount,
+                    pageNumber: chunk.pageNumber,
+                    sectionTitle: chunk.sectionTitle,
+                    keywords: chunk.keywords,
+                    embeddingModel: chunk.embeddingModel,
+                    embeddingDim: chunk.embeddingDim,
+                    createdAt: chunk.createdAt,
+                    updatedAt: chunk.updatedAt,
+                }))
+                : undefined,
+        };
+    }
+    buildTitle(fileName) {
+        const trimmed = fileName.trim();
+        if (!trimmed) {
+            return '未命名知识文档';
+        }
+        const dotIndex = trimmed.lastIndexOf('.');
+        return dotIndex > 0 ? trimmed.slice(0, dotIndex) : trimmed;
+    }
+    async extractDocumentText(document) {
+        const buffer = await this.knowledgeStorageService.getKnowledgeFileBuffer(document.objectKey);
+        return this.knowledgeParserService.extractText(document.fileExt, buffer);
+    }
+    normalizeText(input) {
+        return input
+            .replace(/\r\n/g, '\n')
+            .replace(/\u0000/g, '')
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
+    async buildChunks(text) {
+        if (!text) {
+            throw new Error('文档内容为空，无法建立索引');
+        }
+        const smartChunks = await this.buildChunksWithAi(text);
+        if (smartChunks.length > 0) {
+            return smartChunks;
+        }
+        return this.buildChunksFallback(text);
+    }
+    async buildChunksWithAi(text) {
+        if (!text.trim()) {
+            return [];
+        }
+        try {
+            const paragraphs = this.splitParagraphs(text);
+            const batches = this.buildSmartChunkBatches(paragraphs);
+            const chunks = [];
+            for (const batch of batches) {
+                const response = await this.aiService.generateTextReply({
+                    system: this.buildKnowledgeChunkSystemPrompt(),
+                    user: this.buildKnowledgeChunkUserPrompt(batch),
+                    errorLabel: '知识库智能切片失败',
+                });
+                chunks.push(...this.parseSmartChunks(response.text));
+            }
+            return chunks;
+        }
+        catch (error) {
+            this.logger.warn(`知识库智能切片回退到固定规则：${error instanceof Error ? error.message : 'unknown_error'}`);
+            return [];
+        }
+    }
+    buildChunksFallback(text) {
+        const sections = this.buildDocumentStyleSections(text);
+        const normalizedSections = sections.flatMap((section) => section.length > CHUNK_TARGET_SIZE
+            ? this.recursiveCharacterSplit(section, CHUNK_TARGET_SIZE, 0, [
+                '\n\n',
+                '\n',
+                '。 ',
+                '。\n',
+                '。',
+                '！',
+                '？',
+                '；',
+                '，',
+                ' ',
+                '',
+            ])
+            : [section]);
+        const mergedSections = this.mergeDocumentSections(normalizedSections, CHUNK_TARGET_SIZE, CHUNK_OVERLAP);
+        if (mergedSections.length > 0) {
+            return mergedSections;
+        }
+        return this.recursiveCharacterSplit(text, CHUNK_TARGET_SIZE, CHUNK_OVERLAP, [
+            '\n\n',
+            '\n',
+            '。 ',
+            '。\n',
+            '。',
+            '！',
+            '？',
+            '；',
+            '，',
+            ' ',
+            '',
+        ]);
+    }
+    buildKnowledgeChunkSystemPrompt() {
+        return [
+            '你是一个中文知识库切片助手，负责把混乱文档整理成适合语义检索的片段。',
+            '常见输入包括产品手册、制度文档、公司简章、培训材料、FAQ、服务流程、方案说明、售后资料。',
+            '输入文本可能来自 pdf、ppt、word、ocr，格式可能很乱，可能有错误换行、断句、空白、页码、标题残缺。',
+            '你的目标是先识别真实文字结构，再按语义切分，不要机械按固定字数硬切。',
+            '你必须先判断每段内容属于哪种结构：章节标题、小标题、正文说明、问答对、步骤流、列表项、表格字段、注意事项、案例、结论。',
+            '切片边界优先服从真实结构边界，而不是字数边界。',
+            `每个片段尽量控制在 ${Math.round(CHUNK_TARGET_SIZE * 0.6)} 到 ${CHUNK_TARGET_SIZE} 个中文字符以内，允许少量浮动。`,
+            '优先保持一个完整语义单元：标题+说明、问答对、步骤段、同一主题说明、表格字段组不要拆开。',
+            '如果 OCR 或导出文本存在错误换行，你需要自动合并连续语义行，还原自然段后再切片。',
+            '如果某段非常长，可以在自然句边界、步骤边界、子标题边界处分成多个片段。',
+            '不要输出重复片段，不要输出过短无意义片段，不要保留页码、孤立标题、目录噪声、页眉页脚噪声、纯装饰性编号。',
+            `最多返回 ${SMART_CHUNK_MAX_COUNT} 个片段。`,
+            '输出必须只返回 JSON 数组字符串，例如 ["片段1","片段2"]，不要代码块，不要解释。',
+        ].join('');
+    }
+    buildKnowledgeChunkUserPrompt(text) {
+        const structuredText = this.buildStructuredChunkInput(text);
+        return [
+            '请把下面文本智能切分成适合知识库检索的语义片段。',
+            '文本通常是手册、说明文档、公司简章、FAQ、制度流程等长文资料。',
+            '要求：先根据真实文字结构自动识别，再输出最终切片。',
+            '执行顺序：',
+            '1. 先识别标题层级、正文、列表、步骤、问答、表格字段、注意事项。',
+            '2. 再把语义连续但被错误换行打散的内容自动合并。',
+            '3. 再按结构边界决定切片，而不是按每一行硬切。',
+            '4. 标题尽量和其下属说明放在同一片；问答对、步骤流、字段说明不要拆散。',
+            '5. 对目录、页码、页眉页脚、无意义短句可直接忽略。',
+            '',
+            '下面文本已按行做结构提示标注，请结合内容自动识别真实结构：',
+            '',
+            structuredText,
+        ].join('\n');
+    }
+    buildStructuredChunkInput(text) {
+        return text
+            .split('\n')
+            .map((line, index) => {
+            const normalized = line.trim();
+            if (!normalized) {
+                return '';
+            }
+            const label = this.detectChunkLineLabel(normalized);
+            return `${String(index + 1).padStart(3, '0')} [${label}] ${normalized}`;
+        })
+            .filter(Boolean)
+            .join('\n');
+    }
+    detectChunkLineLabel(line) {
+        if (this.isNoiseLikeLine(line)) {
+            return 'NOISE';
+        }
+        if (this.isHeadingLikeLine(line)) {
+            return 'HEADING';
+        }
+        if (this.isQuestionAnswerLikeLine(line)) {
+            return 'QA';
+        }
+        if (this.isTableLikeLine(line)) {
+            return 'TABLE';
+        }
+        if (this.isListLikeLine(line)) {
+            return 'LIST';
+        }
+        return 'TEXT';
+    }
+    isHeadingLikeLine(line) {
+        if (line.length > 40) {
+            return false;
+        }
+        return (/^第[一二三四五六七八九十0-9]+[章节部分篇条]/.test(line) ||
+            /^[0-9一二三四五六七八九十]+[、.．]\S+/.test(line) ||
+            /^[（(]?[0-9一二三四五六七八九十]+[)）]\S+/.test(line) ||
+            /^(附录|摘要|概述|简介|背景|方案|流程|步骤|总结|结论|注意事项|常见问题|FAQ|公司简介|企业简介|公司概况|企业概况|品牌介绍|品牌故事|企业文化|发展历程|核心优势|主营业务|产品介绍|产品概述|适用场景|使用说明|操作说明|安装步骤|操作步骤|使用步骤|维护保养|售后服务|联系方式|联系我们|资质荣誉|组织架构|制度说明|服务流程|流程说明|案例介绍|成功案例)[:：]?$/.test(line));
+    }
+    isQuestionAnswerLikeLine(line) {
+        return /^(问|答|Q|A)[:：]/i.test(line);
+    }
+    isListLikeLine(line) {
+        return /^([-*•●◦▪]|[0-9]+[.、）)]|[a-zA-Z][.、)])\s*/.test(line);
+    }
+    isTableLikeLine(line) {
+        return /[|｜│]/.test(line) || /[:：]\s*\S+/.test(line);
+    }
+    isNoiseLikeLine(line) {
+        return (/^(第?\s*\d+\s*页|page\s*\d+)$/i.test(line) ||
+            /^(目录|contents)$/i.test(line) ||
+            /^[\-=_*·•]{3,}$/.test(line));
+    }
+    splitParagraphs(text) {
+        return text
+            .split(/\n{2,}/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+    buildDocumentStyleSections(text) {
+        const paragraphs = this.splitParagraphs(text);
+        const sections = [];
+        let currentSection = [];
+        const flushCurrentSection = () => {
+            const section = this.normalizeText(currentSection.join('\n\n'));
+            if (section) {
+                sections.push(section);
+            }
+            currentSection = [];
+        };
+        for (const paragraph of paragraphs) {
+            const normalizedParagraph = this.normalizeText(paragraph);
+            if (!normalizedParagraph || this.isNoiseParagraph(normalizedParagraph)) {
+                continue;
+            }
+            if (this.isDocumentSectionHeading(normalizedParagraph)) {
+                flushCurrentSection();
+                currentSection.push(normalizedParagraph);
+                continue;
+            }
+            const shouldStartNewSection = currentSection.length > 0 &&
+                this.isIndependentDocumentBlock(normalizedParagraph) &&
+                currentSection.join('\n\n').length >= Math.round(CHUNK_TARGET_SIZE * 0.45);
+            if (shouldStartNewSection) {
+                flushCurrentSection();
+            }
+            currentSection.push(normalizedParagraph);
+            if (this.isIndependentDocumentBlock(normalizedParagraph) &&
+                currentSection.join('\n\n').length >= Math.round(CHUNK_TARGET_SIZE * 0.75)) {
+                flushCurrentSection();
+            }
+        }
+        flushCurrentSection();
+        return sections;
+    }
+    buildSmartChunkBatches(paragraphs) {
+        const normalizedParagraphs = paragraphs.flatMap((paragraph) => this.splitOversizedParagraph(paragraph));
+        const batches = [];
+        let current = '';
+        for (const paragraph of normalizedParagraphs) {
+            if (!current) {
+                current = paragraph;
+                continue;
+            }
+            if ((current + '\n\n' + paragraph).length <= SMART_CHUNK_BATCH_TARGET) {
+                current = `${current}\n\n${paragraph}`;
+                continue;
+            }
+            batches.push(current);
+            current = paragraph;
+        }
+        if (current) {
+            batches.push(current);
+        }
+        return batches;
+    }
+    mergeDocumentSections(sections, chunkSize, chunkOverlap) {
+        if (sections.length === 0) {
+            return [];
+        }
+        const chunks = [];
+        let current = '';
+        for (const section of sections) {
+            const normalizedSection = this.normalizeText(section);
+            if (!normalizedSection) {
+                continue;
+            }
+            if (!current) {
+                current = normalizedSection;
+                continue;
+            }
+            const candidate = `${current}\n\n${normalizedSection}`;
+            if (candidate.length <= chunkSize) {
+                current = candidate;
+                continue;
+            }
+            chunks.push(current.trim());
+            const overlapPrefix = this.buildOverlapPrefix(current, chunkOverlap);
+            current = overlapPrefix ? `${overlapPrefix}\n\n${normalizedSection}` : normalizedSection;
+        }
+        if (current) {
+            chunks.push(current.trim());
+        }
+        return chunks.filter(Boolean);
+    }
+    splitOversizedParagraph(paragraph) {
+        if (paragraph.length <= SMART_CHUNK_BATCH_TARGET) {
+            return [paragraph];
+        }
+        const sentences = this.splitSentences(paragraph);
+        if (sentences.length <= 1) {
+            return this.splitTextByLength(paragraph, SMART_CHUNK_BATCH_TARGET);
+        }
+        const parts = [];
+        let current = '';
+        for (const sentence of sentences) {
+            if (!current) {
+                current = sentence;
+                continue;
+            }
+            if ((current + '\n' + sentence).length <= SMART_CHUNK_BATCH_TARGET) {
+                current = `${current}\n${sentence}`;
+                continue;
+            }
+            parts.push(current);
+            current = sentence;
+        }
+        if (current) {
+            parts.push(current);
+        }
+        return parts;
+    }
+    splitTextByLength(text, maxLength) {
+        return text.match(new RegExp(`.{1,${maxLength}}`, 'g')) ?? [text];
+    }
+    isDocumentSectionHeading(paragraph) {
+        const [firstLine = paragraph] = paragraph.split('\n');
+        const normalizedLine = firstLine.trim();
+        return this.isHeadingLikeLine(normalizedLine);
+    }
+    isIndependentDocumentBlock(paragraph) {
+        const [firstLine = paragraph] = paragraph.split('\n');
+        const normalizedLine = firstLine.trim();
+        return (this.isQuestionAnswerLikeLine(normalizedLine) ||
+            this.isListLikeLine(normalizedLine) ||
+            this.isTableLikeLine(normalizedLine));
+    }
+    isNoiseParagraph(paragraph) {
+        const lines = paragraph
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean);
+        return lines.length > 0 && lines.every((line) => this.isNoiseLikeLine(line));
+    }
+    splitSentences(text) {
+        return text
+            .split(/(?<=[。！？；!?;])/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+    parseSmartChunks(raw) {
+        const parsed = this.parseJsonFromText(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((item) => (typeof item === 'string' ? this.normalizeText(item) : ''))
+            .filter((item) => item.length >= 40)
+            .slice(0, SMART_CHUNK_MAX_COUNT);
+    }
+    recursiveCharacterSplit(text, chunkSize, chunkOverlap, separators) {
+        const normalized = this.normalizeText(text);
+        if (!normalized) {
+            return [];
+        }
+        return this.mergeRecursiveSplits(this.recursiveSplit(normalized, chunkSize, separators), chunkSize, chunkOverlap);
+    }
+    recursiveSplit(text, chunkSize, separators) {
+        const normalized = text.trim();
+        if (!normalized) {
+            return [];
+        }
+        if (normalized.length <= chunkSize) {
+            return [normalized];
+        }
+        const separator = separators.find((item) => item === '' || normalized.includes(item)) ?? '';
+        const nextSeparators = separators.slice(Math.min(separators.indexOf(separator) + 1, separators.length));
+        if (!separator) {
+            return this.splitTextByLength(normalized, chunkSize).map((item) => item.trim()).filter(Boolean);
+        }
+        const splits = this.splitBySeparator(normalized, separator);
+        const results = [];
+        let pending = [];
+        const flushPending = () => {
+            if (pending.length === 0) {
+                return;
+            }
+            results.push(...this.mergeBySeparator(pending, separator, chunkSize));
+            pending = [];
+        };
+        for (const split of splits) {
+            if (!split.trim()) {
+                continue;
+            }
+            if (split.length < chunkSize) {
+                pending.push(split);
+                continue;
+            }
+            flushPending();
+            results.push(...this.recursiveSplit(split, chunkSize, nextSeparators));
+        }
+        flushPending();
+        return results.map((item) => item.trim()).filter(Boolean);
+    }
+    splitBySeparator(text, separator) {
+        if (!separator) {
+            return text.split('');
+        }
+        if (separator === ' ') {
+            return text
+                .split(separator)
+                .map((item) => item.trim())
+                .filter(Boolean);
+        }
+        const parts = text.split(separator);
+        const splits = [];
+        parts.forEach((part, index) => {
+            const trimmed = part.trim();
+            if (!trimmed) {
+                return;
+            }
+            const suffix = index < parts.length - 1 ? separator : '';
+            splits.push(`${trimmed}${suffix}`);
+        });
+        return splits;
+    }
+    mergeBySeparator(splits, separator, chunkSize) {
+        const chunks = [];
+        let current = '';
+        for (const split of splits) {
+            const candidate = current
+                ? separator === ' '
+                    ? `${current} ${split}`
+                    : `${current}${split}`
+                : split;
+            if (candidate.length <= chunkSize) {
+                current = candidate;
+                continue;
+            }
+            if (current) {
+                chunks.push(current.trim());
+            }
+            current = split;
+        }
+        if (current) {
+            chunks.push(current.trim());
+        }
+        return chunks;
+    }
+    mergeRecursiveSplits(splits, chunkSize, chunkOverlap) {
+        if (splits.length === 0) {
+            return [];
+        }
+        const chunks = [];
+        let current = '';
+        for (const split of splits) {
+            if (!current) {
+                current = split;
+                continue;
+            }
+            if ((current + split).length <= chunkSize) {
+                current += split;
+                continue;
+            }
+            chunks.push(current.trim());
+            current = this.buildOverlapPrefix(current, chunkOverlap) + split;
+        }
+        if (current) {
+            chunks.push(current.trim());
+        }
+        return chunks.filter(Boolean);
+    }
+    buildOverlapPrefix(text, chunkOverlap) {
+        if (chunkOverlap <= 0) {
+            return '';
+        }
+        return text.slice(Math.max(0, text.length - chunkOverlap)).trim();
+    }
+    extractKeywords(text) {
+        const tokens = this.tokenize(text);
+        return Array.from(new Set(tokens)).slice(0, 12);
+    }
+    countTokens(text) {
+        return this.tokenize(text).length;
+    }
+    tokenize(text) {
+        const latinWords = Array.from(text.toLowerCase().matchAll(/[a-z0-9]{2,}/g)).map((match) => match[0]);
+        const hanChars = Array.from(text.matchAll(/[\u4e00-\u9fff]/g)).map((match) => match[0]);
+        const hanBigrams = [];
+        for (let index = 0; index < hanChars.length - 1; index += 1) {
+            hanBigrams.push(`${hanChars[index]}${hanChars[index + 1]}`);
+        }
+        return [...latinWords, ...hanChars, ...hanBigrams];
+    }
+    parseJsonFromText(text) {
+        const normalized = text.trim();
+        if (!normalized) {
+            return null;
+        }
+        const candidates = [normalized];
+        const fencedMatch = normalized.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (fencedMatch?.[1]?.trim()) {
+            candidates.unshift(fencedMatch[1].trim());
+        }
+        const arrayStart = normalized.indexOf('[');
+        const arrayEnd = normalized.lastIndexOf(']');
+        if (arrayStart >= 0 && arrayEnd > arrayStart) {
+            candidates.push(normalized.slice(arrayStart, arrayEnd + 1));
+        }
+        for (const candidate of candidates) {
+            try {
+                return JSON.parse(candidate);
+            }
+            catch {
+                continue;
+            }
+        }
+        return null;
+    }
+    buildEmbedding(text) {
+        const vector = new Array(EMBEDDING_DIM).fill(0);
+        const tokens = this.tokenize(text);
+        if (tokens.length === 0) {
+            return vector;
+        }
+        for (const token of tokens) {
+            const bucket = this.hashToken(token) % EMBEDDING_DIM;
+            vector[bucket] += 1;
+        }
+        const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+        if (!norm) {
+            return vector;
+        }
+        return vector.map((value) => Number((value / norm).toFixed(6)));
+    }
+    hashToken(token) {
+        let hash = 2166136261;
+        for (let index = 0; index < token.length; index += 1) {
+            hash ^= token.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+        return Math.abs(hash >>> 0);
+    }
+    toVectorLiteral(vector) {
+        return `[${vector.join(',')}]`;
+    }
+};
+exports.KnowledgeService = KnowledgeService;
+exports.KnowledgeService = KnowledgeService = KnowledgeService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        knowledge_storage_service_1.KnowledgeStorageService,
+        knowledge_parser_service_1.KnowledgeParserService,
+        ai_service_1.AiService])
+], KnowledgeService);
+//# sourceMappingURL=knowledge.service.js.map

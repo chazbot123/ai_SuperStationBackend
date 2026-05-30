@@ -1,0 +1,81 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SUPER_SITE_INDUSTRY_SOURCE_DEFINITIONS = void 0;
+exports.buildDefaultIndustrySourceConfigs = buildDefaultIndustrySourceConfigs;
+exports.buildDefaultIndustryKeywords = buildDefaultIndustryKeywords;
+exports.buildDefaultIndustryRefreshConfig = buildDefaultIndustryRefreshConfig;
+exports.findIndustrySourceDefinition = findIndustrySourceDefinition;
+const client_1 = require("@prisma/client");
+exports.SUPER_SITE_INDUSTRY_SOURCE_DEFINITIONS = [
+    {
+        key: 'huxiu_rss',
+        label: '虎嗅',
+        sourceType: client_1.SuperSiteIndustrySourceType.rss,
+        requestUrl: 'https://www.huxiu.com/rss/0.xml',
+        fallbackRequestUrl: 'https://www.huxiu.com/',
+    },
+    {
+        key: '36kr_rss',
+        label: '36氪',
+        sourceType: client_1.SuperSiteIndustrySourceType.rss,
+        requestUrl: 'https://36kr.com/feed',
+    },
+    {
+        key: 'qbitai_html',
+        label: '量子位',
+        sourceType: client_1.SuperSiteIndustrySourceType.rss,
+        requestUrl: 'https://www.qbitai.com/feed',
+    },
+    {
+        key: 'leiphone_html',
+        label: '雷峰网',
+        sourceType: client_1.SuperSiteIndustrySourceType.rss,
+        requestUrl: 'https://www.leiphone.com/feed',
+    },
+    {
+        key: 'infoq_rss',
+        label: 'InfoQ',
+        sourceType: client_1.SuperSiteIndustrySourceType.rss,
+        requestUrl: 'https://www.infoq.cn/feed',
+    },
+    {
+        key: 'ifanr_rss',
+        label: '爱范儿',
+        sourceType: client_1.SuperSiteIndustrySourceType.rss,
+        requestUrl: 'https://www.ifanr.com/feed',
+    },
+    {
+        key: 'sspai_rss',
+        label: '少数派',
+        sourceType: client_1.SuperSiteIndustrySourceType.rss,
+        requestUrl: 'https://sspai.com/feed',
+    },
+    {
+        key: 'geekpark_rss',
+        label: '极客公园',
+        sourceType: client_1.SuperSiteIndustrySourceType.rss,
+        requestUrl: 'https://www.geekpark.net/rss',
+    },
+];
+function buildDefaultIndustrySourceConfigs() {
+    return exports.SUPER_SITE_INDUSTRY_SOURCE_DEFINITIONS.map((item) => ({
+        key: item.key,
+        label: item.label,
+        sourceType: item.sourceType,
+        enabled: true,
+    }));
+}
+function buildDefaultIndustryKeywords() {
+    return ['AI建站', '智能营销', '数字化招商'];
+}
+function buildDefaultIndustryRefreshConfig() {
+    return {
+        enabled: true,
+        frequency: 'daily',
+        dailyTime: '09:00',
+    };
+}
+function findIndustrySourceDefinition(key) {
+    return exports.SUPER_SITE_INDUSTRY_SOURCE_DEFINITIONS.find((item) => item.key === key);
+}
+//# sourceMappingURL=super-site-industry.types.js.map

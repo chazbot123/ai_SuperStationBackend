@@ -1,0 +1,12 @@
+import type { BitBrowserRuntimeFacade } from './bitbrowser.bootstrap';
+import type { BitBrowserHttpRequest, BitBrowserHttpResponse } from './bitbrowser.http-api.types';
+export declare class BitBrowserHttpApi {
+    private readonly controller;
+    private readonly routes;
+    constructor(facade: BitBrowserRuntimeFacade);
+    handle(request: BitBrowserHttpRequest<any>): Promise<BitBrowserHttpResponse>;
+    listRoutes(): string[];
+    private createRoutes;
+    private normalizePath;
+}
+export declare function createBitBrowserHttpApi(facade: BitBrowserRuntimeFacade): BitBrowserHttpApi;

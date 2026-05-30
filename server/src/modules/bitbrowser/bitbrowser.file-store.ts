@@ -234,6 +234,18 @@ export class FileBitBrowserBindingRepository
     );
   }
 
+  async getProfileBindingById(
+    creatorId: string,
+    profileBindingId: string,
+  ): Promise<BrowserProfileBinding | null> {
+    const store = await this.readStore();
+    return (
+      store.profileBindings.find(
+        (item) => item.creatorId === creatorId && item.id === profileBindingId,
+      ) ?? null
+    );
+  }
+
   async touchProfileBinding(
     creatorId: string,
     profileBindingId: string,

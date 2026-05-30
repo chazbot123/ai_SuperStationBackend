@@ -1,0 +1,336 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var BilibiliOpenApiService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BilibiliOpenApiService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const crypto = __importStar(require("crypto"));
+let BilibiliOpenApiService = BilibiliOpenApiService_1 = class BilibiliOpenApiService {
+    configService;
+    logger = new common_1.Logger(BilibiliOpenApiService_1.name);
+    constructor(configService) {
+        this.configService = configService;
+    }
+    async publishVideoFromUrl(input) {
+        const uploadToken = await this.initUpload({
+            accessToken: input.accessToken,
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            name: `video_${Date.now()}.mp4`,
+        });
+        await this.uploadVideoByParts({
+            uploadToken,
+            videoUrl: input.videoUrl,
+        });
+        await this.completeUpload({
+            accessToken: input.accessToken,
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            uploadToken,
+        });
+        const cover = await this.uploadCover({
+            accessToken: input.accessToken,
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            coverUrl: input.coverUrl,
+        });
+        const submit = await this.submitArchive({
+            accessToken: input.accessToken,
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            uploadToken,
+            title: input.title,
+            desc: input.desc,
+            coverUrl: cover,
+            tid: input.tid ?? this.getDefaultTid(),
+            tag: this.buildTagValue(input.tags),
+            copyright: input.copyright ?? 1,
+            source: input.source ?? '',
+            noReprint: input.noReprint ?? 0,
+        });
+        return {
+            resourceId: submit,
+            playUrl: `https://www.bilibili.com/video/${submit}`,
+        };
+    }
+    getDefaultTid() {
+        const raw = this.configService.get('BILIBILI_DEFAULT_TID')?.trim() || '';
+        const parsed = Number(raw);
+        if (raw && !Number.isNaN(parsed) && parsed > 0) {
+            return parsed;
+        }
+        return 21;
+    }
+    buildTagValue(tags) {
+        const normalized = tags.map((item) => item.trim()).filter(Boolean);
+        if (!normalized.length)
+            return '投稿';
+        return normalized.join(',');
+    }
+    async initUpload(input) {
+        const url = 'https://member.bilibili.com/arcopen/fn/archive/video/init';
+        const body = JSON.stringify({ name: input.name, utype: '0' });
+        const headers = this.buildSignedHeaders({
+            accessToken: input.accessToken,
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            body,
+            contentType: 'application/json',
+        });
+        const payload = await this.requestJson(url, {
+            method: 'POST',
+            headers,
+            body,
+        });
+        const token = payload.upload_token?.trim() || '';
+        if (!token) {
+            throw new common_1.ConflictException('B站文件上传预处理返回缺少 upload_token');
+        }
+        return token;
+    }
+    async uploadVideoByParts(input) {
+        const response = await fetch(input.videoUrl, {
+            headers: { Accept: '*/*' },
+            redirect: 'follow',
+        });
+        if (!response.ok || !response.body) {
+            throw new common_1.ConflictException(`B站视频素材下载失败：${response.status}`);
+        }
+        const reader = response.body.getReader();
+        const partSize = 8 * 1024 * 1024;
+        let partNumber = 1;
+        let buffer = new Uint8Array(0);
+        const flushPart = async (chunk) => {
+            const url = new URL('https://openupos.bilivideo.com/video/v2/part/upload');
+            url.searchParams.set('upload_token', input.uploadToken);
+            url.searchParams.set('part_number', String(partNumber));
+            const partResponse = await fetch(url.toString(), {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/octet-stream',
+                },
+                body: chunk,
+            });
+            const text = await partResponse.text();
+            if (!partResponse.ok) {
+                this.logger.warn(`[bilibili-upload] part=${partNumber} http=${partResponse.status} body=${text.slice(0, 200)}`);
+                throw new common_1.ConflictException(`B站分片上传失败：HTTP ${partResponse.status}`);
+            }
+            const payload = this.parseJson(text);
+            const code = typeof payload.code === 'number' ? payload.code : null;
+            if (code !== null && code !== 0) {
+                const message = typeof payload.message === 'string' ? payload.message : '';
+                throw new common_1.ConflictException(message || 'B站分片上传失败');
+            }
+            partNumber += 1;
+        };
+        const concat = (left, right) => {
+            const merged = new Uint8Array(left.length + right.length);
+            merged.set(left, 0);
+            merged.set(right, left.length);
+            return merged;
+        };
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            if (!value || value.length === 0)
+                continue;
+            buffer = concat(buffer, value);
+            while (buffer.length >= partSize) {
+                const chunk = buffer.slice(0, partSize);
+                buffer = buffer.slice(partSize);
+                await flushPart(chunk);
+            }
+        }
+        if (buffer.length > 0) {
+            await flushPart(buffer);
+        }
+    }
+    async completeUpload(input) {
+        const url = new URL('https://member.bilibili.com/arcopen/fn/archive/video/complete');
+        url.searchParams.set('upload_token', input.uploadToken);
+        const headers = this.buildSignedHeaders({
+            accessToken: input.accessToken,
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            body: '',
+            contentType: 'application/json',
+        });
+        await this.requestJson(url.toString(), {
+            method: 'POST',
+            headers,
+            body: undefined,
+        });
+    }
+    async uploadCover(input) {
+        const bytes = await this.fetchBytes(input.coverUrl, 5 * 1024 * 1024, 'B站封面');
+        const url = 'https://member.bilibili.com/arcopen/fn/archive/cover/upload';
+        const headers = this.buildSignedHeaders({
+            accessToken: input.accessToken,
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            body: '',
+        });
+        const form = new FormData();
+        form.append('file', new Blob([new Uint8Array(bytes)]), 'cover');
+        const payload = await this.requestJson(url, {
+            method: 'POST',
+            headers,
+            body: form,
+        });
+        const coverUrl = payload.url?.trim() || '';
+        if (!coverUrl) {
+            throw new common_1.ConflictException('B站封面上传失败');
+        }
+        return coverUrl;
+    }
+    async submitArchive(input) {
+        const url = new URL('https://member.bilibili.com/arcopen/fn/archive/add-by-utoken');
+        url.searchParams.set('upload_token', input.uploadToken);
+        const body = JSON.stringify({
+            title: input.title,
+            cover: input.coverUrl,
+            tid: input.tid,
+            no_reprint: input.noReprint,
+            desc: input.desc,
+            tag: input.tag,
+            copyright: input.copyright,
+            source: input.source,
+        });
+        const headers = this.buildSignedHeaders({
+            accessToken: input.accessToken,
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            body,
+            contentType: 'application/json',
+        });
+        const payload = await this.requestJson(url.toString(), {
+            method: 'POST',
+            headers,
+            body,
+        });
+        const resourceId = payload.resource_id?.trim() || '';
+        if (!resourceId) {
+            throw new common_1.ConflictException('B站稿件提交返回缺少 resource_id');
+        }
+        return resourceId;
+    }
+    buildSignedHeaders(input) {
+        const nonce = crypto.randomBytes(16).toString('base64url');
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        const contentMd5 = crypto.createHash('md5').update(input.body || '').digest('hex');
+        const headers = {
+            Accept: 'application/json',
+            ...(input.contentType ? { 'Content-Type': input.contentType } : {}),
+            'Access-Token': input.accessToken,
+            'X-Bili-Accesskeyid': input.clientId,
+            'X-Bili-Content-Md5': contentMd5,
+            'X-Bili-Signature-Method': 'HMAC-SHA256',
+            'X-Bili-Signature-Nonce': nonce,
+            'X-Bili-Signature-Version': '2.0',
+            'X-Bili-Timestamp': timestamp,
+        };
+        const signaturePayload = [
+            `x-bili-accesskeyid:${headers['X-Bili-Accesskeyid']}`,
+            `x-bili-content-md5:${headers['X-Bili-Content-Md5']}`,
+            `x-bili-signature-method:${headers['X-Bili-Signature-Method']}`,
+            `x-bili-signature-nonce:${headers['X-Bili-Signature-Nonce']}`,
+            `x-bili-signature-version:${headers['X-Bili-Signature-Version']}`,
+            `x-bili-timestamp:${headers['X-Bili-Timestamp']}`,
+        ].join('\n');
+        return {
+            ...headers,
+            Authorization: crypto
+                .createHmac('sha256', input.clientSecret)
+                .update(signaturePayload)
+                .digest('hex'),
+        };
+    }
+    async fetchBytes(url, maxSize, label) {
+        const response = await fetch(url, { headers: { Accept: '*/*' }, redirect: 'follow' });
+        if (!response.ok) {
+            throw new common_1.ConflictException(`${label}下载失败：${response.status}`);
+        }
+        const bytes = Buffer.from(await response.arrayBuffer());
+        if (bytes.length <= 0) {
+            throw new common_1.ConflictException(`${label}为空`);
+        }
+        if (bytes.length > maxSize) {
+            throw new common_1.ConflictException(`${label}不能超过 ${Math.floor(maxSize / 1024 / 1024)}MB`);
+        }
+        return bytes;
+    }
+    parseJson(text) {
+        try {
+            return text ? JSON.parse(text) : {};
+        }
+        catch {
+            return {};
+        }
+    }
+    async requestJson(url, init) {
+        const response = await fetch(url, init);
+        const text = await response.text();
+        const json = this.parseJson(text);
+        if (!response.ok) {
+            throw new common_1.ConflictException(json.message || `B站接口失败：HTTP ${response.status}`);
+        }
+        const code = typeof json.code === 'number' ? json.code : null;
+        if (code !== null && code !== 0) {
+            throw new common_1.ConflictException(json.message || `B站接口错误：${code}`);
+        }
+        if (!json.data) {
+            return {};
+        }
+        return json.data;
+    }
+};
+exports.BilibiliOpenApiService = BilibiliOpenApiService;
+exports.BilibiliOpenApiService = BilibiliOpenApiService = BilibiliOpenApiService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
+], BilibiliOpenApiService);
+//# sourceMappingURL=bilibili-open-api.service.js.map

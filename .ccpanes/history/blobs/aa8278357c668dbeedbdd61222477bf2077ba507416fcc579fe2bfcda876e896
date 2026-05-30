@@ -1,0 +1,13 @@
+type PublicAssetUrlConfig = {
+    bucketName: string;
+    fileBaseUrl?: string | null;
+    minioPublicBaseUrl?: string | null;
+    endpoint?: string | null;
+    port?: number;
+    useSSL?: boolean;
+};
+export declare function encodeObjectKeyForPublicUrl(objectKey: string): string;
+export declare function resolvePublicBucketBaseUrl(config: PublicAssetUrlConfig): string | null;
+export declare function resolvePublicObjectUrl(config: PublicAssetUrlConfig, objectKey: string): string | null;
+export declare function rewriteManagedPublicObjectUrl(config: PublicAssetUrlConfig, inputUrl?: string | null): string | null;
+export {};

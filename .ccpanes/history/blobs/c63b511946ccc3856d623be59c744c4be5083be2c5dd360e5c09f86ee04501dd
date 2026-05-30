@@ -1,0 +1,220 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SupportAiService = void 0;
+const common_1 = require("@nestjs/common");
+const ai_service_1 = require("../ai/ai.service");
+const knowledge_service_1 = require("../knowledge/knowledge.service");
+const SUPPORT_STRONG_MATCH_SCORE = 0.5;
+const SUPPORT_MIN_MATCH_SCORE = 0.18;
+const SUPPORT_MAX_HITS = 4;
+const SUPPORT_HUMAN_SERVICE_HOURS_TEXT = '北京时间 09:00-12:00、14:00-18:00';
+const SUPPORT_HANDOFF_KEYWORDS = [
+    '转人工',
+    '人工客服',
+    '真人客服',
+    '人工处理',
+    '真人处理',
+    '客服介入',
+    '投诉',
+    '退款',
+    '退费',
+    '催单',
+    '紧急',
+];
+let SupportAiService = class SupportAiService {
+    knowledgeService;
+    aiService;
+    constructor(knowledgeService, aiService) {
+        this.knowledgeService = knowledgeService;
+        this.aiService = aiService;
+    }
+    async generateReply(message, userId) {
+        const hits = await this.knowledgeService.retrieveRelevantChunks(message, 'company', 5);
+        const topHits = this.pickRelevantHits(message, hits);
+        const serviceTimeContext = this.getHumanServiceTimeContext();
+        const averageScore = topHits.length > 0
+            ? topHits.reduce((sum, item) => sum + Math.max(0, Number(item.score) || 0), 0) / topHits.length
+            : 0.38;
+        const generated = await this.aiService.generateTextReply({
+            system: this.buildSupportSystemPrompt(),
+            user: this.buildSupportUserPrompt(message, topHits, serviceTimeContext),
+            errorLabel: 'AI 客服托管回复失败',
+            userId: userId?.trim() || undefined,
+        });
+        const answer = this.normalizeSupportReply(generated.text);
+        if (!answer.trim()) {
+            throw new common_1.BadGatewayException('AI 客服未生成有效回复');
+        }
+        return {
+            answer,
+            confidence: Number(Math.min(0.95, Math.max(0.4, averageScore)).toFixed(2)),
+            sources: topHits.map((item) => ({
+                chunkId: item.chunkId,
+                documentId: item.documentId,
+                documentTitle: item.documentTitle,
+                score: Number(item.score ?? 0),
+                snippet: item.snippet,
+            })),
+        };
+    }
+    buildSupportSystemPrompt() {
+        return [
+            '你是 AI 超级站的 AI 客服托管助手，负责先接待访客并给出专业、简洁、可信的中文回复。',
+            '你的回复目标是先理解用户问题，再结合知识库命中片段生成自然客服话术，不要直接照抄切片原文，不要机械罗列片段。',
+            '当提供多个知识片段时，你必须同时参考每个片段的“问题匹配权重”和“时间顺序权重”来综合判断。',
+            '问题匹配权重代表该片段与用户当前问题的直接相关度，优先级最高；时间顺序权重代表该片段在上下文顺序中的参考价值，用于辅助保持信息衔接与先后关系。',
+            '如果两个片段冲突，优先采用问题匹配权重更高且更贴近用户当前问题的片段；时间顺序权重只作为辅助，不可覆盖明显更高的问题匹配权重。',
+            '如果多个片段内容互补，请按权重先融合高相关片段，再用时间顺序更靠前的片段补充背景，避免把次要片段当成主结论。',
+            '默认策略是尽量由 AI 客服继续托管并完成解答，不要轻易建议转人工客服。',
+            `人工客服在线服务时间固定为 ${SUPPORT_HUMAN_SERVICE_HOURS_TEXT}。`,
+            '如果用户希望转人工、咨询人工客服或要求人工介入，你必须先判断当前是否处于人工客服服务时间。',
+            '如果当前不在人工客服服务时间内，不要引导立即转人工，不要承诺人工马上接入，而要明确告知人工客服当前不在线，并提示人工服务时间为北京时间 09:00-12:00、14:00-18:00。',
+            '如果当前不在人工客服服务时间内，可以补充说明用户可先留言问题，待人工客服在线后再跟进。',
+            `只有当用户消息明确命中以下转人工关键词之一时，才允许建议转人工客服：${SUPPORT_HANDOFF_KEYWORDS.join('、')}。`,
+            '如果没有命中转人工关键词，即使依据较弱，也应先给出当前可提供的说明、引导用户补充信息或继续追问，不要直接转人工。',
+            '如果用户只是寒暄、打招呼、询问是否在线，请先礼貌欢迎，再引导对方描述具体问题或需求。',
+            '只要知识片段对用户问题存在部分依据，就先基于高权重片段给出有限回答，再说明这是根据当前知识片段整理的结果。',
+            '只有在没有有效片段，或现有片段与问题明显不匹配时，才说明当前依据不足；此时优先引导补充问题，除非已命中转人工关键词，否则不要主动转人工。',
+            '不要编造产品能力、价格、政策、售后承诺或知识库中不存在的事实。',
+            '回复保持客服口吻，优先 1 到 3 句话；必要时可分点，但不要输出代码块、JSON、Markdown 标题。',
+            '如果命中了多个知识片段，请先融合信息再回答，不要逐条复述。',
+            '当用户已明确要求人工介入，或消息命中了转人工关键词时，结尾才可以明确建议转人工。',
+            '输出只返回最终给用户看的客服回复正文，不要解释你的推理过程。',
+        ].join('');
+    }
+    buildSupportUserPrompt(message, hits, serviceTimeContext) {
+        const handoffIntentMatched = this.hasHandoffKeyword(message);
+        const contextBlock = hits.length > 0
+            ? hits
+                .map((item, index) => {
+                const questionWeight = Math.max(0, Math.round(item.score * 100));
+                const timeWeight = this.buildTimeOrderWeight(index, hits.length);
+                const evidenceLevel = this.buildEvidenceLevel(item.score);
+                return [
+                    `片段${index + 1}｜文档：${item.documentTitle}`,
+                    `问题匹配权重：${questionWeight}`,
+                    `时间顺序权重：${timeWeight}`,
+                    `依据强度：${evidenceLevel}`,
+                    `切片内容：${item.snippet}`,
+                ].join('\n');
+            })
+                .join('\n\n')
+            : '未命中可靠知识片段。';
+        return [
+            `用户消息：${message.trim()}`,
+            '',
+            '知识库命中片段：',
+            contextBlock,
+            '',
+            '请先依据问题匹配权重判断主依据，再结合时间顺序权重整理回复结构。',
+            '如果片段里存在中低强度依据，但能回答用户部分问题，请先给有限回答，不要直接回复未找到结果。',
+            `当前北京时间：${serviceTimeContext.beijingTimeLabel}`,
+            `当前是否在人工客服服务时段内：${serviceTimeContext.withinServiceHours ? '是' : '否'}`,
+            `人工客服服务时间：${SUPPORT_HUMAN_SERVICE_HOURS_TEXT}`,
+            `是否命中转人工关键词：${handoffIntentMatched ? '是' : '否'}`,
+            `转人工关键词列表：${SUPPORT_HANDOFF_KEYWORDS.join('、')}`,
+            '请按 AI 客服口吻直接生成回复。',
+            '如果用户是寒暄，请先简短欢迎，再引导描述问题。',
+            '如果当前知识片段不足以支撑回答，请优先引导用户补充问题；只有命中转人工关键词且当前处于人工客服服务时段内时，才建议转人工。',
+            '如果当前不在人工客服服务时段内，并且用户提到人工客服，请直接告知人工客服当前不在线，并说明北京时间服务时间是 09:00-12:00、14:00-18:00。',
+        ].join('\n');
+    }
+    pickRelevantHits(message, hits) {
+        const normalizedMessage = message.trim().toLowerCase();
+        if (this.isGreetingMessage(normalizedMessage)) {
+            return [];
+        }
+        const scoredHits = hits.filter((item) => Number(item.score ?? 0) > 0);
+        const strongHits = scoredHits.filter((item) => Number(item.score ?? 0) >= SUPPORT_STRONG_MATCH_SCORE);
+        if (strongHits.length > 0) {
+            return strongHits.slice(0, SUPPORT_MAX_HITS);
+        }
+        const mediumHits = scoredHits.filter((item) => Number(item.score ?? 0) >= SUPPORT_MIN_MATCH_SCORE);
+        if (mediumHits.length > 0) {
+            return mediumHits.slice(0, SUPPORT_MAX_HITS);
+        }
+        return scoredHits.slice(0, Math.min(2, SUPPORT_MAX_HITS));
+    }
+    isGreetingMessage(message) {
+        return /^(你好|您好|hi|hello|哈喽|在吗|有人吗|忙吗|嗨)[!！,，。.\s]*$/i.test(message);
+    }
+    normalizeSupportReply(text) {
+        return text
+            .replace(/```[\s\S]*?```/g, '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
+    buildTimeOrderWeight(index, total) {
+        if (total <= 1) {
+            return 100;
+        }
+        const step = 40 / Math.max(1, total - 1);
+        return Math.max(60, Math.round(100 - index * step));
+    }
+    buildEvidenceLevel(score) {
+        if (score >= SUPPORT_STRONG_MATCH_SCORE) {
+            return '高';
+        }
+        if (score >= SUPPORT_MIN_MATCH_SCORE) {
+            return '中';
+        }
+        return '低';
+    }
+    shouldRequestHandoff(message) {
+        return this.hasHandoffKeyword(message) && this.isWithinHumanServiceHours();
+    }
+    hasHandoffIntent(message) {
+        return this.hasHandoffKeyword(message);
+    }
+    hasHandoffKeyword(message) {
+        return SUPPORT_HANDOFF_KEYWORDS.some((keyword) => message.includes(keyword));
+    }
+    getHumanServiceTimeContext() {
+        const now = new Date();
+        const beijingNow = new Date(now.toLocaleString('en-US', {
+            timeZone: 'Asia/Shanghai',
+        }));
+        const dateLabel = new Intl.DateTimeFormat('zh-CN', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+            weekday: 'short',
+        }).format(now);
+        return {
+            beijingTimeLabel: dateLabel,
+            withinServiceHours: this.isWithinHumanServiceHours(beijingNow),
+        };
+    }
+    isWithinHumanServiceHours(reference = new Date()) {
+        const hour = reference.getHours();
+        const minute = reference.getMinutes();
+        const currentMinutes = hour * 60 + minute;
+        const morningStart = 9 * 60;
+        const morningEnd = 12 * 60;
+        const afternoonStart = 14 * 60;
+        const afternoonEnd = 18 * 60;
+        return ((currentMinutes >= morningStart && currentMinutes < morningEnd) ||
+            (currentMinutes >= afternoonStart && currentMinutes < afternoonEnd));
+    }
+};
+exports.SupportAiService = SupportAiService;
+exports.SupportAiService = SupportAiService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [knowledge_service_1.KnowledgeService,
+        ai_service_1.AiService])
+], SupportAiService);
+//# sourceMappingURL=support-ai.service.js.map

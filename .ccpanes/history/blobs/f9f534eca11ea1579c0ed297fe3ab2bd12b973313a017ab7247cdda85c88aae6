@@ -1,0 +1,10 @@
+export declare class CreateRuleDto {
+    name: string;
+    minCount?: number | null;
+    maxCount?: number | null;
+    minLen?: number | null;
+    maxLen?: number | null;
+    dedupeRequired: boolean;
+    sensitiveFilterEnabled: boolean;
+    submitRateLimitPerDay?: number | null;
+}

@@ -1,0 +1,376 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SuperSiteSettingsService = void 0;
+const common_1 = require("@nestjs/common");
+const ai_video_storage_service_1 = require("../ai/ai-video-storage.service");
+const prisma_service_1 = require("../prisma/prisma.service");
+const product_image_storage_service_1 = require("../products/product-image-storage.service");
+const super_site_industry_types_1 = require("./super-site-industry.types");
+const super_site_industry_queue_service_1 = require("./super-site-industry-queue.service");
+let SuperSiteSettingsService = class SuperSiteSettingsService {
+    prisma;
+    productImageStorage;
+    aiVideoStorage;
+    superSiteIndustryQueueService;
+    constructor(prisma, productImageStorage, aiVideoStorage, superSiteIndustryQueueService) {
+        this.prisma = prisma;
+        this.productImageStorage = productImageStorage;
+        this.aiVideoStorage = aiVideoStorage;
+        this.superSiteIndustryQueueService = superSiteIndustryQueueService;
+    }
+    async getMySettings(userId) {
+        const existing = await this.prisma.superSiteSetting.findUnique({
+            where: { userId },
+        });
+        if (!existing) {
+            return this.buildDefaultSettings();
+        }
+        return this.mergeSettings({
+            enterpriseName: existing.enterpriseName,
+            superSiteBaseUrl: existing.superSiteBaseUrl,
+            siteTemplate: existing.siteTemplate,
+            siteModules: this.readJsonArray(existing.siteModules),
+            siteMetrics: this.readJsonArray(existing.siteMetrics),
+            specialOfferTitle: existing.specialOfferTitle,
+            specialOfferSubtitle: existing.specialOfferSubtitle,
+            specialOffers: this.readJsonArray(existing.specialOffers),
+            siteImageSlots: this.readJsonArray(existing.siteImageSlots),
+            siteVideoSettings: this.readJsonObject(existing.siteVideoSettings) ??
+                undefined,
+            industrySourceConfigs: this.readJsonArray(existing.industrySourceConfigs),
+            industryKeywords: this.readJsonArray(existing.industryKeywords),
+            industryRefreshConfig: this.readJsonObject(existing.industryRefreshConfig) ?? undefined,
+            industryLastSyncAt: existing.industryLastSyncAt?.toISOString() ?? null,
+            industryLastSyncStatus: existing.industryLastSyncStatus,
+            industryLastSyncError: existing.industryLastSyncError,
+        });
+    }
+    async updateMySettings(userId, dto) {
+        const current = await this.getMySettings(userId);
+        const next = this.mergeSettings({
+            ...current,
+            ...dto,
+        });
+        const saved = await this.prisma.superSiteSetting.upsert({
+            where: { userId },
+            create: {
+                userId,
+                enterpriseName: next.enterpriseName,
+                superSiteBaseUrl: next.superSiteBaseUrl,
+                siteTemplate: next.siteTemplate,
+                siteModules: next.siteModules,
+                siteMetrics: next.siteMetrics,
+                specialOfferTitle: next.specialOfferTitle,
+                specialOfferSubtitle: next.specialOfferSubtitle,
+                specialOffers: next.specialOffers,
+                siteImageSlots: next.siteImageSlots,
+                siteVideoSettings: next.siteVideoSettings,
+                industrySourceConfigs: next.industrySourceConfigs,
+                industryKeywords: next.industryKeywords,
+                industryRefreshConfig: next.industryRefreshConfig,
+                industryLastSyncAt: next.industryLastSyncAt
+                    ? new Date(next.industryLastSyncAt)
+                    : null,
+                industryLastSyncStatus: next.industryLastSyncStatus,
+                industryLastSyncError: next.industryLastSyncError,
+            },
+            update: {
+                enterpriseName: next.enterpriseName,
+                superSiteBaseUrl: next.superSiteBaseUrl,
+                siteTemplate: next.siteTemplate,
+                siteModules: next.siteModules,
+                siteMetrics: next.siteMetrics,
+                specialOfferTitle: next.specialOfferTitle,
+                specialOfferSubtitle: next.specialOfferSubtitle,
+                specialOffers: next.specialOffers,
+                siteImageSlots: next.siteImageSlots,
+                siteVideoSettings: next.siteVideoSettings,
+                industrySourceConfigs: next.industrySourceConfigs,
+                industryKeywords: next.industryKeywords,
+                industryRefreshConfig: next.industryRefreshConfig,
+                industryLastSyncAt: next.industryLastSyncAt
+                    ? new Date(next.industryLastSyncAt)
+                    : null,
+                industryLastSyncStatus: next.industryLastSyncStatus,
+                industryLastSyncError: next.industryLastSyncError,
+            },
+        });
+        await this.superSiteIndustryQueueService?.syncUserScheduler(userId, next.industryRefreshConfig);
+        return this.mergeSettings({
+            enterpriseName: saved.enterpriseName,
+            superSiteBaseUrl: saved.superSiteBaseUrl,
+            siteTemplate: saved.siteTemplate,
+            siteModules: this.readJsonArray(saved.siteModules),
+            siteMetrics: this.readJsonArray(saved.siteMetrics),
+            specialOfferTitle: saved.specialOfferTitle,
+            specialOfferSubtitle: saved.specialOfferSubtitle,
+            specialOffers: this.readJsonArray(saved.specialOffers),
+            siteImageSlots: this.readJsonArray(saved.siteImageSlots),
+            siteVideoSettings: this.readJsonObject(saved.siteVideoSettings) ??
+                undefined,
+            industrySourceConfigs: this.readJsonArray(saved.industrySourceConfigs),
+            industryKeywords: this.readJsonArray(saved.industryKeywords),
+            industryRefreshConfig: this.readJsonObject(saved.industryRefreshConfig) ?? undefined,
+            industryLastSyncAt: saved.industryLastSyncAt?.toISOString() ?? null,
+            industryLastSyncStatus: saved.industryLastSyncStatus,
+            industryLastSyncError: saved.industryLastSyncError,
+        });
+    }
+    async getPublicSettings(userId) {
+        const settings = await this.getMySettings(userId);
+        return {
+            enterpriseName: settings.enterpriseName,
+            superSiteBaseUrl: settings.superSiteBaseUrl,
+            siteTemplate: settings.siteTemplate,
+            siteModules: settings.siteModules,
+            siteMetrics: settings.siteMetrics,
+            specialOfferTitle: settings.specialOfferTitle,
+            specialOfferSubtitle: settings.specialOfferSubtitle,
+            specialOffers: settings.specialOffers,
+            siteImageSlots: settings.siteImageSlots,
+            siteVideoSettings: settings.siteVideoSettings,
+        };
+    }
+    async uploadSiteImage(userId, file) {
+        const uploaded = await this.productImageStorage.uploadProductImage(userId, file);
+        return { url: uploaded.url };
+    }
+    async uploadSiteVideo(userId, file) {
+        this.validateVideoFile(file);
+        const uploaded = await this.aiVideoStorage.uploadVideoObject({
+            userId,
+            taskId: 'super-site-brand-video',
+            fileName: this.normalizeVideoFileName(file.originalname),
+            buffer: file.buffer,
+        });
+        return { url: uploaded.url };
+    }
+    buildDefaultSettings() {
+        return {
+            enterpriseName: '示例科技',
+            superSiteBaseUrl: '',
+            siteTemplate: 'standard',
+            siteModules: [
+                { key: 'ai_attract', label: 'AI招商', enabled: true },
+                { key: 'ai_leads', label: 'AI拓客', enabled: true },
+                { key: 'special_offer', label: '特价商品', enabled: true },
+                { key: 'ai_kf', label: 'AI客服', enabled: true },
+                { key: 'ai_video', label: 'AI视频', enabled: true },
+            ],
+            siteMetrics: [
+                {
+                    key: 'visits',
+                    label: '访问量',
+                    enabled: true,
+                    valueMode: 'dynamic',
+                    startValue: '2680',
+                    tickInterval: '8',
+                    incrementMin: '1',
+                    incrementMax: '3',
+                    fixedValue: '',
+                    suffix: '',
+                    highlight: '展示站点整体访问热度',
+                },
+                {
+                    key: 'consultations',
+                    label: '咨询量',
+                    enabled: true,
+                    valueMode: 'dynamic',
+                    startValue: '126',
+                    tickInterval: '15',
+                    incrementMin: '1',
+                    incrementMax: '2',
+                    fixedValue: '',
+                    suffix: '',
+                    highlight: '突出线索承接效率',
+                },
+                {
+                    key: 'signing_rate',
+                    label: '招商签约率',
+                    enabled: true,
+                    valueMode: 'fixed',
+                    startValue: '',
+                    tickInterval: '',
+                    incrementMin: '',
+                    incrementMax: '',
+                    fixedValue: '31',
+                    suffix: '%',
+                    highlight: '适合展示阶段性经营结果',
+                },
+                {
+                    key: 'purchases',
+                    label: '购买量',
+                    enabled: true,
+                    valueMode: 'dynamic',
+                    startValue: '880',
+                    tickInterval: '20',
+                    incrementMin: '1',
+                    incrementMax: '2',
+                    fixedValue: '',
+                    suffix: '',
+                    highlight: '适合营造成交活跃感',
+                },
+            ],
+            specialOfferTitle: '特价商品专区',
+            specialOfferSubtitle: '支持首页插入限时优惠、秒杀引导与爆款推荐',
+            specialOffers: [
+                {
+                    id: 'offer-starter',
+                    name: '爆款引流套餐',
+                    summary: '限时植入首页首屏，适合拉新转化',
+                    tag: '今日特价',
+                    priceText: '¥199',
+                    originalPriceText: '¥399',
+                    ctaText: '立即抢购',
+                    images: [],
+                    enabled: true,
+                },
+                {
+                    id: 'offer-pro',
+                    name: '企业获客升级版',
+                    summary: '含 AI 文案、线索承接与客服分发',
+                    tag: '组合优惠',
+                    priceText: '¥699',
+                    originalPriceText: '¥999',
+                    ctaText: '查看详情',
+                    images: [],
+                    enabled: true,
+                },
+                {
+                    id: 'offer-addon',
+                    name: '视频种草加购包',
+                    summary: '搭配短视频素材与直播话术使用',
+                    tag: '加价购',
+                    priceText: '¥99',
+                    originalPriceText: '¥159',
+                    ctaText: '加入购物车',
+                    images: [],
+                    enabled: false,
+                },
+            ],
+            siteImageSlots: [],
+            siteVideoSettings: {
+                videoUrl: '',
+                posterUrl: '',
+            },
+            industrySourceConfigs: (0, super_site_industry_types_1.buildDefaultIndustrySourceConfigs)(),
+            industryKeywords: (0, super_site_industry_types_1.buildDefaultIndustryKeywords)(),
+            industryRefreshConfig: (0, super_site_industry_types_1.buildDefaultIndustryRefreshConfig)(),
+            industryLastSyncAt: null,
+            industryLastSyncStatus: null,
+            industryLastSyncError: null,
+        };
+    }
+    mergeSettings(settings) {
+        const defaults = this.buildDefaultSettings();
+        const savedModules = settings?.siteModules ?? [];
+        const savedMetrics = settings?.siteMetrics ?? [];
+        const savedOffers = settings?.specialOffers ?? [];
+        const savedImageSlots = settings?.siteImageSlots ?? [];
+        const savedSiteVideoSettings = settings?.siteVideoSettings;
+        const savedIndustrySourceConfigs = settings?.industrySourceConfigs ?? [];
+        return {
+            enterpriseName: settings?.enterpriseName ?? defaults.enterpriseName,
+            superSiteBaseUrl: typeof settings?.superSiteBaseUrl === 'string'
+                ? settings.superSiteBaseUrl.trim()
+                : defaults.superSiteBaseUrl,
+            siteTemplate: settings?.siteTemplate ?? defaults.siteTemplate,
+            siteModules: [
+                ...savedModules,
+                ...defaults.siteModules.filter((item) => !savedModules.some((saved) => saved.key === item.key)),
+            ],
+            siteMetrics: [
+                ...savedMetrics.map((metric) => ({
+                    ...defaults.siteMetrics.find((item) => item.key === metric.key),
+                    ...metric,
+                })),
+                ...defaults.siteMetrics.filter((item) => !savedMetrics.some((saved) => saved.key === item.key)),
+            ],
+            specialOfferTitle: settings?.specialOfferTitle ?? defaults.specialOfferTitle,
+            specialOfferSubtitle: settings?.specialOfferSubtitle ?? defaults.specialOfferSubtitle,
+            specialOffers: savedOffers.length > 0 ? savedOffers : defaults.specialOffers,
+            siteImageSlots: savedImageSlots
+                .filter((item) => item?.slotKey?.trim() && item?.moduleKey?.trim() && item?.imageUrl?.trim())
+                .map((item) => ({
+                slotKey: item.slotKey.trim(),
+                moduleKey: item.moduleKey.trim(),
+                imageUrl: item.imageUrl.trim(),
+                sourceContentId: item.sourceContentId?.trim() || null,
+                updatedAt: item.updatedAt?.trim() || null,
+            })),
+            siteVideoSettings: {
+                videoUrl: typeof savedSiteVideoSettings?.videoUrl === 'string'
+                    ? savedSiteVideoSettings.videoUrl.trim()
+                    : defaults.siteVideoSettings.videoUrl,
+                posterUrl: typeof savedSiteVideoSettings?.posterUrl === 'string'
+                    ? savedSiteVideoSettings.posterUrl.trim()
+                    : defaults.siteVideoSettings.posterUrl,
+            },
+            industrySourceConfigs: defaults.industrySourceConfigs.map((item) => ({
+                ...item,
+                enabled: savedIndustrySourceConfigs.find((saved) => saved.key === item.key)
+                    ?.enabled ?? item.enabled,
+            })),
+            industryKeywords: settings?.industryKeywords?.length &&
+                settings.industryKeywords.some((item) => item.trim())
+                ? settings.industryKeywords.map((item) => item.trim()).filter(Boolean)
+                : defaults.industryKeywords,
+            industryRefreshConfig: {
+                ...defaults.industryRefreshConfig,
+                ...(settings?.industryRefreshConfig ?? {}),
+            },
+            industryLastSyncAt: settings?.industryLastSyncAt ?? defaults.industryLastSyncAt,
+            industryLastSyncStatus: settings?.industryLastSyncStatus ?? defaults.industryLastSyncStatus,
+            industryLastSyncError: settings?.industryLastSyncError ?? defaults.industryLastSyncError,
+        };
+    }
+    readJsonArray(value) {
+        return Array.isArray(value) ? value : [];
+    }
+    readJsonObject(value) {
+        return value && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : null;
+    }
+    validateVideoFile(file) {
+        if (!file) {
+            throw new common_1.BadRequestException('请选择视频文件');
+        }
+        if (!file.mimetype.startsWith('video/')) {
+            throw new common_1.BadRequestException('仅支持上传视频文件');
+        }
+        if (file.size <= 0) {
+            throw new common_1.BadRequestException('视频文件不能为空');
+        }
+        if (file.size > 200 * 1024 * 1024) {
+            throw new common_1.BadRequestException('视频大小不能超过 200MB');
+        }
+    }
+    normalizeVideoFileName(fileName) {
+        const trimmed = String(fileName || '').trim();
+        const safe = trimmed.replace(/[^\w.\-]+/g, '-');
+        return safe || 'brand-video.mp4';
+    }
+};
+exports.SuperSiteSettingsService = SuperSiteSettingsService;
+exports.SuperSiteSettingsService = SuperSiteSettingsService = __decorate([
+    (0, common_1.Injectable)(),
+    __param(3, (0, common_1.Optional)()),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        product_image_storage_service_1.ProductImageStorageService,
+        ai_video_storage_service_1.AiVideoStorageService,
+        super_site_industry_queue_service_1.SuperSiteIndustryQueueService])
+], SuperSiteSettingsService);
+//# sourceMappingURL=super-site-settings.service.js.map

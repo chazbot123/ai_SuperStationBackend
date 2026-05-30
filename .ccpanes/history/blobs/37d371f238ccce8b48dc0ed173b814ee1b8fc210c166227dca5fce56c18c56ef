@@ -1,0 +1,538 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AiVideoConcatService = void 0;
+exports.buildConcatCrossfadePlan = buildConcatCrossfadePlan;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const node_fs_1 = require("node:fs");
+const promises_1 = require("node:fs/promises");
+const node_path_1 = require("node:path");
+const node_os_1 = require("node:os");
+const fluent_ffmpeg_1 = __importDefault(require("fluent-ffmpeg"));
+const ffmpeg_1 = __importDefault(require("@ffmpeg-installer/ffmpeg"));
+const ffprobe_1 = __importDefault(require("@ffprobe-installer/ffprobe"));
+const ffmpeg_static_1 = __importDefault(require("ffmpeg-static"));
+function buildConcatCrossfadePlan(durations, desiredTransitionSeconds) {
+    const normalizedDurations = durations
+        .map((value) => (Number.isFinite(value) ? Number(value) : 0))
+        .map((value) => Math.max(0, value));
+    if (normalizedDurations.length < 2) {
+        return [];
+    }
+    const baseTransition = Number.isFinite(desiredTransitionSeconds) ? Math.max(0, desiredTransitionSeconds) : 0;
+    if (baseTransition <= 0) {
+        return [];
+    }
+    const steps = [];
+    let composedDuration = normalizedDurations[0];
+    for (let index = 0; index < normalizedDurations.length - 1; index += 1) {
+        const current = normalizedDurations[index];
+        const next = normalizedDurations[index + 1];
+        const maxSafeTransition = Math.min(baseTransition, current * 0.2, next * 0.2, current - 0.12, next - 0.12);
+        const transition = Number(maxSafeTransition.toFixed(3));
+        if (!Number.isFinite(transition) || transition <= 0.05) {
+            return [];
+        }
+        const offsetSeconds = Number((composedDuration - transition).toFixed(3));
+        if (!Number.isFinite(offsetSeconds) || offsetSeconds <= 0) {
+            return [];
+        }
+        steps.push({
+            leftIndex: index,
+            rightIndex: index + 1,
+            durationSeconds: transition,
+            offsetSeconds,
+        });
+        composedDuration = offsetSeconds + next;
+    }
+    return steps;
+}
+let AiVideoConcatService = class AiVideoConcatService {
+    configService;
+    constructor(configService) {
+        this.configService = configService;
+        const resolvedFfmpegPath = this.resolveBinaryPath('FFMPEG_PATH', [
+            '/usr/bin/ffmpeg',
+            '/usr/local/bin/ffmpeg',
+            typeof ffmpeg_1.default?.path === 'string' ? ffmpeg_1.default.path : '',
+            typeof ffmpeg_static_1.default === 'string' ? ffmpeg_static_1.default : '',
+        ]);
+        const resolvedFfprobePath = this.resolveBinaryPath('FFPROBE_PATH', [
+            '/usr/bin/ffprobe',
+            '/usr/local/bin/ffprobe',
+            typeof ffprobe_1.default?.path === 'string' ? ffprobe_1.default.path : '',
+        ]);
+        if (resolvedFfmpegPath) {
+            fluent_ffmpeg_1.default.setFfmpegPath(resolvedFfmpegPath);
+        }
+        if (resolvedFfprobePath) {
+            fluent_ffmpeg_1.default.setFfprobePath(resolvedFfprobePath);
+        }
+    }
+    async concatMp4Files(inputFiles, opts) {
+        if (inputFiles.length === 0) {
+            throw new common_1.InternalServerErrorException('没有可拼接的视频片段');
+        }
+        const outputDir = (0, node_path_1.join)((0, node_os_1.tmpdir)(), 'ai-superweb-video');
+        await (0, promises_1.mkdir)(outputDir, { recursive: true });
+        const outputPath = (0, node_path_1.join)(outputDir, `final-${Date.now()}.mp4`);
+        const transitionSeconds = Number.isFinite(opts?.transitionSeconds) && Number(opts?.transitionSeconds) > 0 ? Number(opts?.transitionSeconds) : 0;
+        if (inputFiles.length > 1 && transitionSeconds > 0) {
+            const media = await Promise.all(inputFiles.map((filePath) => this.getMediaSummary(filePath)));
+            const hasAllAudio = media.every((item) => item.hasAudio);
+            const hasNoAudio = media.every((item) => !item.hasAudio);
+            const canCrossfade = hasAllAudio || hasNoAudio;
+            const plan = canCrossfade ? buildConcatCrossfadePlan(media.map((item) => item.durationSeconds), transitionSeconds) : [];
+            if (plan.length > 0) {
+                try {
+                    await this.runCrossfade(inputFiles, outputPath, plan, hasAllAudio);
+                    return Buffer.from(await (0, promises_1.readFile)(outputPath));
+                }
+                catch {
+                }
+            }
+        }
+        const listPath = (0, node_path_1.join)(outputDir, `concat-${Date.now()}.txt`);
+        const listBody = inputFiles.map((file) => `file '${file.replace(/'/g, "'\\''")}'`).join('\n');
+        await (0, promises_1.writeFile)(listPath, listBody, 'utf-8');
+        try {
+            await this.runConcat(listPath, outputPath);
+            return Buffer.from(await (0, promises_1.readFile)(outputPath));
+        }
+        catch (error) {
+            try {
+                await this.runReencode(listPath, outputPath);
+                return Buffer.from(await (0, promises_1.readFile)(outputPath));
+            }
+            catch {
+                throw error instanceof Error
+                    ? new common_1.InternalServerErrorException(error.message)
+                    : new common_1.InternalServerErrorException('视频拼接失败');
+            }
+        }
+    }
+    async muxMp4WithAudio(opts) {
+        const outputDir = (0, node_path_1.join)((0, node_os_1.tmpdir)(), 'ai-superweb-video');
+        await (0, promises_1.mkdir)(outputDir, { recursive: true });
+        const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+        const videoPath = (0, node_path_1.join)(outputDir, `video-${suffix}.mp4`);
+        const audioExt = (opts.audioExtension ?? 'mp3').replace(/^\./, '') || 'mp3';
+        const audioPath = (0, node_path_1.join)(outputDir, `audio-${suffix}.${audioExt}`);
+        const outputPath = (0, node_path_1.join)(outputDir, `mux-${suffix}.mp4`);
+        await (0, promises_1.writeFile)(videoPath, opts.videoBuffer);
+        await (0, promises_1.writeFile)(audioPath, opts.audioBuffer);
+        try {
+            await this.runMux(videoPath, audioPath, outputPath);
+            return Buffer.from(await (0, promises_1.readFile)(outputPath));
+        }
+        catch (error) {
+            try {
+                await this.runMuxReencode(videoPath, audioPath, outputPath);
+                return Buffer.from(await (0, promises_1.readFile)(outputPath));
+            }
+            catch {
+                throw error instanceof Error
+                    ? new common_1.InternalServerErrorException(error.message)
+                    : new common_1.InternalServerErrorException('视频音频合成失败');
+            }
+        }
+    }
+    async muxMp4WithAudioMix(opts) {
+        const outputDir = (0, node_path_1.join)((0, node_os_1.tmpdir)(), 'ai-superweb-video');
+        await (0, promises_1.mkdir)(outputDir, { recursive: true });
+        const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+        const videoPath = (0, node_path_1.join)(outputDir, `video-${suffix}.mp4`);
+        await (0, promises_1.writeFile)(videoPath, opts.videoBuffer);
+        const voiceBuffer = opts.voiceAudioBuffer ?? null;
+        const bgmBuffer = opts.bgmAudioBuffer ?? null;
+        if (!voiceBuffer && !bgmBuffer) {
+            throw new common_1.InternalServerErrorException('缺少可用音频');
+        }
+        const voiceVol = Number.isFinite(opts.voiceVolume) ? Math.max(0, Math.min(2, Number(opts.voiceVolume))) : 1;
+        const bgmVol = Number.isFinite(opts.bgmVolume) ? Math.max(0, Math.min(2, Number(opts.bgmVolume))) : 0.25;
+        const outputPath = (0, node_path_1.join)(outputDir, `mix-${suffix}.mp4`);
+        if (voiceBuffer && bgmBuffer) {
+            const voiceExt = (opts.voiceAudioExtension ?? 'mp3').replace(/^\./, '') || 'mp3';
+            const bgmExt = (opts.bgmAudioExtension ?? 'mp3').replace(/^\./, '') || 'mp3';
+            const voicePath = (0, node_path_1.join)(outputDir, `voice-${suffix}.${voiceExt}`);
+            const bgmPath = (0, node_path_1.join)(outputDir, `bgm-${suffix}.${bgmExt}`);
+            await (0, promises_1.writeFile)(voicePath, voiceBuffer);
+            await (0, promises_1.writeFile)(bgmPath, bgmBuffer);
+            await this.runMuxWithMix(videoPath, voicePath, bgmPath, outputPath, voiceVol, bgmVol);
+            return Buffer.from(await (0, promises_1.readFile)(outputPath));
+        }
+        if (voiceBuffer) {
+            const voiceExt = (opts.voiceAudioExtension ?? 'mp3').replace(/^\./, '') || 'mp3';
+            const voicePath = (0, node_path_1.join)(outputDir, `voice-${suffix}.${voiceExt}`);
+            await (0, promises_1.writeFile)(voicePath, voiceBuffer);
+            await this.runMux(videoPath, voicePath, outputPath);
+            return Buffer.from(await (0, promises_1.readFile)(outputPath));
+        }
+        const bgmExt = (opts.bgmAudioExtension ?? 'mp3').replace(/^\./, '') || 'mp3';
+        const bgmPath = (0, node_path_1.join)(outputDir, `bgm-${suffix}.${bgmExt}`);
+        await (0, promises_1.writeFile)(bgmPath, bgmBuffer);
+        await this.runMuxLoopBgm(videoPath, bgmPath, outputPath, bgmVol);
+        return Buffer.from(await (0, promises_1.readFile)(outputPath));
+    }
+    async getVideoDuration(filePath) {
+        return new Promise((resolve, reject) => {
+            fluent_ffmpeg_1.default.ffprobe(filePath, (error, metadata) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                const duration = Number(metadata?.format?.duration ?? 0);
+                if (Number.isFinite(duration) && duration > 0) {
+                    resolve(duration);
+                    return;
+                }
+                reject(new Error('无法读取视频时长'));
+            });
+        });
+    }
+    async getMediaSummary(filePath) {
+        return new Promise((resolve, reject) => {
+            fluent_ffmpeg_1.default.ffprobe(filePath, (error, metadata) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                const durationSeconds = Number(metadata?.format?.duration ?? 0);
+                const hasAudio = Boolean(metadata?.streams?.some((stream) => stream.codec_type === 'audio'));
+                if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+                    resolve({ durationSeconds, hasAudio });
+                    return;
+                }
+                reject(new Error('无法读取视频时长'));
+            });
+        });
+    }
+    async getVideoFrameSize(filePath) {
+        return new Promise((resolve, reject) => {
+            fluent_ffmpeg_1.default.ffprobe(filePath, (error, metadata) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                const videoStream = metadata?.streams?.find((stream) => stream.codec_type === 'video');
+                const width = Number(videoStream?.width ?? 0);
+                const height = Number(videoStream?.height ?? 0);
+                if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+                    resolve({ width, height });
+                    return;
+                }
+                reject(new Error('无法读取视频分辨率'));
+            });
+        });
+    }
+    async burnSubtitles(opts) {
+        const validCues = opts.cues.filter((cue) => typeof cue.text === 'string' &&
+            cue.text.trim() &&
+            Number.isFinite(cue.startSeconds) &&
+            Number.isFinite(cue.endSeconds) &&
+            cue.endSeconds > cue.startSeconds);
+        if (validCues.length === 0) {
+            return opts.videoBuffer;
+        }
+        const outputDir = (0, node_path_1.join)((0, node_os_1.tmpdir)(), 'ai-superweb-video');
+        await (0, promises_1.mkdir)(outputDir, { recursive: true });
+        const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+        const videoPath = (0, node_path_1.join)(outputDir, `subtitle-video-${suffix}.mp4`);
+        const srtPath = (0, node_path_1.join)(outputDir, `subtitle-${suffix}.srt`);
+        const outputPath = (0, node_path_1.join)(outputDir, `subtitle-burned-${suffix}.mp4`);
+        await (0, promises_1.writeFile)(videoPath, opts.videoBuffer);
+        await (0, promises_1.writeFile)(srtPath, this.buildSrt(validCues), 'utf-8');
+        try {
+            const frameSize = await this.getVideoFrameSize(videoPath);
+            await this.runBurnSubtitles(videoPath, srtPath, outputPath, frameSize);
+            return Buffer.from(await (0, promises_1.readFile)(outputPath));
+        }
+        catch (error) {
+            throw error instanceof Error
+                ? new common_1.InternalServerErrorException(error.message)
+                : new common_1.InternalServerErrorException('视频字幕烧录失败');
+        }
+    }
+    runConcat(listPath, outputPath) {
+        return new Promise((resolve, reject) => {
+            (0, fluent_ffmpeg_1.default)()
+                .input(listPath)
+                .inputOptions(['-f concat', '-safe 0'])
+                .outputOptions(['-c copy'])
+                .on('error', reject)
+                .on('end', () => resolve())
+                .save(outputPath);
+        });
+    }
+    runReencode(listPath, outputPath) {
+        return new Promise((resolve, reject) => {
+            (0, fluent_ffmpeg_1.default)()
+                .input(listPath)
+                .inputOptions(['-f concat', '-safe 0'])
+                .outputOptions(['-c:v libx264', '-preset veryfast', '-pix_fmt yuv420p', '-c:a aac'])
+                .on('error', reject)
+                .on('end', () => resolve())
+                .save(outputPath);
+        });
+    }
+    runCrossfade(inputFiles, outputPath, plan, withAudio) {
+        return new Promise((resolve, reject) => {
+            let command = (0, fluent_ffmpeg_1.default)();
+            for (const filePath of inputFiles) {
+                command = command.input(filePath);
+            }
+            const filters = [];
+            let currentVideoLabel = '0:v';
+            let currentAudioLabel = withAudio ? '0:a' : '';
+            for (let index = 0; index < plan.length; index += 1) {
+                const step = plan[index];
+                const nextVideoInput = `${step.rightIndex}:v`;
+                const nextVideoLabel = `vxf${index + 1}`;
+                filters.push(`[${currentVideoLabel}][${nextVideoInput}]xfade=transition=fade:duration=${step.durationSeconds}:offset=${step.offsetSeconds}[${nextVideoLabel}]`);
+                currentVideoLabel = nextVideoLabel;
+                if (withAudio) {
+                    const nextAudioInput = `${step.rightIndex}:a`;
+                    const nextAudioLabel = `axf${index + 1}`;
+                    filters.push(`[${currentAudioLabel}][${nextAudioInput}]acrossfade=d=${step.durationSeconds}:c1=tri:c2=tri[${nextAudioLabel}]`);
+                    currentAudioLabel = nextAudioLabel;
+                }
+            }
+            const outputOptions = ['-map', `[${currentVideoLabel}]`, '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p'];
+            if (withAudio) {
+                outputOptions.push('-map', `[${currentAudioLabel}]`, '-c:a', 'aac', '-b:a', '128k');
+            }
+            else {
+                outputOptions.push('-an');
+            }
+            command
+                .complexFilter(filters)
+                .outputOptions(outputOptions)
+                .on('error', reject)
+                .on('end', () => resolve())
+                .save(outputPath);
+        });
+    }
+    runMux(videoPath, audioPath, outputPath) {
+        return new Promise((resolve, reject) => {
+            (0, fluent_ffmpeg_1.default)()
+                .input(videoPath)
+                .input(audioPath)
+                .outputOptions([
+                '-map 0:v:0',
+                '-map 1:a:0',
+                '-c:v copy',
+                '-c:a aac',
+                '-b:a 128k',
+                '-shortest',
+            ])
+                .on('error', reject)
+                .on('end', () => resolve())
+                .save(outputPath);
+        });
+    }
+    runMuxReencode(videoPath, audioPath, outputPath) {
+        return new Promise((resolve, reject) => {
+            (0, fluent_ffmpeg_1.default)()
+                .input(videoPath)
+                .input(audioPath)
+                .outputOptions([
+                '-map 0:v:0',
+                '-map 1:a:0',
+                '-c:v libx264',
+                '-preset veryfast',
+                '-pix_fmt yuv420p',
+                '-c:a aac',
+                '-b:a 128k',
+                '-shortest',
+            ])
+                .on('error', reject)
+                .on('end', () => resolve())
+                .save(outputPath);
+        });
+    }
+    runMuxLoopBgm(videoPath, bgmPath, outputPath, bgmVolume) {
+        return new Promise((resolve, reject) => {
+            (0, fluent_ffmpeg_1.default)()
+                .input(videoPath)
+                .input(bgmPath)
+                .inputOptions(['-stream_loop -1'])
+                .audioFilters([`volume=${bgmVolume}`])
+                .outputOptions([
+                '-map 0:v:0',
+                '-map 1:a:0',
+                '-c:v copy',
+                '-c:a aac',
+                '-b:a 128k',
+                '-shortest',
+            ])
+                .on('error', reject)
+                .on('end', () => resolve())
+                .save(outputPath);
+        });
+    }
+    runMuxWithMix(videoPath, voicePath, bgmPath, outputPath, voiceVolume, bgmVolume) {
+        return new Promise((resolve, reject) => {
+            (0, fluent_ffmpeg_1.default)()
+                .input(videoPath)
+                .input(voicePath)
+                .input(bgmPath)
+                .inputOptions(['-stream_loop -1'])
+                .complexFilter([
+                `[1:a]volume=${voiceVolume}[voice]`,
+                `[2:a]volume=${bgmVolume}[bgm]`,
+                `[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+            ])
+                .outputOptions([
+                '-map 0:v:0',
+                '-map [aout]',
+                '-c:v copy',
+                '-c:a aac',
+                '-b:a 128k',
+                '-shortest',
+            ])
+                .on('error', reject)
+                .on('end', () => resolve())
+                .save(outputPath);
+        });
+    }
+    runBurnSubtitles(videoPath, subtitlePath, outputPath, frameSize) {
+        return new Promise((resolve, reject) => {
+            const escapedSubtitlePath = subtitlePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+            const fontName = process.platform === 'win32'
+                ? 'SimHei'
+                : process.platform === 'darwin'
+                    ? 'PingFangSC'
+                    : 'NotoSansCJKsc-Regular';
+            const marginV = this.getSubtitleMarginV(frameSize);
+            const marginH = this.getSubtitleMarginH(frameSize);
+            const forceStyle = [
+                `FontName=${fontName}`,
+                'Alignment=2',
+                `MarginV=${marginV}`,
+                `MarginL=${marginH}`,
+                `MarginR=${marginH}`,
+                'FontSize=18',
+                'Outline=2',
+                'Shadow=0',
+                'BorderStyle=1',
+                'WrapStyle=2',
+            ].join(',');
+            const filter = `subtitles='${escapedSubtitlePath}':charenc=UTF-8:force_style='${forceStyle}'`;
+            (0, fluent_ffmpeg_1.default)()
+                .input(videoPath)
+                .outputOptions([
+                '-vf',
+                filter,
+                '-c:v libx264',
+                '-preset veryfast',
+                '-pix_fmt yuv420p',
+                '-c:a copy',
+            ])
+                .on('error', reject)
+                .on('end', () => resolve())
+                .save(outputPath);
+        });
+    }
+    getSubtitleMarginV(frameSize) {
+        const shorterSide = Math.min(frameSize.width, frameSize.height);
+        const aspectRatio = frameSize.height / frameSize.width;
+        const marginPercent = aspectRatio >= 1.6 ? 0.06 : aspectRatio >= 0.9 ? 0.055 : 0.05;
+        return Math.max(24, Math.round(shorterSide * marginPercent));
+    }
+    getSubtitleMarginH(frameSize) {
+        const horizontalMargin = Math.round(frameSize.width * 0.07);
+        return Math.max(20, horizontalMargin);
+    }
+    resolveBinaryPath(envKey, candidates) {
+        const explicit = this.configService.get(envKey)?.trim();
+        if (explicit && (0, node_fs_1.existsSync)(explicit)) {
+            return explicit;
+        }
+        for (const candidate of candidates) {
+            const normalized = candidate?.trim();
+            if (normalized && (0, node_fs_1.existsSync)(normalized)) {
+                return normalized;
+            }
+        }
+        return '';
+    }
+    buildSrt(cues) {
+        return cues
+            .map((cue, index) => {
+            const text = this.wrapSubtitleTextForSrt(cue.text);
+            return `${index + 1}\n${this.formatSrtTime(cue.startSeconds)} --> ${this.formatSrtTime(cue.endSeconds)}\n${text}\n`;
+        })
+            .join('\n');
+    }
+    wrapSubtitleTextForSrt(text) {
+        const normalized = text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        if (!normalized) {
+            return '';
+        }
+        const paragraphs = normalized
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean);
+        const wrapped = [];
+        for (const paragraph of paragraphs) {
+            wrapped.push(...this.wrapSubtitleLine(paragraph, 10));
+        }
+        return wrapped.join('\n');
+    }
+    wrapSubtitleLine(line, maxCharsPerLine) {
+        if (!line) {
+            return [];
+        }
+        const compact = line.replace(/\s+/g, ' ').trim();
+        if (this.countSubtitleChars(compact) <= maxCharsPerLine) {
+            return [compact];
+        }
+        const result = [];
+        let cursor = '';
+        let cursorChars = 0;
+        for (const char of compact) {
+            cursor += char;
+            if (!/\s/.test(char)) {
+                cursorChars += 1;
+            }
+            if (cursorChars >= maxCharsPerLine) {
+                result.push(cursor.trim());
+                cursor = '';
+                cursorChars = 0;
+            }
+        }
+        if (cursor.trim()) {
+            result.push(cursor.trim());
+        }
+        return result;
+    }
+    countSubtitleChars(text) {
+        return text.replace(/\s+/g, '').length;
+    }
+    formatSrtTime(seconds) {
+        const safeMs = Math.max(0, Math.round(seconds * 1000));
+        const hours = Math.floor(safeMs / 3600000);
+        const minutes = Math.floor((safeMs % 3600000) / 60000);
+        const secs = Math.floor((safeMs % 60000) / 1000);
+        const ms = safeMs % 1000;
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+    }
+};
+exports.AiVideoConcatService = AiVideoConcatService;
+exports.AiVideoConcatService = AiVideoConcatService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
+], AiVideoConcatService);
+//# sourceMappingURL=ai-video-concat.service.js.map

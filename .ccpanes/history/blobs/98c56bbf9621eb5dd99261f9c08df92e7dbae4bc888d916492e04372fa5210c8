@@ -1,0 +1,138 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.RulesService = void 0;
+const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../prisma/prisma.service");
+const rbac_constants_1 = require("../rbac/rbac.constants");
+let RulesService = class RulesService {
+    prisma;
+    constructor(prisma) {
+        this.prisma = prisma;
+    }
+    async list(query) {
+        const trimmedQuery = query.q?.trim();
+        const where = trimmedQuery
+            ? {
+                name: {
+                    contains: trimmedQuery,
+                    mode: 'insensitive',
+                },
+            }
+            : {};
+        const [items, total] = await Promise.all([
+            this.prisma.rule.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (query.page - 1) * query.limit,
+                take: query.limit,
+            }),
+            this.prisma.rule.count({ where }),
+        ]);
+        return {
+            items,
+            pagination: { page: query.page, limit: query.limit, total },
+        };
+    }
+    async create(user, dto) {
+        this.ensureMainCompany(user);
+        this.validateRange(dto.minCount, dto.maxCount, '关键词数量');
+        this.validateRange(dto.minLen, dto.maxLen, '关键词长度');
+        const name = dto.name.trim();
+        const existing = await this.prisma.rule.findFirst({
+            where: { name: { equals: name, mode: 'insensitive' } },
+            select: { id: true },
+        });
+        if (existing) {
+            throw new common_1.ConflictException('规则名称已存在');
+        }
+        return this.prisma.rule.create({
+            data: {
+                name,
+                minCount: dto.minCount ?? null,
+                maxCount: dto.maxCount ?? null,
+                minLen: dto.minLen ?? null,
+                maxLen: dto.maxLen ?? null,
+                dedupeRequired: dto.dedupeRequired,
+                sensitiveFilterEnabled: dto.sensitiveFilterEnabled,
+                submitRateLimitPerDay: dto.submitRateLimitPerDay ?? null,
+            },
+        });
+    }
+    async getById(id) {
+        const rule = await this.prisma.rule.findUnique({ where: { id } });
+        if (!rule) {
+            throw new common_1.NotFoundException('规则不存在');
+        }
+        return rule;
+    }
+    async update(user, id, dto) {
+        this.ensureMainCompany(user);
+        const existing = await this.prisma.rule.findUnique({ where: { id } });
+        if (!existing) {
+            throw new common_1.NotFoundException('规则不存在');
+        }
+        const nextMinCount = dto.minCount ?? existing.minCount;
+        const nextMaxCount = dto.maxCount ?? existing.maxCount;
+        const nextMinLen = dto.minLen ?? existing.minLen;
+        const nextMaxLen = dto.maxLen ?? existing.maxLen;
+        this.validateRange(nextMinCount, nextMaxCount, '关键词数量');
+        this.validateRange(nextMinLen, nextMaxLen, '关键词长度');
+        if (dto.name !== undefined) {
+            const name = dto.name.trim();
+            const duplicate = await this.prisma.rule.findFirst({
+                where: {
+                    id: { not: id },
+                    name: { equals: name, mode: 'insensitive' },
+                },
+                select: { id: true },
+            });
+            if (duplicate) {
+                throw new common_1.ConflictException('规则名称已存在');
+            }
+        }
+        return this.prisma.rule.update({
+            where: { id },
+            data: {
+                ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+                ...(dto.minCount !== undefined ? { minCount: dto.minCount } : {}),
+                ...(dto.maxCount !== undefined ? { maxCount: dto.maxCount } : {}),
+                ...(dto.minLen !== undefined ? { minLen: dto.minLen } : {}),
+                ...(dto.maxLen !== undefined ? { maxLen: dto.maxLen } : {}),
+                ...(dto.dedupeRequired !== undefined
+                    ? { dedupeRequired: dto.dedupeRequired }
+                    : {}),
+                ...(dto.sensitiveFilterEnabled !== undefined
+                    ? { sensitiveFilterEnabled: dto.sensitiveFilterEnabled }
+                    : {}),
+                ...(dto.submitRateLimitPerDay !== undefined
+                    ? { submitRateLimitPerDay: dto.submitRateLimitPerDay }
+                    : {}),
+            },
+        });
+    }
+    ensureMainCompany(user) {
+        if (user.role !== rbac_constants_1.MAIN_COMPANY_ROLE_KEY) {
+            throw new common_1.ForbiddenException('仅主公司可操作规则');
+        }
+    }
+    validateRange(min, max, label) {
+        if (min != null && max != null && min > max) {
+            throw new common_1.ConflictException(`${label}最小值不能大于最大值`);
+        }
+    }
+};
+exports.RulesService = RulesService;
+exports.RulesService = RulesService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+], RulesService);
+//# sourceMappingURL=rules.service.js.map

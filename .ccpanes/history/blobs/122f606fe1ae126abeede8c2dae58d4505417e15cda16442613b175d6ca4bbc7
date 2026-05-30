@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeUploadFileName = normalizeUploadFileName;
+function normalizeUploadFileName(fileName) {
+    if (!fileName) {
+        return '';
+    }
+    try {
+        const decoded = Buffer.from(fileName, 'latin1').toString('utf8').trim();
+        return decoded || fileName.trim();
+    }
+    catch {
+        return fileName.trim();
+    }
+}
+//# sourceMappingURL=knowledge-file-name.util.js.map

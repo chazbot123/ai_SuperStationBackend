@@ -50,6 +50,10 @@ export interface BitBrowserBindingRepository {
     accountId?: string | null,
     accountName?: string | null,
   ): Promise<BrowserProfileBinding | null>;
+  getProfileBindingById(
+    creatorId: string,
+    profileBindingId: string,
+  ): Promise<BrowserProfileBinding | null>;
   touchProfileBinding(
     creatorId: string,
     profileBindingId: string,

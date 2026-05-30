@@ -1,0 +1,216 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BitBrowserProfileService = exports.BitBrowserLockConflictError = exports.BitBrowserOwnershipError = void 0;
+exports.buildProfileTaskId = buildProfileTaskId;
+const node_fs_1 = require("node:fs");
+const node_path_1 = require("node:path");
+class BitBrowserOwnershipError extends Error {
+}
+exports.BitBrowserOwnershipError = BitBrowserOwnershipError;
+class BitBrowserLockConflictError extends Error {
+}
+exports.BitBrowserLockConflictError = BitBrowserLockConflictError;
+async function reportDouyinLoginDebug(hypothesisId, location, msg, data) {
+    let url = 'http://127.0.0.1:7777/event';
+    let sessionId = 'douyin-login-page';
+    try {
+        const envText = (0, node_fs_1.readFileSync)((0, node_path_1.resolve)(process.cwd(), '..', '.dbg', 'douyin-login-page.env'), 'utf8');
+        url = envText.match(/DEBUG_SERVER_URL=(.+)/)?.[1]?.trim() ?? url;
+        sessionId =
+            envText.match(/DEBUG_SESSION_ID=(.+)/)?.[1]?.trim() ?? sessionId;
+    }
+    catch { }
+    await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            sessionId,
+            runId: 'pre-fix',
+            hypothesisId,
+            location,
+            msg: `[DEBUG] ${msg}`,
+            data,
+            ts: Date.now(),
+        }),
+    }).catch(() => { });
+}
+class BitBrowserProfileService {
+    repository;
+    runtimeProvider;
+    constructor(repository, runtimeProvider) {
+        this.repository = repository;
+        this.runtimeProvider = runtimeProvider;
+    }
+    async createOwner(input) {
+        return this.repository.createOwner(input);
+    }
+    async bindProfile(input) {
+        await this.assertOwnerExists(input.creatorId, input.ownerId);
+        return this.repository.bindProfile(input);
+    }
+    async registerPlatformAccount(input) {
+        await this.assertOwnerExists(input.creatorId, input.ownerId);
+        const profileBinding = await this.findProfileBindingById(input.creatorId, input.profileBindingId);
+        if (!profileBinding) {
+            throw new BitBrowserOwnershipError(`业务主体 ${input.ownerId} 尚未绑定平台账号 ${input.accountId || input.accountName} 的 BitBrowser Profile`);
+        }
+        if (profileBinding.ownerId !== input.ownerId ||
+            profileBinding.platform !== input.platform ||
+            profileBinding.bindingMode !== 'dedicated_by_account') {
+            throw new BitBrowserOwnershipError(`平台账号绑定的 Profile ${input.profileBindingId} 不属于业务主体 ${input.ownerId}`);
+        }
+        return this.repository.registerPlatformAccount(input);
+    }
+    async prepareOwnerRuntime(input) {
+        return this.prepareOwnerRuntimeWithRecovery(input, true);
+    }
+    async prepareOwnerRuntimeWithRecovery(input, canRecreateMissingProfile) {
+        const context = await this.buildRuntimeContext(input);
+        try {
+            const runtime = await this.runtimeProvider.openProfile(context.profileBinding);
+            await this.repository.touchProfileBinding(input.creatorId, context.profileBinding.id, new Date().toISOString());
+            return { runtime, context };
+        }
+        catch (error) {
+            await this.repository.releaseProfileLock({
+                creatorId: input.creatorId,
+                taskId: input.taskId,
+            });
+            if (canRecreateMissingProfile && this.isMissingProfileError(error)) {
+                const rebuiltProfile = await this.runtimeProvider.createProfile({
+                    creatorId: input.creatorId,
+                    ownerId: context.owner.id,
+                    profileName: context.profileBinding.profileName,
+                    proxyConfig: context.profileBinding.proxyConfig,
+                    browserConfig: context.profileBinding.browserConfig ?? undefined,
+                }, this.buildBrowserCreatePayload(context.owner.name, {
+                    creatorId: input.creatorId,
+                    ownerId: context.owner.id,
+                    profileName: context.profileBinding.profileName,
+                    proxyConfig: context.profileBinding.proxyConfig,
+                    browserConfig: context.profileBinding.browserConfig ?? undefined,
+                }));
+                await this.repository.bindProfile({
+                    creatorId: input.creatorId,
+                    ownerId: context.owner.id,
+                    platform: context.profileBinding.platform,
+                    accountId: context.profileBinding.accountId,
+                    accountName: context.profileBinding.accountName,
+                    profileId: rebuiltProfile.profileId,
+                    profileName: rebuiltProfile.profileName,
+                    proxyConfig: context.profileBinding.proxyConfig,
+                    browserConfig: rebuiltProfile.browserConfig,
+                });
+                fetch("http://127.0.0.1:7777/event", { method: "POST", body: JSON.stringify({ sessionId: "douyin-login-no-reaction", runId: "post-fix", hypothesisId: "B", location: "server/src/modules/bitbrowser/bitbrowser.service.ts:prepareOwnerRuntime:missing-profile-rebuilt", msg: "[DEBUG] missing profile rebuilt", data: { oldProfileId: context.profileBinding.profileId, newProfileId: rebuiltProfile.profileId, ownerId: context.owner.id, taskId: input.taskId }, ts: Date.now() }) }).catch(() => undefined);
+                return this.prepareOwnerRuntimeWithRecovery(input, false);
+            }
+            fetch("http://127.0.0.1:7777/event", { method: "POST", body: JSON.stringify({ sessionId: "douyin-login-no-reaction", runId: "post-fix", hypothesisId: "B", location: "server/src/modules/bitbrowser/bitbrowser.service.ts:prepareOwnerRuntime:lock-released-on-error", msg: "[DEBUG] runtime prepare failed and lock released", data: { profileBindingId: context.profileBinding.id, profileId: context.profileBinding.profileId, taskId: input.taskId, error: error instanceof Error ? error.message : String(error) }, ts: Date.now() }) }).catch(() => undefined);
+            throw error;
+        }
+    }
+    async releaseOwnerRuntime(input) {
+        await this.repository.releaseProfileLock(input);
+    }
+    async listOwnerAccounts(creatorId, ownerId) {
+        await this.assertOwnerExists(creatorId, ownerId);
+        return this.repository.listPlatformAccountsByOwner(creatorId, ownerId);
+    }
+    async buildRuntimeContext(input) {
+        const owner = await this.assertOwnerExists(input.creatorId, input.ownerId);
+        if (!input.platformAccountId?.trim()) {
+            throw new BitBrowserOwnershipError('BitBrowser runtime 必须绑定具体平台账号');
+        }
+        const platformAccount = (await this.repository.listPlatformAccountsByOwner(input.creatorId, input.ownerId)).find((item) => item.platform === input.platform &&
+            (item.id === input.platformAccountId ||
+                item.accountId === input.platformAccountId)) ?? null;
+        if (!platformAccount) {
+            throw new BitBrowserOwnershipError(`业务主体 ${input.ownerId} 未找到平台账号 ${input.platformAccountId}`);
+        }
+        const platformAccountKey = (platformAccount.accountId || '').trim() ||
+            (input.platformAccountId || '').trim() ||
+            platformAccount.id;
+        const profileBinding = await this.repository.getProfileBindingByPlatformAccount(input.creatorId, input.ownerId, input.platform, platformAccountKey, platformAccount.accountName);
+        if (!profileBinding) {
+            throw new BitBrowserOwnershipError(`平台账号 ${input.platformAccountId} 未绑定 BitBrowser Profile`);
+        }
+        const lock = await this.acquireExclusiveProfileLock({
+            creatorId: input.creatorId,
+            ownerId: input.ownerId,
+            profileBindingId: profileBinding.id,
+            taskId: input.taskId,
+            reason: input.reason,
+            expiresAt: input.expiresAt,
+        });
+        return {
+            owner,
+            profileBinding,
+            platformAccount,
+            lock,
+        };
+    }
+    async acquireExclusiveProfileLock(input) {
+        const resolvedProfileBinding = input.profileBindingId
+            ? await this.findProfileBindingById(input.creatorId, input.profileBindingId)
+            : null;
+        if (!resolvedProfileBinding) {
+            throw new BitBrowserOwnershipError(`业务主体 ${input.ownerId} 未找到可用的平台账号专属 BitBrowser Profile`);
+        }
+        let activeLock = await this.repository.getProfileLock(resolvedProfileBinding.id);
+        if (activeLock) {
+            const expiresAt = Date.parse(activeLock.expiresAt);
+            if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+                await this.repository.releaseProfileLock({
+                    creatorId: input.creatorId,
+                    taskId: activeLock.lockedByTaskId,
+                });
+                fetch("http://127.0.0.1:7777/event", { method: "POST", body: JSON.stringify({ sessionId: "douyin-login-no-reaction", runId: "post-fix", hypothesisId: "B", location: "server/src/modules/bitbrowser/bitbrowser.service.ts:acquireExclusiveProfileLock:expired-lock-released", msg: "[DEBUG] expired profile lock released", data: { profileBindingId: resolvedProfileBinding.id, profileId: resolvedProfileBinding.profileId, lockedByTaskId: activeLock.lockedByTaskId, expiredAt: activeLock.expiresAt }, ts: Date.now() }) }).catch(() => undefined);
+                activeLock = null;
+            }
+        }
+        if (activeLock && activeLock.lockedByTaskId !== input.taskId) {
+            throw new BitBrowserLockConflictError(`Profile ${resolvedProfileBinding.profileId} 当前正被任务 ${activeLock.lockedByTaskId} 占用`);
+        }
+        return this.repository.acquireProfileLock({
+            ...input,
+            profileBindingId: resolvedProfileBinding.id,
+        });
+    }
+    async findProfileBindingById(creatorId, profileBindingId) {
+        return this.repository.getProfileBindingById(creatorId, profileBindingId);
+    }
+    async assertOwnerExists(creatorId, ownerId) {
+        const owner = await this.repository.getOwnerById(creatorId, ownerId);
+        if (!owner) {
+            throw new BitBrowserOwnershipError(`业务主体 ${ownerId} 不存在`);
+        }
+        return owner;
+    }
+    isMissingProfileError(error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return message.includes('BitBrowser profile') && message.includes('不存在');
+    }
+    buildBrowserCreatePayload(ownerName, input) {
+        const basePayload = input.browserConfig ?? {};
+        return {
+            proxyMethod: 2,
+            proxyType: 'noproxy',
+            syncExtensions: true,
+            syncUserExtensions: true,
+            browserFingerPrint: {
+                coreProduct: 'chrome',
+                coreVersion: '130',
+                ostype: 'PC',
+                os: 'Win32',
+                osVersion: '11,10',
+                ...(basePayload.browserFingerPrint ?? {}),
+            },
+            ...basePayload,
+            name: input.profileName || basePayload.name || `${ownerName} 账号环境`,
+        };
+    }
+}
+exports.BitBrowserProfileService = BitBrowserProfileService;
+function buildProfileTaskId(ownerId, platform) {
+    return `bitbrowser-profile:${ownerId}:${platform}:${Date.now()}`;
+}
+//# sourceMappingURL=bitbrowser.service.js.map

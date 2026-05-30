@@ -1,0 +1,124 @@
+import { SessionUser } from '../auth/auth.types';
+import { StartExtensionPublishJobDto } from './dto/start-extension-publish-job.dto';
+import { GetExtensionPublishAuthDto } from './dto/get-extension-publish-auth.dto';
+import { OpenPlatformAccountHomeDto } from './dto/open-platform-account-home.dto';
+import { SyncExtensionPublishJobDto } from './dto/sync-extension-publish-job.dto';
+import { SyncPlatformExtensionLoginDto } from './dto/sync-platform-extension-login.dto';
+import { PublishingService } from './publishing.service';
+export declare class PublishingExtensionController {
+    private readonly publishingService;
+    constructor(publishingService: PublishingService);
+    startExtensionPublishJob(req: {
+        user: SessionUser;
+    }, dto: StartExtensionPublishJobDto): Promise<{
+        sessionToken: string;
+        expiresAt: string;
+        job: {
+            leadContentTitle: string;
+            platformAccountId: string | null;
+            platformAccountName: string | null;
+            platformAccountDisplayName: string | null;
+            id: string;
+            leadContentId: string;
+            createdById: string;
+            platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+            provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+            publishMode: "draft_box";
+            status: import("@prisma/client").$Enums.LeadPublishStatus;
+            draftTitle: string;
+            draftBody: string;
+            draftTags: string[];
+            draftImages: string[];
+            draftVideoUrl: string | null;
+            draftUrl: string | null;
+            externalDraftId: string | null;
+            externalFlowId: string | null;
+            externalStatus: string | null;
+            draftedAt: string | null;
+            queuedAt: string | null;
+            startedAt: string | null;
+            completedAt: string | null;
+            lastError: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        accountAuthPayload: string;
+        accountCookiePayload: string | null;
+        platformAccountId: string;
+        platformAccountName: string;
+        platformAccountDisplayName: string | null;
+    }>;
+    getExtensionPublishAuth(dto: GetExtensionPublishAuthDto): Promise<{
+        sessionToken: string;
+        accountAuthPayload: string;
+        accountCookiePayload: string | null;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        platformAccountId: string;
+    }>;
+    openPlatformAccountHome(req: {
+        user: SessionUser;
+    }, dto: OpenPlatformAccountHomeDto): Promise<{
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        loginUrl: string;
+        profileId: string;
+    }>;
+    syncExtensionPublishJob(dto: SyncExtensionPublishJobDto): Promise<{
+        leadContentTitle: string;
+        platformAccountId: string | null;
+        platformAccountName: string | null;
+        platformAccountDisplayName: string | null;
+        id: string;
+        leadContentId: string;
+        createdById: string;
+        platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+        provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+        publishMode: "draft_box";
+        status: import("@prisma/client").$Enums.LeadPublishStatus;
+        draftTitle: string;
+        draftBody: string;
+        draftTags: string[];
+        draftImages: string[];
+        draftVideoUrl: string | null;
+        draftUrl: string | null;
+        externalDraftId: string | null;
+        externalFlowId: string | null;
+        externalStatus: string | null;
+        draftedAt: string | null;
+        queuedAt: string | null;
+        startedAt: string | null;
+        completedAt: string | null;
+        lastError: string | null;
+        createdAt: string;
+        updatedAt: string;
+    }>;
+    syncPlatformLogin(dto: SyncPlatformExtensionLoginDto): Promise<{
+        sessionId: string;
+        account: {
+            id: string;
+            creatorId: string;
+            creatorName: string;
+            platform: import("@prisma/client").$Enums.LeadPublishPlatform;
+            provider: import("@prisma/client").$Enums.PlatformAccountProvider;
+            authType: import("@prisma/client").$Enums.PlatformAccountAuthType;
+            accountName: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+            followerCount: number | null;
+            authPayloadPreview: string;
+            loginStatus: import("@prisma/client").$Enums.PlatformAccountLoginStatus;
+            loginUrl: string | null;
+            externalAccountId: string | null;
+            externalGroupId: string | null;
+            loginSourceLabel: string;
+            status: import("@prisma/client").$Enums.PlatformAccountStatus;
+            remark: string | null;
+            lastLoginStartedAt: string | null;
+            lastLoginCompletedAt: string | null;
+            lastValidatedAt: string | null;
+            lastError: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        sourceUrl: string | null;
+    }>;
+}
