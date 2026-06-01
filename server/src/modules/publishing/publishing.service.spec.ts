@@ -223,7 +223,7 @@ describe('PublishingService draft payloads', () => {
   it('marks the platform account as expired when publish fails because login has expired', async () => {
     const findUnique = jest.fn().mockResolvedValue({
       id: 'job-1',
-      platform: LeadPublishPlatform.xiaohongshu,
+      platform: LeadPublishPlatform.kuaishou,
       platformAccountId: 'account-1',
       draftTitle: '鏍囬',
       draftBody: '姝ｆ枃',
@@ -232,7 +232,9 @@ describe('PublishingService draft payloads', () => {
       draftVideoUrl: null,
       platformAccount: {
         id: 'account-1',
-        platform: LeadPublishPlatform.xiaohongshu,
+        platform: LeadPublishPlatform.kuaishou,
+        provider: 'extension',
+        authType: 'cookie',
         accountName: '725947261',
         displayName: 'kobe',
         authPayloadEncrypted: 'encrypted-old',
@@ -292,7 +294,7 @@ describe('PublishingService draft payloads', () => {
   it('refreshes the platform account auth payload after publish login recovery succeeds', async () => {
     const findUnique = jest.fn().mockResolvedValue({
       id: 'job-1',
-      platform: LeadPublishPlatform.xiaohongshu,
+      platform: LeadPublishPlatform.kuaishou,
       platformAccountId: 'account-1',
       draftTitle: '标题',
       draftBody: '正文',
@@ -301,7 +303,9 @@ describe('PublishingService draft payloads', () => {
       draftVideoUrl: null,
       platformAccount: {
         id: 'account-1',
-        platform: LeadPublishPlatform.xiaohongshu,
+        platform: LeadPublishPlatform.kuaishou,
+        provider: 'extension',
+        authType: 'cookie',
         accountName: 'old_account',
         displayName: 'Old Account',
         authPayloadEncrypted: 'encrypted-old',
@@ -320,7 +324,7 @@ describe('PublishingService draft payloads', () => {
       });
     const leadPlatformAccountUpdate = jest.fn().mockResolvedValue(undefined);
     const publish = jest.fn().mockResolvedValue({
-      draftUrl: 'https://creator.xiaohongshu.com/publish/success',
+      draftUrl: 'https://cp.kuaishou.com/article/publish/success',
       authPayload: 'sid=fresh_cookie',
       accountName: 'fresh_account',
       displayName: 'Fresh Account',
@@ -499,6 +503,123 @@ describe('PublishingService draft payloads', () => {
         status: PlatformAccountStatus.valid,
         loginStatus: PlatformAccountLoginStatus.authenticated,
         lastError: null,
+      }),
+      include: expect.anything(),
+    });
+  });
+
+  it('marks Douyin account offline when BitBrowser snapshot lands on login page', async () => {
+    const findUnique = jest.fn().mockResolvedValue({
+      id: 'account-1',
+      creatorId: 'user-1',
+      creator: { displayName: 'Demo User' },
+      platform: LeadPublishPlatform.douyin,
+      provider: 'extension',
+      externalGroupId: 'A',
+      externalMeta: {
+        keepAliveStatus: 'success',
+        keepAliveError: null,
+        reauthRequired: false,
+      },
+      authType: 'cookie',
+      accountName: 'douyin-demo',
+      displayName: 'Douyin Demo',
+      authPayloadEncrypted: 'encrypted-value',
+      authPayloadPreview: 'sessionid=***1234',
+      loginStatus: PlatformAccountLoginStatus.authenticated,
+      loginUrl: 'https://creator.douyin.com/creator-micro/content/upload',
+      status: PlatformAccountStatus.valid,
+      remark: null,
+      lastLoginStartedAt: null,
+      lastLoginCompletedAt: new Date('2026-06-01T00:00:00.000Z'),
+      lastValidatedAt: null,
+      lastError: null,
+      createdAt: new Date('2026-04-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+    });
+    const update = jest.fn().mockResolvedValue({
+      id: 'account-1',
+      creatorId: 'user-1',
+      creator: { displayName: 'Demo User' },
+      platform: LeadPublishPlatform.douyin,
+      provider: 'extension',
+      authType: 'cookie',
+      accountName: 'douyin-demo',
+      displayName: 'Douyin Demo',
+      authPayloadPreview: 'sessionid=***1234',
+      loginStatus: PlatformAccountLoginStatus.failed,
+      loginUrl: 'https://creator.douyin.com/passport',
+      status: PlatformAccountStatus.invalid,
+      remark: null,
+      lastLoginStartedAt: null,
+      lastLoginCompletedAt: new Date('2026-06-01T00:00:00.000Z'),
+      lastValidatedAt: new Date('2026-06-01T00:05:00.000Z'),
+      lastError: '命中登录页 / 401 / 请重新登录',
+      externalMeta: {
+        keepAliveStatus: 'reauth_required',
+        keepAliveError: '命中登录页 / 401 / 请重新登录',
+        reauthRequired: true,
+      },
+      createdAt: new Date('2026-04-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T00:05:00.000Z'),
+    });
+    const collectPlatformAccountCookieSnapshot = jest.fn().mockResolvedValue({
+      authPayload: 'sessionid=still-present',
+      sourceUrl: 'https://creator.douyin.com/passport',
+      accountName: 'douyin-demo',
+      externalAccountId: 'douyin-demo',
+      displayName: 'Douyin Demo',
+      avatarUrl: null,
+      followerCount: null,
+    });
+
+    service = new PublishingService(
+      {
+        leadPlatformAccount: {
+          findUnique,
+          update,
+        },
+      } as never,
+      { get: jest.fn().mockReturnValue('unit-test-secret') } as unknown as ConfigService,
+      {} as never,
+      {} as never,
+      {
+        collectLoginResult: jest.fn(),
+        getSessionPath: jest.fn().mockReturnValue('D:/tmp/session'),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        isEnabled: jest.fn().mockReturnValue(true),
+        collectPlatformAccountCookieSnapshot,
+      } as never,
+    );
+
+    jest.spyOn(service as never, 'decryptAuthPayload').mockReturnValue('sessionid=still-present');
+
+    await service.validatePlatformAccount({ userId: 'user-1', role: 'employee' } as never, 'account-1');
+
+    expect(collectPlatformAccountCookieSnapshot).toHaveBeenCalledWith({
+      creatorId: 'user-1',
+      platform: LeadPublishPlatform.douyin,
+      accountId: 'account-1',
+      accountName: 'douyin-demo',
+      externalGroupId: 'A',
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'account-1' },
+      data: expect.objectContaining({
+        status: PlatformAccountStatus.invalid,
+        loginStatus: PlatformAccountLoginStatus.failed,
+        lastError: '命中登录页 / 401 / 请重新登录',
+        loginUrl: 'https://creator.douyin.com/passport',
+        externalMeta: expect.objectContaining({
+          keepAliveStatus: 'reauth_required',
+          keepAliveError: '命中登录页 / 401 / 请重新登录',
+          reauthRequired: true,
+        }),
       }),
       include: expect.anything(),
     });

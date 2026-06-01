@@ -42,6 +42,14 @@ type BitBrowserProfileSnapshot = {
   followerCount: number | null;
 };
 
+type BitBrowserKeepAliveResult = BitBrowserProfileSnapshot & {
+  cookiePayload: string | null;
+  profileId: string;
+  keepAliveStatus: 'success' | 'reauth_required' | 'collect_failed';
+  keepAliveMessage: string;
+  reauthRequired: boolean;
+};
+
 type StartLoginRuntimeInput = {
   creatorId: string;
   platform: LeadPublishPlatform;
@@ -185,6 +193,9 @@ export class PublishingBitBrowserService implements OnModuleInit {
 
   async startLoginRuntime(input: StartLoginRuntimeInput) {
     this.assertEnabled();
+    // #region debug-point B:video-login-entry
+    void fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"video-login-500",runId:"pre-fix",hypothesisId:"B",location:"server/src/modules/publishing/publishing-bitbrowser.service.ts:startLoginRuntime:entry",msg:"[DEBUG] startLoginRuntime entry",data:{creatorId:input.creatorId,platform:input.platform,accountId:input.accountId,accountName:input.accountName,externalGroupId:input.externalGroupId,forceFreshLogin:Boolean(input.forceFreshLogin)},ts:Date.now()})}).catch(()=>undefined);
+    // #endregion
     // #region debug-point B:start-login-runtime
     this.reportDebugEvent('B', 'pre-fix', 'publishing-bitbrowser.service:startLoginRuntime:entry', {
       creatorId: input.creatorId,
@@ -207,6 +218,9 @@ export class PublishingBitBrowserService implements OnModuleInit {
       accountId: input.accountId,
       accountName: input.accountName,
     });
+    // #region debug-point B:video-login-binding
+    void fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"video-login-500",runId:"pre-fix",hypothesisId:"B",location:"server/src/modules/publishing/publishing-bitbrowser.service.ts:startLoginRuntime:binding",msg:"[DEBUG] startLoginRuntime binding resolved",data:{platform:input.platform,accountId:input.accountId,ownerId:owner.id,ownerCode:owner.code,profileBindingId:profileBinding.id,profileId:profileBinding.profileId,profileName:profileBinding.profileName,bindingMode:profileBinding.bindingMode},ts:Date.now()})}).catch(()=>undefined);
+    // #endregion
     const platform = this.toBitBrowserPlatform(input.platform);
 
     await this.ensurePlatformAccountBinding({
@@ -311,6 +325,9 @@ export class PublishingBitBrowserService implements OnModuleInit {
         fallbackLoginResult: null,
       };
     } catch (error) {
+      // #region debug-point B:video-login-runtime-error
+      void fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"video-login-500",runId:"pre-fix",hypothesisId:"B",location:"server/src/modules/publishing/publishing-bitbrowser.service.ts:startLoginRuntime:error",msg:"[DEBUG] startLoginRuntime failed",data:{platform:input.platform,accountId:input.accountId,externalGroupId:input.externalGroupId,error:error instanceof Error ? error.message : String(error),errorName:error instanceof Error ? error.name : typeof error},ts:Date.now()})}).catch(()=>undefined);
+      // #endregion
       // #region debug-point E:start-login-runtime-error
       this.reportDebugEvent('E', 'pre-fix', 'publishing-bitbrowser.service:startLoginRuntime:error', {
         runtimeSessionId: opened.session.id,
@@ -404,6 +421,13 @@ export class PublishingBitBrowserService implements OnModuleInit {
     // #endregion
 
     try {
+      await this.persistDedicatedProfileCookie({
+        profileId: opened.context.profileBinding.profileId,
+        runtimeSessionId: opened.session.id,
+        authPayload: input.accountAuthPayload,
+        cookiePayload: input.accountCookiePayload ?? undefined,
+        source: 'start-publish-runtime',
+      }).catch(() => undefined);
       const targetUrl = this.getPlatformPublishUrl(input.platform, input.job);
       // #region debug-point H5:start-publish-runtime-target-url
       this.reportDebugEvent(
@@ -529,6 +553,41 @@ export class PublishingBitBrowserService implements OnModuleInit {
     };
   }
 
+  async persistDedicatedProfileCookie(input: {
+    profileId?: string | null;
+    runtimeSessionId?: string | null;
+    authPayload?: string | null;
+    cookiePayload?: string | null;
+    source: string;
+  }) {
+    if (!this.enabled || !this.gatewayClient) {
+      return;
+    }
+    const profileId = String(input.profileId || '').trim();
+    const authPayload = String(input.authPayload || '').trim();
+    const cookiePayload = String(input.cookiePayload || '').trim();
+    const persistedCookie = this.buildCookieAuthPayload(cookiePayload) || authPayload;
+    if (!profileId || !persistedCookie) {
+      return;
+    }
+    await this.gatewayClient.updateBrowserPartial([profileId], {
+      cookie: persistedCookie,
+    });
+    this.reportDebugEvent(
+      'B',
+      'post-fix',
+      'publishing-bitbrowser.service:persistDedicatedProfileCookie:updated',
+      {
+        runtimeSessionId: input.runtimeSessionId ?? null,
+        profileId,
+        source: input.source,
+        authPayloadLength: authPayload.length,
+        cookiePayloadLength: cookiePayload.length,
+        persistedCookieLength: persistedCookie.length,
+      },
+    );
+  }
+
   async collectPlatformAccountCookieSnapshot(input: {
     creatorId: string;
     platform: LeadPublishPlatform;
@@ -567,6 +626,134 @@ export class PublishingBitBrowserService implements OnModuleInit {
       avatarUrl: null,
       followerCount: null,
     };
+  }
+
+  async keepAliveDedicatedProfile(input: {
+    creatorId: string;
+    platform: LeadPublishPlatform;
+    accountId: string;
+    accountName: string;
+    externalGroupId: string;
+    authPayload?: string | null;
+    cookiePayload?: string | null;
+  }): Promise<BitBrowserKeepAliveResult | null> {
+    this.assertEnabled();
+    const owner = await this.ensureOwner(input.creatorId, input.externalGroupId);
+    const profileBinding = await this.getDedicatedProfileBinding({
+      creatorId: input.creatorId,
+      ownerId: owner.id,
+      platform: this.toBitBrowserPlatform(input.platform),
+      accountId: input.accountId,
+      accountName: input.accountName,
+    });
+
+    await this.persistDedicatedProfileCookie({
+      profileId: profileBinding.profileId,
+      authPayload: input.authPayload ?? null,
+      cookiePayload: input.cookiePayload ?? null,
+      source: 'keepalive-before-open',
+    }).catch(() => undefined);
+
+    const runtime = await this.gatewayClient!.openProfile(profileBinding).catch((error) => {
+      throw new ConflictException(
+        `打开 BitBrowser 专属窗口失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+
+    try {
+      await this.gatewayClient!.openPlatformHome(
+        profileBinding,
+        this.toBitBrowserPlatform(input.platform),
+        runtime,
+      );
+      await this.sleep(1500);
+      await this.simulateKeepAliveInteraction(input.platform, runtime.debugUrl).catch(() => undefined);
+      await this.sleep(2500);
+
+      const authPayload = await this.collectLiveAuthPayloadFromDebugPort(
+        input.platform,
+        runtime.debugUrl,
+        profileBinding.profileId,
+      );
+      const cookiePayload = await this.collectLiveCookiePayloadFromDebugPort(
+        input.platform,
+        runtime.debugUrl,
+        profileBinding.profileId,
+      );
+      const inspected = await this.inspectProfileFromDebugPort(input.platform, runtime.debugUrl).catch(
+        () => null,
+      );
+      const baseKeepAliveState = this.resolveKeepAliveState({
+        platform: input.platform,
+        sourceUrl: inspected?.sourceUrl || this.getPlatformLoginUrl(input.platform),
+        title: inspected?.title || '',
+        pageTextPreview: inspected?.pageTextPreview || '',
+        authPayload,
+        cookiePayload,
+      });
+
+      if (!authPayload) {
+        const detail = await this.gatewayClient!.detailBrowser(profileBinding.profileId).catch(() => null);
+        const fallbackAuthPayload = this.buildCookieAuthPayload(detail?.cookie);
+        const fallbackKeepAliveState = this.resolveKeepAliveState({
+          platform: input.platform,
+          sourceUrl:
+            inspected?.sourceUrl ||
+            (typeof detail?.url === 'string' ? detail.url.trim() || null : null) ||
+            this.getPlatformLoginUrl(input.platform),
+          title: inspected?.title || '',
+          pageTextPreview: inspected?.pageTextPreview || '',
+          authPayload: fallbackAuthPayload,
+          cookiePayload,
+        });
+        return {
+          authPayload: fallbackAuthPayload,
+          cookiePayload: cookiePayload || null,
+          profileId: profileBinding.profileId,
+          sourceUrl:
+            inspected?.sourceUrl ||
+            (typeof detail?.url === 'string' ? detail.url.trim() || null : null) ||
+            this.getPlatformLoginUrl(input.platform),
+          accountName: inspected?.accountName || null,
+          externalAccountId: inspected?.externalAccountId || null,
+          displayName: inspected?.displayName || null,
+          avatarUrl: inspected?.avatarUrl || null,
+          followerCount:
+            typeof inspected?.followerCount === 'number' && Number.isFinite(inspected.followerCount)
+              ? inspected.followerCount
+              : null,
+          keepAliveStatus: fallbackKeepAliveState.keepAliveStatus,
+          keepAliveMessage: fallbackKeepAliveState.keepAliveMessage,
+          reauthRequired: fallbackKeepAliveState.reauthRequired,
+        };
+      }
+
+      return {
+        authPayload,
+        cookiePayload: cookiePayload || null,
+        profileId: profileBinding.profileId,
+        sourceUrl: inspected?.sourceUrl || this.getPlatformLoginUrl(input.platform),
+        accountName: inspected?.accountName || null,
+        externalAccountId: inspected?.externalAccountId || null,
+        displayName: inspected?.displayName || null,
+        avatarUrl: inspected?.avatarUrl || null,
+        followerCount:
+          typeof inspected?.followerCount === 'number' && Number.isFinite(inspected.followerCount)
+            ? inspected.followerCount
+            : null,
+        keepAliveStatus: baseKeepAliveState.keepAliveStatus,
+        keepAliveMessage: baseKeepAliveState.keepAliveMessage,
+        reauthRequired: baseKeepAliveState.reauthRequired,
+      };
+    } finally {
+      await this.gatewayClient!.closeProfileById(profileBinding.profileId).catch((error) => {
+        this.logger.warn(
+          `关闭 BitBrowser 保活窗口失败: ${profileBinding.profileId} - ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }
   }
 
   async releaseDedicatedProfile(
@@ -1035,6 +1222,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
       const authPayload = await this.collectLiveAuthPayloadFromDebugPort(
         input.platform,
         input.debugUrl,
+        input.profileId,
       );
       if (!authPayload) {
         const detail = await this.gatewayClient!.detailBrowser(input.profileId);
@@ -1117,6 +1305,44 @@ export class PublishingBitBrowserService implements OnModuleInit {
     }
   }
 
+  private buildCookiePayloadFromRawCookie(rawCookie: string | null | undefined) {
+    const normalized = String(rawCookie || '').trim();
+    if (!normalized) {
+      return '';
+    }
+
+    try {
+      const parsed = JSON.parse(normalized);
+      if (Array.isArray(parsed)) {
+        return normalized;
+      }
+    } catch {}
+
+    const cookies = normalized
+      .split(';')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const separatorIndex = item.indexOf('=');
+        if (separatorIndex <= 0) {
+          return null;
+        }
+        const name = item.slice(0, separatorIndex).trim();
+        const value = item.slice(separatorIndex + 1).trim();
+        if (!name || !value) {
+          return null;
+        }
+        return {
+          name,
+          value,
+          path: '/',
+        };
+      })
+      .filter(Boolean);
+
+    return cookies.length ? JSON.stringify(cookies) : '';
+  }
+
   private async collectCookieSnapshotFromLiveProfile(input: {
     profileBinding: BrowserProfileBinding;
     platform: LeadPublishPlatform;
@@ -1125,6 +1351,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
     const authPayload = await this.collectLiveAuthPayloadFromDebugPort(
       input.platform,
       runtime?.debugUrl,
+      input.profileBinding.profileId,
     );
     if (!authPayload) {
       return null;
@@ -1151,27 +1378,91 @@ export class PublishingBitBrowserService implements OnModuleInit {
   private async collectLiveAuthPayloadFromDebugPort(
     platform: LeadPublishPlatform,
     debugUrl: string | null | undefined,
+    profileId?: string | null,
   ) {
-    const debugBaseUrl = this.normalizeDebugBaseUrl(debugUrl);
+    const cookiePayload = await this.collectStableCookiePayloadFromDebugPort({
+      platform,
+      debugUrl,
+      profileId,
+    });
+    return this.buildCookieAuthPayload(cookiePayload);
+  }
+
+  private async collectLiveCookiePayloadFromDebugPort(
+    platform: LeadPublishPlatform,
+    debugUrl: string | null | undefined,
+    profileId?: string | null,
+  ) {
+    return this.collectStableCookiePayloadFromDebugPort({
+      platform,
+      debugUrl,
+      profileId,
+    });
+  }
+
+  private async collectStableCookiePayloadFromDebugPort(input: {
+    platform: LeadPublishPlatform;
+    debugUrl: string | null | undefined;
+    profileId?: string | null;
+  }) {
+    const debugBaseUrl = this.normalizeDebugBaseUrl(input.debugUrl);
     if (!debugBaseUrl) {
       return '';
     }
 
-    const targetUrl = this.getPlatformLoginUrl(platform);
-    const pageTarget = await this.findDebugPageTarget(debugBaseUrl, targetUrl);
-    if (!pageTarget?.webSocketDebuggerUrl) {
-      return '';
+    const targetUrl = this.getPlatformLoginUrl(input.platform);
+    let lastError = '';
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const pageTarget = await this.findStableDebugPageTarget(input.platform, debugBaseUrl, targetUrl);
+      if (!pageTarget?.webSocketDebuggerUrl) {
+        await this.sleep(300);
+        continue;
+      }
+
+      await this.waitForStableDebugPage(pageTarget.webSocketDebuggerUrl).catch(() => undefined);
+      const urls = [pageTarget.url || targetUrl, targetUrl];
+
+      try {
+        const firstCookies = await this.getCookiesInDebugTarget(pageTarget.webSocketDebuggerUrl, urls);
+        if (firstCookies.length) {
+          await this.sleep(700);
+          const secondCookies = await this.getCookiesInDebugTarget(pageTarget.webSocketDebuggerUrl, urls).catch(
+            () => [],
+          );
+          const stableCookies =
+            secondCookies.length >= firstCookies.length ? secondCookies : firstCookies;
+          return stableCookies.length ? JSON.stringify(stableCookies) : '';
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+
+      await this.sleep(900);
     }
 
-    const cookies = await this.getCookiesInDebugTarget(pageTarget.webSocketDebuggerUrl, [
-      pageTarget.url || targetUrl,
-      targetUrl,
-    ]);
-    if (!cookies.length) {
-      return '';
+    if (input.profileId && this.gatewayClient) {
+      const detail = await this.gatewayClient.detailBrowser(input.profileId).catch(() => null);
+      const fallbackCookie = this.buildCookiePayloadFromRawCookie(detail?.cookie);
+      if (fallbackCookie) {
+        return fallbackCookie;
+      }
     }
 
-    return this.buildCookieAuthPayload(JSON.stringify(cookies));
+    if (lastError) {
+      this.reportDebugEvent(
+        'H4',
+        'post-fix',
+        'publishing-bitbrowser.service:collectStableCookiePayloadFromDebugPort:fallback-empty',
+        {
+          platform: input.platform,
+          profileId: input.profileId ?? null,
+          debugBaseUrl,
+          error: lastError,
+        },
+      );
+    }
+    return '';
   }
 
   private buildLoginFallbackResult(
@@ -1249,21 +1540,16 @@ export class PublishingBitBrowserService implements OnModuleInit {
       webSocketDebuggerUrl?: string;
     }>;
 
-    const hostKeyword =
-      platform === LeadPublishPlatform.douyin
-        ? 'creator.douyin.com'
-        : platform === LeadPublishPlatform.xiaohongshu
-          ? 'creator.xiaohongshu.com'
-          : platform === LeadPublishPlatform.wechat_mp
-            ? 'channels.weixin.qq.com'
-            : '';
-    const target = targets.find(
-      (item) =>
-        item.type === 'page' &&
-        typeof item.url === 'string' &&
-        (!hostKeyword || item.url.includes(hostKeyword)),
+    const pageTargets = targets.filter(
+      (item) => item.type === 'page' && typeof item.url === 'string' && Boolean(item.webSocketDebuggerUrl),
     );
-    if (!target?.webSocketDebuggerUrl) {
+    const hostKeyword = this.getPlatformDebugHostKeyword(platform);
+    const candidateTargets = (
+      hostKeyword
+        ? pageTargets.filter((item) => String(item.url || '').includes(hostKeyword))
+        : pageTargets
+    ).slice(0, 8);
+    if (!candidateTargets.length) {
       this.reportDebugEvent(
         'H4',
         'pre-fix',
@@ -1282,16 +1568,31 @@ export class PublishingBitBrowserService implements OnModuleInit {
       return null;
     }
 
-    const inspected = await this.evaluateInDebugTarget<{
+    let bestInspection: {
       sourceUrl: string | null;
+      title: string | null;
+      pageTextPreview: string | null;
       accountName: string | null;
       externalAccountId: string | null;
       displayName: string | null;
       avatarUrl: string | null;
       followerCount: number | null;
-    }>(
-      target.webSocketDebuggerUrl,
-      `((currentPlatform) => {
+    } | null = null;
+    let bestScore = -1;
+
+    for (const target of candidateTargets) {
+      const inspected = await this.evaluateInDebugTarget<{
+        sourceUrl: string | null;
+        title: string | null;
+        pageTextPreview: string | null;
+        accountName: string | null;
+        externalAccountId: string | null;
+        displayName: string | null;
+        avatarUrl: string | null;
+        followerCount: number | null;
+      }>(
+        target.webSocketDebuggerUrl!,
+        `((currentPlatform) => {
         const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
         const parseCountText = (value) => {
           const normalized = normalize(value).replace(/[,，]/g, '');
@@ -1338,6 +1639,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
           Array.from(document.querySelectorAll('div, span, p, h2, h3'))
             .find((node) => normalize(node.innerText || node.textContent).includes(keyword));
         const pageText = normalize(document.body && (document.body.innerText || document.body.textContent || ''));
+        const title = normalize(document.title || '');
 
         if (currentPlatform === 'douyin') {
           const accountMatch = pageText.match(/抖音号\\s*[:：]?\\s*([A-Za-z0-9_-]+)/i);
@@ -1370,6 +1672,8 @@ export class PublishingBitBrowserService implements OnModuleInit {
             parseCountText(pageText.replace(/^.*?粉丝/, '粉丝'));
           return {
             sourceUrl: normalize(location.href) || null,
+            title: title || null,
+            pageTextPreview: pageText.slice(0, 240) || null,
             accountName: accountName || null,
             externalAccountId: accountName || null,
             displayName: displayName || null,
@@ -1409,6 +1713,8 @@ export class PublishingBitBrowserService implements OnModuleInit {
             '';
           return {
             sourceUrl: normalize(location.href) || null,
+            title: title || null,
+            pageTextPreview: pageText.slice(0, 240) || null,
             accountName: accountName || null,
             externalAccountId: accountName || null,
             displayName: displayName || null,
@@ -1448,6 +1754,8 @@ export class PublishingBitBrowserService implements OnModuleInit {
             normalize(followerNode?.innerText || followerNode?.textContent);
           return {
             sourceUrl: normalize(location.href) || null,
+            title: title || null,
+            pageTextPreview: pageText.slice(0, 240) || null,
             accountName: accountName || null,
             externalAccountId: accountName || null,
             displayName: displayName || null,
@@ -1458,9 +1766,21 @@ export class PublishingBitBrowserService implements OnModuleInit {
 
         return null;
       })(${JSON.stringify(platform)})`,
-    );
+      ).catch(() => null);
+      if (!inspected?.sourceUrl) {
+        continue;
+      }
+      const score = this.scoreDebugInspection(platform, inspected);
+      if (score > bestScore) {
+        bestInspection = inspected;
+        bestScore = score;
+      }
+      if (score >= 1000) {
+        break;
+      }
+    }
 
-    if (!inspected?.sourceUrl) {
+    if (!bestInspection?.sourceUrl) {
       this.reportDebugEvent(
         'H4',
         'pre-fix',
@@ -1468,13 +1788,161 @@ export class PublishingBitBrowserService implements OnModuleInit {
         {
           platform,
           debugBaseUrl,
-          targetUrl: target.url ?? null,
+          targetCount: candidateTargets.length,
+          targets: candidateTargets.slice(0, 8).map((item) => ({
+            url: item.url ?? null,
+            hasSocket: Boolean(item.webSocketDebuggerUrl),
+          })),
         },
       );
       return null;
     }
 
-    return inspected;
+    return bestInspection;
+  }
+
+  private resolveKeepAliveState(input: {
+    platform: LeadPublishPlatform;
+    sourceUrl: string | null;
+    title: string | null;
+    pageTextPreview: string | null;
+    authPayload: string | null | undefined;
+    cookiePayload?: string | null | undefined;
+  }) {
+    if (
+      this.isPlatformReauthInspection({
+        platform: input.platform,
+        sourceUrl: input.sourceUrl,
+        title: input.title,
+        pageTextPreview: input.pageTextPreview,
+      })
+    ) {
+      return {
+        keepAliveStatus: 'reauth_required' as const,
+        keepAliveMessage: '命中登录页 / 401 / 请重新登录',
+        reauthRequired: true,
+      };
+    }
+
+    if (!String(input.authPayload || '').trim() && !String(input.cookiePayload || '').trim()) {
+      return {
+        keepAliveStatus: 'collect_failed' as const,
+        keepAliveMessage: '未采集到最新 Cookie',
+        reauthRequired: false,
+      };
+    }
+
+    return {
+      keepAliveStatus: 'success' as const,
+      keepAliveMessage: '保活成功',
+      reauthRequired: false,
+    };
+  }
+
+  private getPlatformDebugHostKeyword(platform: LeadPublishPlatform) {
+    if (platform === LeadPublishPlatform.douyin) {
+      return 'creator.douyin.com';
+    }
+    if (platform === LeadPublishPlatform.xiaohongshu) {
+      return 'creator.xiaohongshu.com';
+    }
+    if (platform === LeadPublishPlatform.wechat_mp) {
+      return 'channels.weixin.qq.com';
+    }
+    if (platform === LeadPublishPlatform.kuaishou) {
+      return 'cp.kuaishou.com';
+    }
+    return '';
+  }
+
+  private isPlatformReauthInspection(input: {
+    platform: LeadPublishPlatform;
+    sourceUrl: string | null | undefined;
+    title: string | null | undefined;
+    pageTextPreview: string | null | undefined;
+  }) {
+    const sourceUrl = String(input.sourceUrl || '').toLowerCase();
+    const combinedText = `${String(input.title || '')} ${String(input.pageTextPreview || '')}`.toLowerCase();
+    if (input.platform === LeadPublishPlatform.xiaohongshu) {
+      return (
+        sourceUrl.includes('creator.xiaohongshu.com/login') ||
+        sourceUrl.includes('redirectreason=401') ||
+        combinedText.includes('登录后继续') ||
+        combinedText.includes('请登录') ||
+        combinedText.includes('手机号登录') ||
+        combinedText.includes('验证码登录') ||
+        combinedText.includes('请重新登录')
+      );
+    }
+    if (input.platform === LeadPublishPlatform.douyin) {
+      return (
+        sourceUrl.includes('creator.douyin.com/passport') ||
+        sourceUrl.includes('creator.douyin.com/login') ||
+        sourceUrl.includes('creator.douyin.com/auth') ||
+        combinedText.includes('登录抖音') ||
+        combinedText.includes('扫码登录') ||
+        combinedText.includes('手机验证码登录') ||
+        combinedText.includes('登录后即可发布') ||
+        combinedText.includes('请重新登录')
+      );
+    }
+    if (input.platform === LeadPublishPlatform.wechat_mp) {
+      return (
+        sourceUrl.includes('channels.weixin.qq.com/platform/login') ||
+        sourceUrl.includes('channels.weixin.qq.com/login') ||
+        combinedText.includes('视频号助手登录') ||
+        combinedText.includes('微信扫码登录') ||
+        combinedText.includes('请使用微信扫码登录') ||
+        combinedText.includes('登录后即可发表') ||
+        combinedText.includes('请重新登录')
+      );
+    }
+    if (input.platform === LeadPublishPlatform.kuaishou) {
+      return (
+        sourceUrl.includes('cp.kuaishou.com/login') ||
+        sourceUrl.includes('passport.kuaishou.com') ||
+        combinedText.includes('登录快手创作者服务平台') ||
+        combinedText.includes('您的登录状态已过期') ||
+        combinedText.includes('点击确定重新登录') ||
+        combinedText.includes('请重新登录')
+      );
+    }
+    return false;
+  }
+
+  private scoreDebugInspection(
+    platform: LeadPublishPlatform,
+    inspected: {
+      sourceUrl: string | null;
+      title: string | null;
+      pageTextPreview: string | null;
+      accountName: string | null;
+      externalAccountId: string | null;
+      displayName: string | null;
+      avatarUrl: string | null;
+      followerCount: number | null;
+    },
+  ) {
+    if (
+      this.isPlatformReauthInspection({
+        platform,
+        sourceUrl: inspected.sourceUrl,
+        title: inspected.title,
+        pageTextPreview: inspected.pageTextPreview,
+      })
+    ) {
+      return 1000;
+    }
+    let score = 0;
+    if (inspected.sourceUrl) score += 100;
+    if (inspected.accountName) score += 80;
+    if (inspected.externalAccountId) score += 60;
+    if (inspected.displayName) score += 40;
+    if (inspected.avatarUrl) score += 20;
+    if (typeof inspected.followerCount === 'number' && Number.isFinite(inspected.followerCount)) {
+      score += 20;
+    }
+    return score;
   }
 
   private normalizeDebugBaseUrl(debugUrl: string | null | undefined) {
@@ -1973,6 +2441,83 @@ export class PublishingBitBrowserService implements OnModuleInit {
     return null;
   }
 
+  private async findStableDebugPageTarget(
+    platform: LeadPublishPlatform,
+    debugBaseUrl: string,
+    targetUrl: string,
+  ) {
+    const targetHost = new URL(targetUrl).host;
+    let bestTarget:
+      | {
+          type?: string;
+          url?: string;
+          webSocketDebuggerUrl?: string;
+        }
+      | null = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const targets = (await fetch(`${debugBaseUrl}/json/list`).then((response) =>
+        response.json(),
+      )) as Array<{
+        type?: string;
+        url?: string;
+        webSocketDebuggerUrl?: string;
+      }>;
+      const pageTargets = targets.filter(
+        (item) => item.type === 'page' && typeof item.url === 'string' && Boolean(item.webSocketDebuggerUrl),
+      );
+      const candidateTargets = (
+        pageTargets.filter((item) => String(item.url || '').includes(targetHost)).length
+          ? pageTargets.filter((item) => String(item.url || '').includes(targetHost))
+          : pageTargets
+      ).slice(0, 6);
+
+      for (const candidate of candidateTargets) {
+        const state = await this.evaluateInDebugTarget<{
+          sourceUrl: string | null;
+          title: string | null;
+          pageTextPreview: string | null;
+          readyState: string | null;
+        }>(
+          candidate.webSocketDebuggerUrl!,
+          `(() => ({
+            sourceUrl: String(location.href || '') || null,
+            title: String(document.title || '') || null,
+            pageTextPreview: String(document.body?.innerText || document.body?.textContent || '').slice(0, 240) || null,
+            readyState: String(document.readyState || '') || null,
+          }))()`,
+        ).catch(() => null);
+
+        const score =
+          this.scoreDebugInspection(platform, {
+            sourceUrl: state?.sourceUrl || candidate.url || null,
+            title: state?.title || null,
+            pageTextPreview: state?.pageTextPreview || null,
+            accountName: null,
+            externalAccountId: null,
+            displayName: null,
+            avatarUrl: null,
+            followerCount: null,
+          }) +
+          (state?.readyState === 'complete' ? 120 : 0) +
+          (String(state?.sourceUrl || candidate.url || '').includes(targetHost) ? 80 : 0);
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestTarget = candidate;
+        }
+      }
+
+      if (bestTarget?.webSocketDebuggerUrl) {
+        return bestTarget;
+      }
+      await this.sleep(400);
+    }
+
+    return this.findDebugPageTarget(debugBaseUrl, targetUrl);
+  }
+
   private async openTargetUrlWithDebug(debugUrl: string, targetUrl: string) {
     const debugBaseUrl = this.normalizeDebugBaseUrl(debugUrl);
     if (!debugBaseUrl) {
@@ -2166,6 +2711,214 @@ export class PublishingBitBrowserService implements OnModuleInit {
         finish(() => reject(new Error('DevTools websocket connect failed')));
       });
     });
+  }
+
+  private async bringDebugTargetToFront(webSocketDebuggerUrl: string) {
+    return new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(webSocketDebuggerUrl);
+      const requestId = Date.now();
+      let closed = false;
+
+      const finish = (callback: () => void) => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        clearTimeout(timeout);
+        try {
+          ws.close();
+        } catch {}
+        callback();
+      };
+
+      const timeout = setTimeout(() => {
+        finish(() => reject(new Error('DevTools bringToFront timeout')));
+      }, 8000);
+
+      ws.addEventListener('open', () => {
+        ws.send(
+          JSON.stringify({
+            id: requestId,
+            method: 'Page.bringToFront',
+          }),
+        );
+      });
+
+      ws.addEventListener('message', (event) => {
+        try {
+          const payload = JSON.parse(String(event.data || '{}'));
+          if (payload.id !== requestId) {
+            return;
+          }
+          if (payload.error) {
+            finish(() =>
+              reject(new Error(payload.error?.message || 'DevTools bringToFront failed')),
+            );
+            return;
+          }
+          finish(() => resolve());
+        } catch (error) {
+          finish(() => reject(error));
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        if (closed) {
+          return;
+        }
+        finish(() => reject(new Error('DevTools bringToFront websocket closed unexpectedly')));
+      });
+
+      ws.addEventListener('error', () => {
+        finish(() => reject(new Error('DevTools bringToFront websocket connect failed')));
+      });
+    });
+  }
+
+  private async waitForStableDebugPage(webSocketDebuggerUrl: string) {
+    let previousHref = '';
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const state = await this.evaluateInDebugTarget<{
+        href: string | null;
+        readyState: string | null;
+      }>(
+        webSocketDebuggerUrl,
+        `(() => ({
+          href: String(location.href || '') || null,
+          readyState: String(document.readyState || '') || null,
+        }))()`,
+      ).catch(() => null);
+      const href = String(state?.href || '').trim();
+      const readyState = String(state?.readyState || '').trim().toLowerCase();
+      if (href && readyState === 'complete' && href === previousHref) {
+        return true;
+      }
+      previousHref = href;
+      await this.sleep(500);
+    }
+    return false;
+  }
+
+  private async simulateKeepAliveInteraction(
+    platform: LeadPublishPlatform,
+    debugUrl: string | null | undefined,
+  ) {
+    const debugBaseUrl = this.normalizeDebugBaseUrl(debugUrl);
+    if (!debugBaseUrl) {
+      return null;
+    }
+    const pageTarget = await this.findDebugPageTarget(debugBaseUrl, this.getPlatformLoginUrl(platform));
+    if (!pageTarget?.webSocketDebuggerUrl) {
+      return null;
+    }
+    await this.bringDebugTargetToFront(pageTarget.webSocketDebuggerUrl).catch(() => undefined);
+    await this.sleep(350);
+
+    const keywords =
+      platform === LeadPublishPlatform.douyin
+        ? ['首页', '创作者中心', '内容管理', '作品管理', '数据中心']
+        : platform === LeadPublishPlatform.xiaohongshu
+          ? ['首页', '创作服务', '内容管理', '数据中心', '笔记']
+          : platform === LeadPublishPlatform.wechat_mp
+            ? ['首页', '数据中心', '内容管理', '视频号', '助手']
+            : platform === LeadPublishPlatform.kuaishou
+              ? ['首页', '作品管理', '数据中心', '创作者服务']
+              : ['首页', '内容'];
+
+    const blockedKeywords = ['发布', '提交', '保存', '删除', '退出', '登录', '重新登录'];
+
+    return this.evaluateInDebugTarget<{
+      sourceUrl: string | null;
+      clickedText: string | null;
+      scrollTop: number;
+    }>(
+      pageTarget.webSocketDebuggerUrl,
+      `(() => new Promise(async (resolve) => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+        const keywords = ${JSON.stringify(keywords)};
+        const blockedKeywords = ${JSON.stringify(blockedKeywords)};
+        const viewportHeight = Math.max(window.innerHeight || 0, 720);
+        const root = document.scrollingElement || document.documentElement || document.body;
+        const maxScrollTop = Math.max(0, (root?.scrollHeight || document.body?.scrollHeight || 0) - viewportHeight);
+        const scrollTargets = [0.18, 0.42, 0.68, 0.33]
+          .map((rate) => Math.max(0, Math.min(maxScrollTop, Math.round(maxScrollTop * rate))));
+
+        try { window.focus(); } catch {}
+
+        for (const nextTop of scrollTargets) {
+          try {
+            window.scrollTo({ top: nextTop, behavior: 'auto' });
+          } catch {
+            try {
+              window.scrollTo(0, nextTop);
+            } catch {}
+          }
+          await wait(400);
+        }
+
+        const isVisible = (element) => {
+          if (!(element instanceof HTMLElement)) return false;
+          const style = window.getComputedStyle(element);
+          if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') === 0) {
+            return false;
+          }
+          const rect = element.getBoundingClientRect();
+          return rect.width > 8 && rect.height > 8 && rect.bottom > 0 && rect.right > 0;
+        };
+
+        const textFor = (element) => normalize(element?.innerText || element?.textContent || '');
+        const isBlocked = (text) => blockedKeywords.some((keyword) => text.includes(keyword));
+        const candidates = Array.from(document.querySelectorAll('a, button, [role="button"], [class*="nav"], [class*="menu"], [class*="tab"]'))
+          .filter((element) => isVisible(element))
+          .map((element) => ({ element, text: textFor(element) }))
+          .filter((item) => item.text && !isBlocked(item.text));
+
+        const matched =
+          candidates.find((item) => keywords.some((keyword) => item.text.includes(keyword))) ||
+          candidates[0] ||
+          null;
+
+        if (matched?.element instanceof HTMLElement) {
+          try {
+            matched.element.scrollIntoView({ block: 'center', inline: 'center' });
+            await wait(250);
+          } catch {}
+          const rect = matched.element.getBoundingClientRect();
+          const clickEventInit = {
+            bubbles: true,
+            cancelable: true,
+            clientX: Math.max(0, Math.round(rect.left + Math.min(rect.width / 2, 80))),
+            clientY: Math.max(0, Math.round(rect.top + Math.min(rect.height / 2, 24))),
+          };
+          try { matched.element.dispatchEvent(new MouseEvent('mousemove', clickEventInit)); } catch {}
+          try { matched.element.dispatchEvent(new MouseEvent('mousedown', clickEventInit)); } catch {}
+          try { matched.element.dispatchEvent(new MouseEvent('mouseup', clickEventInit)); } catch {}
+          try { matched.element.click(); } catch {}
+          await wait(500);
+        } else {
+          try {
+            document.body?.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: 120, clientY: 120 }));
+          } catch {}
+          await wait(300);
+        }
+
+        try {
+          window.scrollTo({ top: Math.max(0, Math.round(maxScrollTop * 0.12)), behavior: 'auto' });
+        } catch {
+          try {
+            window.scrollTo(0, Math.max(0, Math.round(maxScrollTop * 0.12)));
+          } catch {}
+        }
+        await wait(600);
+
+        resolve({
+          sourceUrl: String(location.href || '') || null,
+          clickedText: matched?.text || null,
+          scrollTop: Number(window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0),
+        });
+      }))()`,
+    );
   }
 
   private async getCookiesInDebugTarget(

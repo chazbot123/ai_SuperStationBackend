@@ -5,6 +5,7 @@ import { SignOptions } from 'jsonwebtoken';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ProductsModule } from '../products/products.module';
 import { PublishingCleanupService } from './publishing-cleanup.service';
+import { PublishingProfileKeepaliveService } from './publishing-profile-keepalive.service';
 import { PublishingController } from './publishing.controller';
 import { PublishingBitBrowserController } from './publishing-bitbrowser.controller';
 import { PublishingExtensionController } from './publishing-extension.controller';
@@ -50,6 +51,7 @@ import { PublishingService } from './publishing.service';
     BilibiliOpenApiService,
     PublishingBitBrowserService,
     PublishingCleanupService,
+    PublishingProfileKeepaliveService,
     PublishingStoreSearchService,
   ],
 })

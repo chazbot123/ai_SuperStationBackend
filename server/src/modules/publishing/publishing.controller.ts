@@ -178,6 +178,11 @@ export class PublishingController {
     return this.publishingService.validatePlatformAccount(req.user, id);
   }
 
+  @Post('platform-accounts/keepalive')
+  keepAlivePlatformAccounts(@Req() req: { user: SessionUser }) {
+    return this.publishingService.keepAliveLoggedInPlatformAccounts(req.user);
+  }
+
   @Post('platform-accounts/:id/hosted-login/start')
   restartPlatformLogin(@Req() req: { user: SessionUser }, @Param('id') id: string) {
     return this.publishingService.restartPlatformLogin(req.user, id);

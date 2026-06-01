@@ -28,6 +28,11 @@ export class SyncExtensionPublishJobDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200000)
+  cookiePayload?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(80)
   accountName?: string;
 
