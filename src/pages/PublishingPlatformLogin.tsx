@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, KeyRound, ShieldCheck, Smartphone } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -17,6 +17,7 @@ import youtubeIconUrl from "@/assets/youtube.svg";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import {
   deletePlatformAccount,
+  keepAlivePlatformAccounts,
   listPlatformAccounts,
   openExtensionPlatformAccountHome,
   startOfficialOauthLogin,
@@ -28,11 +29,11 @@ import {
   validatePlatformAccount,
 } from "@/lib/publishing";
 import {
-  listenPlatformExtensionEvents,
-  openPlatformAccountHomeInExtension,
-  pingPlatformLoginExtension,
-  startPlatformLoginExtensionSession,
-} from "@/lib/platformLoginExtension";
+  getLocalAgentStatus,
+  pingLocalAgent,
+  startLocalAgentBitBrowser,
+  type LocalAgentStatus,
+} from "@/lib/localAgent";
 import { useAuthStore } from "@/store/authStore";
 
 function XiaohongshuIcon({ className = "" }: { className?: string }) {
@@ -200,7 +201,7 @@ type ConnectChannelPlatform = {
   hint: string;
   actionLabel: string;
   localLoginPlatform?: Extract<LeadPlatformStyle, "xiaohongshu" | "douyin" | "wechat_mp">;
-  oauthPlatform?: Extract<LeadPlatformStyle, "douyin" | "kuaishou" | "bilibili" | "wechat_official">;
+  oauthPlatform?: Extract<LeadPlatformStyle, "kuaishou" | "bilibili" | "wechat_official">;
 };
 
 const connectChannelPlatforms: ConnectChannelPlatform[] = [
@@ -211,8 +212,8 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
     iconWrapClassName: "rounded-[10px]",
     enabled: true,
     badge: "浏览器插件",
-    hint: "点击后会先清理当前浏览器该平台登录态，再进入新账号登录，完成后自动保存账号。",
-    actionLabel: "新增账号",
+    hint: "点击后由后台接管 BitBrowser，在该账号专属 profile 中打开登录页，登录完成后自动保存账号。",
+    actionLabel: "立即登录",
     localLoginPlatform: "xiaohongshu",
   },
   {
@@ -242,8 +243,8 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
     iconWrapClassName: "rounded-[10px]",
     enabled: true,
     badge: "浏览器插件",
-    hint: "点击后会先清理当前浏览器该平台登录态，再进入新账号登录，完成后自动保存账号。",
-    actionLabel: "新增账号",
+    hint: "点击后由后台接管 BitBrowser，在该账号专属 profile 中打开登录页，登录完成后自动保存账号。",
+    actionLabel: "立即登录",
     localLoginPlatform: "douyin",
   },
   {
@@ -253,8 +254,8 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
     iconWrapClassName: "rounded-[10px]",
     enabled: true,
     badge: "浏览器插件",
-    hint: "点击后会先清理当前浏览器该平台登录态，再进入新账号登录，完成后自动保存账号。",
-    actionLabel: "新增账号",
+    hint: "点击后由后台接管 BitBrowser，在该账号专属 profile 中打开登录页，登录完成后自动保存账号。",
+    actionLabel: "立即登录",
     localLoginPlatform: "wechat_mp",
   },
   {
@@ -341,7 +342,7 @@ const connectChannelPlatforms: ConnectChannelPlatform[] = [
   },
 ];
 
-const PLATFORM_LOGIN_EXTENSION_DOWNLOAD_URL = "";
+const PLATFORM_LOGIN_CLIENT_DOWNLOAD_URL = "/api/bitbrowser/local-client/download";
 
 function platformLabel(platform: LeadPlatformStyle) {
   return platformOptions.find((item) => item.value === platform)?.label ?? platform;
@@ -373,6 +374,25 @@ function loginStatusMeta(status: PlatformAccountItem["loginStatus"]) {
   return { label: "未登录", variant: "gray" as const };
 }
 
+function keepAliveMeta(status: PlatformAccountItem["keepAliveStatus"]) {
+  if (status === "success") return { label: "保活成功", variant: "green" as const };
+  if (status === "reauth_required") return { label: "需要登录", variant: "red" as const };
+  if (status === "collect_failed") return { label: "采集失败", variant: "yellow" as const };
+  return null;
+}
+
+function hasResolvedProfileData(item: PlatformAccountItem | null | undefined) {
+  if (!item || item.status !== "valid" || item.loginStatus !== "authenticated") {
+    return false;
+  }
+
+  if (item.platform === "xiaohongshu" || item.platform === "wechat_mp") {
+    return Boolean(item.displayName || item.avatarUrl || item.externalAccountId) || item.followerCount !== null;
+  }
+
+  return Boolean(item.displayName || item.avatarUrl || item.externalAccountId);
+}
+
 function isDeletedResult(
   value: { id: string; deleted?: boolean } | PlatformAccountItem,
 ): value is { id: string; deleted?: boolean } {
@@ -382,44 +402,6 @@ function isDeletedResult(
 function formatTime(value?: string | null) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
-}
-
-function getPlatformLoginUrl(platform: LeadPlatformStyle) {
-  switch (platform) {
-    case "xiaohongshu":
-      return "https://creator.xiaohongshu.com/login";
-    case "douyin":
-      return "https://creator.douyin.com/";
-    case "wechat_mp":
-      return "https://channels.weixin.qq.com/platform";
-    case "kuaishou":
-      return "https://cp.kuaishou.com/article/publish/video";
-    case "bilibili":
-      return "https://member.bilibili.com/";
-    case "wechat_official":
-      return "https://mp.weixin.qq.com/";
-    default:
-      return "";
-  }
-}
-
-function getPlatformCreatorCenterUrl(platform: LeadPlatformStyle) {
-  switch (platform) {
-    case "xiaohongshu":
-      return "https://creator.xiaohongshu.com/";
-    case "douyin":
-      return "https://creator.douyin.com/";
-    case "wechat_mp":
-      return "https://channels.weixin.qq.com/platform";
-    case "kuaishou":
-      return "https://cp.kuaishou.com/profile";
-    case "bilibili":
-      return "https://member.bilibili.com/";
-    case "wechat_official":
-      return "https://mp.weixin.qq.com/";
-    default:
-      return "";
-  }
 }
 
 function isExtensionLoginPlatform(platform: LeadPlatformStyle) {
@@ -441,11 +423,11 @@ export default function PublishingPlatformLogin() {
   const [saving, setSaving] = useState(false);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [autoRefreshingId, setAutoRefreshingId] = useState<string | null>(null);
-  const loginActionLocksRef = useRef(new Set<string>());
+  const [keepingAlive, setKeepingAlive] = useState(false);
   const [startingPlatform, setStartingPlatform] = useState<LeadPlatformStyle | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
-  const [extensionReady, setExtensionReady] = useState<boolean | null>(null);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PlatformAccountItem | null>(null);
@@ -454,6 +436,20 @@ export default function PublishingPlatformLogin() {
   const [remark, setRemark] = useState("");
   const [activePlatform, setActivePlatform] = useState<LeadPlatformStyle | "all">("all");
   const [highlightedAccountId, setHighlightedAccountId] = useState<string | null>(null);
+  const [localAgentReady, setLocalAgentReady] = useState<boolean | null>(null);
+  const [localAgentStatus, setLocalAgentStatus] = useState<LocalAgentStatus | null>(null);
+  const [postStartRefreshTarget, setPostStartRefreshTarget] = useState<{
+    platform: LeadPlatformStyle;
+    requestedAt: number;
+    knownAccountIds: string[];
+  } | null>(null);
+  const [postRestartRefreshTarget, setPostRestartRefreshTarget] = useState<{
+    accountId: string;
+    requestedAt: number;
+  } | null>(null);
+
+  const panelClassName = "rounded-xl border border-white/15 bg-[#0b1220]/90";
+  const panelHeaderClassName = "border-b border-white/15";
 
   const loadAccounts = useCallback(
     async (showLoading = false) => {
@@ -527,42 +523,68 @@ export default function PublishingPlatformLogin() {
   }, [highlightedAccountId, items]);
 
   useEffect(() => {
-    let cancelled = false;
-    void pingPlatformLoginExtension()
-      .then((ready) => {
-        if (!cancelled) {
-          setExtensionReady(ready);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setExtensionReady(false);
-        }
-      });
+    if (!accessToken) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadAccounts();
+    }, 5000);
 
     return () => {
-      cancelled = true;
+      window.clearInterval(timer);
     };
-  }, []);
+  }, [accessToken, loadAccounts]);
 
   useEffect(() => {
-    return listenPlatformExtensionEvents((event) => {
-      if (event.kind === "synced") {
-        setItems((current) => {
-          const exists = current.some((item) => item.id === event.account.id);
-          if (exists) {
-            return current.map((item) => (item.id === event.account.id ? event.account : item));
-          }
-          return [event.account, ...current];
-        });
-        setHint(`${platformLabel(event.platform)} 登录信息已自动保存。`);
+    if (!postStartRefreshTarget && !postRestartRefreshTarget) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadAccounts();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loadAccounts, postRestartRefreshTarget, postStartRefreshTarget]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshLocalAgentStatus() {
+      const ready = await pingLocalAgent();
+      if (cancelled) {
+        return;
+      }
+      setLocalAgentReady(ready);
+      if (!ready) {
+        setLocalAgentStatus(null);
         return;
       }
 
-      if (event.kind === "error" || event.kind === "publish-error") {
-        setHint(event.message);
+      try {
+        const status = await getLocalAgentStatus();
+        if (!cancelled) {
+          setLocalAgentStatus(status);
+        }
+      } catch {
+        if (!cancelled) {
+          setLocalAgentStatus(null);
+        }
       }
-    });
+    }
+
+    void refreshLocalAgentStatus();
+    const timer = window.setInterval(() => {
+      void refreshLocalAgentStatus();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const summary = useMemo(() => {
@@ -607,54 +629,6 @@ export default function PublishingPlatformLogin() {
     setEditorOpen(true);
   }
 
-  function openLocalLoginPage(platform: LeadPlatformStyle, loginUrl?: string | null) {
-    const targetUrl = loginUrl?.trim() || getPlatformLoginUrl(platform);
-    if (!targetUrl) {
-      setHint("当前平台暂未配置登录地址。");
-      return;
-    }
-
-    openExternalUrl(targetUrl);
-  }
-
-  function openPendingExternalWindow() {
-    const opened = window.open("about:blank", "_blank");
-    if (opened) {
-      try {
-        opened.opener = null;
-      } catch {
-        // ignore opener assignment failure
-      }
-      opened.document.title = "正在打开登录页...";
-      opened.focus?.();
-      return opened;
-    }
-    return null;
-  }
-
-  function navigatePendingExternalWindow(pendingWindow: Window | null, targetUrl: string) {
-    const normalizedUrl = targetUrl.trim();
-    if (!normalizedUrl) {
-      pendingWindow?.close();
-      setHint("跳转地址为空，请稍后重试。");
-      return false;
-    }
-
-    if (!pendingWindow || pendingWindow.closed) {
-      return openExternalUrl(normalizedUrl);
-    }
-
-    pendingWindow.location.replace(normalizedUrl);
-    pendingWindow.focus?.();
-    return true;
-  }
-
-  function closePendingExternalWindow(pendingWindow: Window | null) {
-    if (pendingWindow && !pendingWindow.closed) {
-      pendingWindow.close();
-    }
-  }
-
   function openExternalUrl(targetUrl: string) {
     const normalizedUrl = targetUrl.trim();
     if (!normalizedUrl) {
@@ -672,188 +646,231 @@ export default function PublishingPlatformLogin() {
     return false;
   }
 
-  function acquireLoginActionLock(key: string) {
-    if (loginActionLocksRef.current.has(key)) {
+  function handleDownloadClient() {
+    openExternalUrl(PLATFORM_LOGIN_CLIENT_DOWNLOAD_URL);
+  }
+
+  async function ensureLocalClientRuntime() {
+    if (localAgentReady !== true) {
+      setHint("未检测到本地客户端，请先启动本地客户端后再继续。");
       return false;
     }
-    loginActionLocksRef.current.add(key);
-    return true;
+
+    try {
+      await startLocalAgentBitBrowser();
+      return true;
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "本地客户端启动 BitBrowser 失败");
+      return false;
+    }
   }
 
-  function releaseLoginActionLock(key: string) {
-    loginActionLocksRef.current.delete(key);
-  }
+  const refreshPlatformAccount = useCallback(
+    async (item: PlatformAccountItem, options?: { silent?: boolean }) => {
+      if (!accessToken) {
+        if (!options?.silent) {
+          setHint("登录已失效，请重新登录。");
+        }
+        return null;
+      }
 
-  function handleDownloadExtension() {
-    if (!PLATFORM_LOGIN_EXTENSION_DOWNLOAD_URL.trim()) {
-      setHint("浏览器扩展下载地址暂未配置，请先补充正式下载链接。");
+      try {
+        setValidatingId(item.id);
+        const next = await validatePlatformAccount({ accessToken, id: item.id });
+        setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
+        if (!options?.silent) {
+          setHint(next.status === "valid" ? "账号校验通过。" : next.lastError ?? "账号校验失败。");
+        }
+        return next;
+      } catch (error) {
+        if (!options?.silent) {
+          setHint(error instanceof Error ? error.message : "校验平台账号失败");
+        }
+        return null;
+      } finally {
+        setValidatingId(null);
+      }
+    },
+    [accessToken],
+  );
+
+  const autoRefreshPlatformAccount = useCallback(
+    async (item: PlatformAccountItem) => {
+      setAutoRefreshingId(item.id);
+      try {
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          const next = await refreshPlatformAccount(item, { silent: true });
+          if (hasResolvedProfileData(next)) {
+            await loadAccounts();
+            setHint("账号资料已自动刷新。");
+            return;
+          }
+          if (attempt < 11) {
+            await new Promise((resolve) => window.setTimeout(resolve, 2500));
+          }
+        }
+        await loadAccounts();
+        setHint("已自动尝试刷新账号资料，如仍未显示请确认账号后台首页已正常打开。");
+      } finally {
+        setAutoRefreshingId((current) => (current === item.id ? null : current));
+      }
+    },
+    [loadAccounts, refreshPlatformAccount],
+  );
+
+  useEffect(() => {
+    if (!postStartRefreshTarget || autoRefreshingId) {
       return;
     }
-    openExternalUrl(PLATFORM_LOGIN_EXTENSION_DOWNLOAD_URL);
-  }
 
-  async function refreshPlatformAccount(item: PlatformAccountItem, options?: { silent?: boolean }) {
-    if (!accessToken) {
-      if (!options?.silent) {
-        setHint("登录已失效，请重新登录。");
-      }
-      return null;
+    const current = items
+      .filter(
+        (item) =>
+          item.platform === postStartRefreshTarget.platform &&
+          !postStartRefreshTarget.knownAccountIds.includes(item.id) &&
+          item.status === "valid" &&
+          item.loginStatus === "authenticated",
+      )
+      .sort((left, right) => {
+        const leftTime = left.lastLoginCompletedAt ? Date.parse(left.lastLoginCompletedAt) : 0;
+        const rightTime = right.lastLoginCompletedAt ? Date.parse(right.lastLoginCompletedAt) : 0;
+        return rightTime - leftTime;
+      })[0];
+    if (!current) {
+      return;
     }
 
-    try {
-      setValidatingId(item.id);
-      const next = await validatePlatformAccount({ accessToken, id: item.id });
-      setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
-      if (!options?.silent) {
-        setHint(next.status === "valid" ? "账号校验通过。" : next.lastError ?? "账号校验失败。");
-      }
-      return next;
-    } catch (error) {
-      if (!options?.silent) {
-        setHint(error instanceof Error ? error.message : "校验平台账号失败");
-      }
-      return null;
-    } finally {
-      setValidatingId(null);
+    const completedAt = current.lastLoginCompletedAt ? Date.parse(current.lastLoginCompletedAt) : 0;
+    if (!Number.isFinite(completedAt) || completedAt < postStartRefreshTarget.requestedAt) {
+      return;
     }
-  }
 
-  async function autoRefreshPlatformAccount(item: PlatformAccountItem) {
-    setAutoRefreshingId(item.id);
-    try {
-      for (let attempt = 0; attempt < 6; attempt += 1) {
-        const next = await refreshPlatformAccount(item, { silent: true });
-        const hasEnoughProfileData =
-          next &&
-          (item.platform === "wechat_mp" || item.platform === "xiaohongshu"
-            ? Boolean(next.avatarUrl) && next.followerCount !== null
-            : Boolean(next.avatarUrl) || next.followerCount !== null);
-        if (hasEnoughProfileData) {
-          setHint("账号资料已自动刷新。");
-          return;
-        }
-        if (attempt < 5) {
-          await new Promise((resolve) => window.setTimeout(resolve, 2500));
-        }
-      }
-      setHint("已自动尝试刷新账号资料，如仍未显示请确认账号后台首页已正常打开。");
-    } finally {
-      setAutoRefreshingId((current) => (current === item.id ? null : current));
+    setHighlightedAccountId(current.id);
+    void autoRefreshPlatformAccount(current).finally(() => {
+      setPostStartRefreshTarget((target) =>
+        target?.platform === current.platform ? null : target,
+      );
+    });
+  }, [autoRefreshingId, autoRefreshPlatformAccount, items, postStartRefreshTarget]);
+
+  useEffect(() => {
+    if (!postRestartRefreshTarget || autoRefreshingId) {
+      return;
     }
-  }
+
+    const current = items.find((item) => item.id === postRestartRefreshTarget.accountId);
+    if (!current || current.loginStatus !== "authenticated") {
+      return;
+    }
+
+    const completedAt = current.lastLoginCompletedAt ? Date.parse(current.lastLoginCompletedAt) : 0;
+    if (!Number.isFinite(completedAt) || completedAt < postRestartRefreshTarget.requestedAt) {
+      return;
+    }
+
+    setHighlightedAccountId(current.id);
+    void autoRefreshPlatformAccount(current).finally(() => {
+      setPostRestartRefreshTarget((target) =>
+        target?.accountId === current.id ? null : target,
+      );
+    });
+  }, [autoRefreshingId, autoRefreshPlatformAccount, items, postRestartRefreshTarget]);
 
   async function handleStartLogin(platform: LeadPlatformStyle) {
-    const actionKey = `start:${platform}`;
-    if (!acquireLoginActionLock(actionKey)) {
-      return;
-    }
-    const pendingWindow = openPendingExternalWindow();
-
     if (!accessToken) {
-      closePendingExternalWindow(pendingWindow);
       setHint("登录已失效，请重新登录。");
-      releaseLoginActionLock(actionKey);
       return;
     }
 
     if (!isExtensionLoginPlatform(platform)) {
-      closePendingExternalWindow(pendingWindow);
       setHint(`${platformLabel(platform)} 当前请走“连接新频道”里的官方授权入口。`);
-      releaseLoginActionLock(actionKey);
       return;
     }
 
-    if (extensionReady === false) {
-      closePendingExternalWindow(pendingWindow);
-      setHint("未检测到平台登录扩展，请先安装并启用扩展。");
-      releaseLoginActionLock(actionKey);
+    if (localAgentReady !== true) {
+      setHint("未检测到本地客户端，请先启动本地客户端后再登录。");
       return;
     }
 
     try {
       setStartingPlatform(platform);
-      const session = await startExtensionPlatformLogin({ accessToken, platform });
-      await startPlatformLoginExtensionSession({
-        session,
-        platform,
-        apiBaseUrl: window.location.origin,
-        forceFreshLogin: true,
-      });
-      if (!navigatePendingExternalWindow(pendingWindow, session.loginUrl || getPlatformLoginUrl(platform))) {
+      const ready = await ensureLocalClientRuntime();
+      if (!ready) {
         return;
       }
-      setHint(`已打开${platformLabel(platform)}新账号登录页，完成登录后系统会自动保存为新账号。`);
+      const requestedAt = Date.now();
+      const knownAccountIds = items
+        .filter((item) => item.platform === platform)
+        .map((item) => item.id);
+      const session = await startExtensionPlatformLogin({ accessToken, platform });
+      setPostStartRefreshTarget({
+        platform,
+        requestedAt,
+        knownAccountIds,
+      });
+      setActivePlatform(platform);
+      setHint(
+        `已由后台在 BitBrowser 打开${platformLabel(platform)}登录页，请切到对应窗口完成登录。当前账号会自动绑定到 Profile ${session.externalGroupId ?? "A"}。`,
+      );
+      void loadAccounts();
     } catch (error) {
-      closePendingExternalWindow(pendingWindow);
       setHint(error instanceof Error ? error.message : "发起平台登录失败");
     } finally {
       setStartingPlatform(null);
-      releaseLoginActionLock(actionKey);
     }
   }
 
   async function handleConnectChannel(platform: ConnectChannelPlatform) {
-    const actionKey = `connect:${platform.key}`;
-    if (!acquireLoginActionLock(actionKey)) {
-      return;
-    }
-    const pendingWindow = openPendingExternalWindow();
-
     if (!platform.enabled) {
-      closePendingExternalWindow(pendingWindow);
       setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
-      releaseLoginActionLock(actionKey);
       return;
     }
 
     if (!accessToken) {
-      closePendingExternalWindow(pendingWindow);
       setHint("登录已失效，请重新登录。");
-      releaseLoginActionLock(actionKey);
       return;
     }
 
     if (platform.localLoginPlatform) {
-      if (extensionReady === false) {
-        closePendingExternalWindow(pendingWindow);
-        setHint("未检测到平台登录扩展，请先安装并启用扩展。");
-        releaseLoginActionLock(actionKey);
+      if (localAgentReady !== true) {
+        setHint("未检测到本地客户端，请先启动本地客户端后再登录。");
         return;
       }
 
       try {
         setConnectingPlatform(platform.key);
+        const ready = await ensureLocalClientRuntime();
+        if (!ready) {
+          return;
+        }
+        const requestedAt = Date.now();
+        const knownAccountIds = items
+          .filter((item) => item.platform === platform.localLoginPlatform)
+          .map((item) => item.id);
         const session = await startExtensionPlatformLogin({
           accessToken,
           platform: platform.localLoginPlatform,
         });
-        await startPlatformLoginExtensionSession({
-          session,
+        setPostStartRefreshTarget({
           platform: platform.localLoginPlatform,
-          apiBaseUrl: window.location.origin,
-          forceFreshLogin: true,
+          requestedAt,
+          knownAccountIds,
         });
-        if (!navigatePendingExternalWindow(
-          pendingWindow,
-          session.loginUrl || getPlatformLoginUrl(platform.localLoginPlatform),
-        )) {
-          return;
-        }
-        setHint(`已打开${platform.label}新账号登录页，完成本地 Cookie 登录后系统会自动保存为新账号。`);
+        setActivePlatform(platform.localLoginPlatform);
+        setHint(
+          `已由后台在 BitBrowser 打开${platform.label}登录页，请切到对应窗口完成登录。当前账号会自动绑定到 Profile ${session.externalGroupId ?? "A"}。`,
+        );
+        void loadAccounts();
       } catch (error) {
-        closePendingExternalWindow(pendingWindow);
         setHint(error instanceof Error ? error.message : `${platform.label} 本地登录发起失败`);
       } finally {
         setConnectingPlatform(null);
-        releaseLoginActionLock(actionKey);
       }
       return;
     }
 
     if (!platform.oauthPlatform) {
-      closePendingExternalWindow(pendingWindow);
       setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
-      releaseLoginActionLock(actionKey);
       return;
     }
 
@@ -863,16 +880,12 @@ export default function PublishingPlatformLogin() {
         accessToken,
         platform: platform.oauthPlatform,
       });
-      if (!navigatePendingExternalWindow(pendingWindow, session.loginUrl)) {
-        return;
-      }
+      openExternalUrl(session.loginUrl);
       setHint(`${platform.label} 已打开官方授权页，授权完成后会自动回到平台登录页。`);
     } catch (error) {
-      closePendingExternalWindow(pendingWindow);
       setHint(error instanceof Error ? error.message : `${platform.label} 官方授权发起失败`);
     } finally {
       setConnectingPlatform(null);
-      releaseLoginActionLock(actionKey);
     }
   }
 
@@ -917,9 +930,8 @@ export default function PublishingPlatformLogin() {
       setHint("登录已失效，请重新登录。");
       return;
     }
-    const pendingWindow = openPendingExternalWindow();
 
-    if (item.provider === "official_oauth" && item.platform !== "douyin") {
+    if (item.provider === "official_oauth") {
       try {
         setRestartingId(item.id);
         const session = await startOfficialOauthLogin({
@@ -930,12 +942,9 @@ export default function PublishingPlatformLogin() {
           >,
           accountId: item.id,
         });
-        if (!navigatePendingExternalWindow(pendingWindow, session.loginUrl)) {
-          return;
-        }
+        openExternalUrl(session.loginUrl);
         setHint(`${platformLabel(item.platform)} 已重新打开官方授权页。`);
       } catch (error) {
-        closePendingExternalWindow(pendingWindow);
         setHint(error instanceof Error ? error.message : "重新发起官方授权失败");
       } finally {
         setRestartingId(null);
@@ -943,41 +952,36 @@ export default function PublishingPlatformLogin() {
       return;
     }
 
-    if (extensionReady === false) {
-      closePendingExternalWindow(pendingWindow);
-      setHint("未检测到平台登录扩展，请先安装并启用扩展。");
+    if (localAgentReady !== true) {
+      setHint("未检测到本地客户端，请先启动本地客户端后再重新登录。");
       return;
     }
 
     try {
       setRestartingId(item.id);
+      const ready = await ensureLocalClientRuntime();
+      if (!ready) {
+        return;
+      }
       const session = await startExtensionPlatformLogin({
         accessToken,
         platform: item.platform,
         accountId: item.id,
       });
-      await startPlatformLoginExtensionSession({
-        session,
-        platform: item.platform,
-        apiBaseUrl: window.location.origin,
+      setPostRestartRefreshTarget({
+        accountId: item.id,
+        requestedAt: Date.now(),
       });
-      if (!navigatePendingExternalWindow(
-        pendingWindow,
-        session.loginUrl || item.loginUrl || getPlatformLoginUrl(item.platform),
-      )) {
-        return;
-      }
-      setHint(`已重新打开${platformLabel(item.platform)}官方登录页，完成登录后系统会自动更新账号。`);
+      setActivePlatform(item.platform);
+      setHint(
+        `已由后台在 BitBrowser 重新打开${platformLabel(item.platform)}登录页，请在原专属环境中重新登录，账号会继续保留在 Profile ${session.externalGroupId ?? item.externalGroupId ?? "A"}。`,
+      );
+      void loadAccounts();
     } catch (error) {
-      closePendingExternalWindow(pendingWindow);
       setHint(error instanceof Error ? error.message : "重新发起登录失败");
     } finally {
       setRestartingId(null);
     }
-  }
-
-  async function handleValidate(item: PlatformAccountItem) {
-    await refreshPlatformAccount(item);
   }
 
   async function handleDelete(item: PlatformAccountItem) {
@@ -998,47 +1002,49 @@ export default function PublishingPlatformLogin() {
     }
   }
 
-  async function handleOpenLoginUrl(item: PlatformAccountItem) {
+  async function handleOpenAccountHome(item: PlatformAccountItem) {
     if (!accessToken) {
       setHint("登录已失效，请重新登录。");
       return;
     }
 
-    if (item.provider === "extension") {
-      if (extensionReady === false) {
-        setHint("未检测到平台登录扩展，请先安装并启用扩展。");
-        return;
-      }
+    try {
+      setOpeningId(item.id);
+      await openExtensionPlatformAccountHome({
+        accessToken,
+        accountId: item.id,
+      });
+      setHint(`已打开${platformLabel(item.platform)}账号对应的 BitBrowser 创作者页面，正在刷新账号资料。`);
+      void autoRefreshPlatformAccount(item);
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "打开账号对应 BitBrowser 页面失败");
+    } finally {
+      setOpeningId((current) => (current === item.id ? null : current));
+    }
+  }
 
-      try {
-        const session = await openExtensionPlatformAccountHome({
-          accessToken,
-          accountId: item.id,
-        });
-        await openPlatformAccountHomeInExtension({
-          platform: session.platform,
-          loginUrl: session.loginUrl,
-          authPayload: session.authPayload,
-        });
-        setHint(`已切换到${platformLabel(item.platform)}对应账号并打开平台页面，正在自动刷新账号资料。`);
-      } catch (error) {
-        setHint(error instanceof Error ? error.message : "打开对应账号页面失败");
-        return;
-      }
-    } else {
-      const targetUrl = getPlatformCreatorCenterUrl(item.platform);
-      if (!targetUrl) {
-        setHint("当前平台暂未配置创作者中心地址。");
-        return;
-      }
-      const opened = openExternalUrl(targetUrl);
-      if (!opened) {
-        return;
-      }
-      setHint(`已打开${platformLabel(item.platform)}创作者中心，正在自动刷新账号资料。`);
+  async function handleKeepAliveAccounts() {
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
     }
 
-    void autoRefreshPlatformAccount(item);
+    try {
+      setKeepingAlive(true);
+      const result = await keepAlivePlatformAccounts({ accessToken });
+      const succeeded = typeof result.succeeded === "number" ? result.succeeded : 0;
+      const reauthRequired = typeof result.reauthRequired === "number" ? result.reauthRequired : 0;
+      const collectFailed = typeof result.collectFailed === "number" ? result.collectFailed : 0;
+      const skipped = typeof result.skipped === "number" ? result.skipped : 0;
+      await loadAccounts();
+      setHint(
+        `活跃完成：共 ${result.total} 个，成功 ${succeeded} 个，需要登录 ${reauthRequired} 个，采集失败 ${collectFailed} 个，跳过 ${skipped} 个。`,
+      );
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "活跃账号失败");
+    } finally {
+      setKeepingAlive(false);
+    }
   }
 
   return (
@@ -1051,7 +1057,7 @@ export default function PublishingPlatformLogin() {
           <div className="flex flex-wrap gap-2 text-xs text-zinc-400">
             <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
               <KeyRound className="h-3.5 w-3.5" />
-              本地扩展登录
+              本地客户端登录
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
               <ShieldCheck className="h-3.5 w-3.5" />
@@ -1063,13 +1069,20 @@ export default function PublishingPlatformLogin() {
             </span>
           </div>
           <div className="text-xs text-zinc-500">
-            扩展状态：
-            {extensionReady === true ? " 已连接" : extensionReady === false ? " 未检测到扩展" : " 检测中..."}
+            本地客户端状态：
+            {localAgentReady === true
+              ? " 已连接"
+              : localAgentReady === false
+                ? " 未连接"
+                : " 检测中..."}
+            {localAgentReady === true && localAgentStatus?.bitBrowserPath
+              ? `，BitBrowser 已配置`
+              : ""}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={handleDownloadExtension}>
+            <Button type="button" variant="secondary" size="sm" onClick={handleDownloadClient}>
               <Download className="h-4 w-4" />
-              下载浏览器扩展
+              下载本地客户端
             </Button>
           </div>
           <div className="flex flex-wrap gap-3 text-xs text-zinc-400">
@@ -1077,7 +1090,7 @@ export default function PublishingPlatformLogin() {
             <span>有效账号：{summary.validCount}</span>
             <span>登录中：{summary.pendingCount}</span>
           </div>
-          <div className="space-y-3 rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+          <div className={`${panelClassName} space-y-3 px-3 py-3`}>
             <div className="text-sm font-semibold text-zinc-100">连接新频道</div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
               {connectChannelPlatforms.map((item) => (
@@ -1085,7 +1098,7 @@ export default function PublishingPlatformLogin() {
                   key={item.key}
                   type="button"
                   onClick={() => void handleConnectChannel(item)}
-                  disabled={connectingPlatform !== null}
+                  disabled={connectingPlatform !== null && connectingPlatform !== item.key}
                   className={`relative flex min-h-28 flex-col items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-center transition-colors disabled:cursor-not-allowed ${
                     item.enabled
                       ? "border-white/10 bg-white/5 hover:border-orange-400/40 hover:bg-orange-500/10"
@@ -1100,7 +1113,7 @@ export default function PublishingPlatformLogin() {
                           : "bg-white/10 text-zinc-200 ring-white/15"
                       }`}
                     >
-                      插件运行
+                      客户端接管
                     </span>
                   ) : null}
                   <span
@@ -1118,10 +1131,10 @@ export default function PublishingPlatformLogin() {
                 </button>
               ))}
             </div>
-            <div className="rounded-xl border border-white/10 bg-black/10 px-4 py-3 text-xs text-zinc-400">
+            <div className={`${panelClassName} px-4 py-3 text-xs text-zinc-400`}>
               {connectingPlatform
                 ? connectChannelPlatforms.find((item) => item.key === connectingPlatform)?.hint
-                : "当前小红书、抖音、微信视频号点击“连接新频道”会先清掉该平台当前浏览器登录态，再进入新账号登录；快手、哔哩哔哩、微信公众号走官方 OAuth。"}
+                : "当前抖音、小红书、微信视频号均使用平台账号专属 BitBrowser profile 登录；快手、哔哩哔哩、微信公众号走官方 OAuth。"}
             </div>
           </div>
         </CardContent>
@@ -1137,7 +1150,7 @@ export default function PublishingPlatformLogin() {
 
           {!loading ? (
             <div className="flex flex-col gap-3 lg:flex-row">
-              <div className="rounded-xl border border-white/10 bg-black/10 p-2 lg:w-64">
+              <div className={`${panelClassName} p-2 lg:w-64`}>
                 <button
                   type="button"
                   onClick={() => setActivePlatform("all")}
@@ -1183,11 +1196,19 @@ export default function PublishingPlatformLogin() {
                 </div>
               </div>
 
-              <div className="flex-1 rounded-xl border border-white/10 bg-black/10">
-                <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+              <div className={`${panelClassName} min-w-0 flex-1 overflow-hidden`}>
+                <div className={`flex items-center justify-between px-4 py-3 ${panelHeaderClassName}`}>
                   <div className="text-sm font-semibold text-zinc-100">{activePlatformLabel}</div>
                   <div className="flex items-center gap-3">
                     <div className="text-xs text-zinc-500">{visibleAccounts.length} 个账号</div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void handleKeepAliveAccounts()}
+                      disabled={keepingAlive}
+                    >
+                      {keepingAlive ? "活跃中..." : "活跃账号"}
+                    </Button>
                     {activePlatform !== "all" ? (
                       <Button
                         size="sm"
@@ -1207,8 +1228,15 @@ export default function PublishingPlatformLogin() {
                   <div className="divide-y divide-white/10">
                     {visibleAccounts.map((item) => {
                       const meta = platformMeta(item.platform);
-                      const online = item.status === "valid" && item.loginStatus === "authenticated";
+                      const keepAlive = keepAliveMeta(item.keepAliveStatus);
+                      const reauthRequired = item.reauthRequired || item.keepAliveStatus === "reauth_required";
+                      const isFirstLoginPending =
+                        item.loginStatus === "pending" && !item.lastLoginCompletedAt;
+                      const online =
+                        item.status === "valid" && item.loginStatus === "authenticated" && !reauthRequired;
+                      const needsRelogin = !online && !isFirstLoginPending;
                       const actionBusy =
+                        openingId === item.id ||
                         validatingId === item.id ||
                         deletingId === item.id ||
                         restartingId === item.id ||
@@ -1243,15 +1271,39 @@ export default function PublishingPlatformLogin() {
                                 </span>
                                 <span className="inline-flex items-center gap-1">
                                   <span
-                                    className={`h-2 w-2 rounded-full ${online ? "bg-emerald-400" : "bg-zinc-500"}`}
+                                    className={`h-2 w-2 rounded-full ${
+                                      isFirstLoginPending
+                                        ? "bg-amber-400"
+                                        : online
+                                          ? "bg-emerald-400"
+                                          : "bg-zinc-500"
+                                    }`}
                                   />
-                                  {online ? "在线" : "离线"}
+                                  {isFirstLoginPending ? "登录中" : online ? "在线" : "离线"}
                                 </span>
                                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
                                   {item.loginSourceLabel}
                                 </span>
+                                {keepAlive ? (
+                                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                    {keepAlive.label}
+                                  </span>
+                                ) : null}
                                 <span>粉丝：{item.followerCount ?? "-"}</span>
                               </div>
+                              {item.keepAliveStatus === "collect_failed" && item.keepAliveError ? (
+                                <div className="mt-1 text-xs text-amber-300">{item.keepAliveError}</div>
+                              ) : null}
+                              {isFirstLoginPending ? (
+                                <div className="mt-1 text-xs text-amber-300">
+                                  {item.lastError || "当前账号正在等待完成首次登录。"}
+                                </div>
+                              ) : null}
+                              {needsRelogin ? (
+                                <div className="mt-1 text-xs text-rose-300">
+                                  {item.keepAliveError || item.lastError || "当前账号需要重新登录。"}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
 
@@ -1259,18 +1311,24 @@ export default function PublishingPlatformLogin() {
                             <Button
                               size="sm"
                               variant="secondary"
-                              onClick={() => void handleOpenLoginUrl(item)}
-                              disabled={deletingId === item.id || validatingId === item.id || autoRefreshingId === item.id}
+                              onClick={() =>
+                                void ((isFirstLoginPending || needsRelogin)
+                                  ? handleRestartLogin(item)
+                                  : handleOpenAccountHome(item))
+                              }
+                              disabled={actionBusy}
                             >
-                              {autoRefreshingId === item.id ? "刷新中..." : "登录"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => void handleValidate(item)}
-                              disabled={validatingId === item.id || actionBusy}
-                            >
-                              {validatingId === item.id ? "校验中..." : "校验"}
+                              {isFirstLoginPending
+                                ? restartingId === item.id
+                                  ? "继续登录中..."
+                                  : "继续登录"
+                                : needsRelogin
+                                ? restartingId === item.id
+                                  ? "重新登录中..."
+                                  : "重新登录"
+                                : openingId === item.id
+                                  ? "打开中..."
+                                  : "打开"}
                             </Button>
                             <Button
                               size="sm"

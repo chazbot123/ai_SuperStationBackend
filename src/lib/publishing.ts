@@ -132,8 +132,28 @@ export type PlatformAccountItem = {
   lastLoginCompletedAt: string | null;
   lastValidatedAt: string | null;
   lastError: string | null;
+  keepAliveStatus: "success" | "reauth_required" | "collect_failed" | null;
+  keepAliveError: string | null;
+  keepAliveAt: string | null;
+  reauthRequired: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PlatformAccountsKeepAliveResult = {
+  trigger: "manual" | "schedule";
+  total: number;
+  succeeded: number;
+  reauthRequired: number;
+  collectFailed: number;
+  skipped: number;
+  items: Array<{
+    id: string;
+    platform: LeadPlatformStyle;
+    accountName: string;
+    status: "success" | "reauth_required" | "collect_failed" | "skipped";
+    message: string;
+  }>;
 };
 
 export type PlatformExtensionLoginSession = {
@@ -141,8 +161,13 @@ export type PlatformExtensionLoginSession = {
   sessionToken: string;
   platform: LeadPlatformStyle;
   accountId: string | null;
+  externalGroupId?: string | null;
   expiresAt: string;
   loginUrl: string;
+  runtimeSessionId?: string | null;
+  profileId?: string | null;
+  ownerId?: string | null;
+  bridgeBaseUrl?: string | null;
 };
 
 export type PlatformExtensionPublishSession = {
@@ -283,11 +308,18 @@ export async function openExtensionPlatformAccountHome(input: { accessToken: str
   return requestJson<{
     platform: LeadPlatformStyle;
     loginUrl: string;
-    authPayload: string;
+    profileId: string;
   }>("/api/publishing/extension/platform-accounts/open-home", {
     method: "POST",
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({ accountId: input.accountId }),
+  });
+}
+
+export async function keepAlivePlatformAccounts(input: { accessToken: string }) {
+  return requestJson<PlatformAccountsKeepAliveResult>("/api/publishing/platform-accounts/keepalive", {
+    method: "POST",
+    headers: getAuthHeaders(input.accessToken),
   });
 }
 
@@ -300,6 +332,7 @@ export async function syncExtensionPublishJob(input: {
   accountName?: string;
   displayName?: string;
   sourceUrl?: string;
+  runtimeSessionId?: string;
 }) {
   return requestJson<PublishingJobItem>("/api/publishing/extension/publish-jobs/sync", {
     method: "POST",
@@ -381,6 +414,7 @@ export async function createPlatformAccount(input: {
   displayName?: string;
   authPayload: string;
   remark?: string;
+  externalGroupId?: string;
 }) {
   return requestJson<PlatformAccountItem>("/api/publishing/platform-accounts", {
     method: "POST",
@@ -406,13 +440,28 @@ export async function startExtensionPlatformLogin(input: {
   accessToken: string;
   platform: LeadPlatformStyle;
   accountId?: string;
+  externalGroupId?: string;
 }) {
   const { accessToken, ...payload } = input;
-  return requestJson<PlatformExtensionLoginSession>("/api/publishing/platform-accounts/extension-login/start", {
-    method: "POST",
-    headers: getAuthHeaders(accessToken),
-    body: JSON.stringify(payload),
-  });
+  // #region debug-point A:extension-login-request
+  fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"douyin-login-no-reaction",runId:"pre-fix",hypothesisId:"A",location:"src/lib/publishing.ts:startExtensionPlatformLogin:request",msg:"[DEBUG] startExtensionPlatformLogin request",data:{platform:payload.platform,accountId:payload.accountId||null,externalGroupId:payload.externalGroupId||null},ts:Date.now()})}).catch(()=>{});
+  // #endregion
+  try {
+    const session = await requestJson<PlatformExtensionLoginSession>("/api/publishing/platform-accounts/extension-login/start", {
+      method: "POST",
+      headers: getAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    });
+    // #region debug-point A:extension-login-success
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"douyin-login-no-reaction",runId:"pre-fix",hypothesisId:"A",location:"src/lib/publishing.ts:startExtensionPlatformLogin:success",msg:"[DEBUG] startExtensionPlatformLogin success",data:{platform:session.platform,runtimeSessionId:session.runtimeSessionId||null,profileId:session.profileId||null,bridgeBaseUrl:session.bridgeBaseUrl||null,loginUrl:session.loginUrl},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+    return session;
+  } catch (error) {
+    // #region debug-point A:extension-login-error
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"douyin-login-no-reaction",runId:"pre-fix",hypothesisId:"A",location:"src/lib/publishing.ts:startExtensionPlatformLogin:error",msg:"[DEBUG] startExtensionPlatformLogin error",data:{platform:payload.platform,error:error instanceof Error ? error.message : String(error)},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw error;
+  }
 }
 
 export async function startMcpPlatformLogin(input: {
@@ -456,6 +505,7 @@ export async function updatePlatformAccount(input: {
   authPayload?: string;
   remark?: string;
   status?: PlatformAccountStatus;
+  externalGroupId?: string;
 }) {
   const { accessToken, id, ...payload } = input;
   return requestJson<PlatformAccountItem>(`/api/publishing/platform-accounts/${id}/update`, {

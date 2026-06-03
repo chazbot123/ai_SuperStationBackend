@@ -19,18 +19,12 @@ import {
   listPlatformAccounts,
   deletePublishingJob,
   publishLeadContent,
-  startExtensionPublishJob,
-  syncExtensionPublishJob,
   type LeadPlatformStyle,
   type LeadPublishStatus,
   type PlatformAccountItem,
   type PublishingContentItem,
   type PublishingJobItem,
 } from "@/lib/publishing";
-import {
-  pingPlatformLoginExtension,
-  startPlatformPublishExtensionSession,
-} from "@/lib/platformLoginExtension";
 
 export const publishPlatformOptions: Array<{ key: LeadPlatformStyle; label: string; enabled: boolean }> = [
   { key: "xiaohongshu", label: "小红书", enabled: true },
@@ -508,7 +502,7 @@ export default function Publishing() {
     try {
       setPublishing(true);
 
-      const extensionTargets = targets.filter(
+      const bitBrowserTargets = targets.filter(
         (item) =>
           item.platform === "xiaohongshu" ||
           item.platform === "douyin" ||
@@ -521,14 +515,6 @@ export default function Publishing() {
           item.platform !== "wechat_mp",
       );
 
-      if (extensionTargets.length > 0) {
-        const extensionReady = await pingPlatformLoginExtension();
-        if (!extensionReady) {
-          setHint("未检测到平台扩展，请先安装并启用扩展后再发布小红书/抖音/视频号。");
-          return;
-        }
-      }
-
       const createdJobs: PublishingJobItem[] = [];
 
       if (serverTargets.length > 0) {
@@ -540,43 +526,28 @@ export default function Publishing() {
         createdJobs.push(...serverResult.jobs);
       }
 
-      if (extensionTargets.length > 0) {
-        const extensionResult = await publishLeadContent({
+      if (bitBrowserTargets.length > 0) {
+        const bitBrowserResult = await publishLeadContent({
           accessToken,
           contentId: publishTarget,
-          targets: extensionTargets,
+          targets: bitBrowserTargets,
           executionMode: "extension",
         });
-        createdJobs.push(...extensionResult.jobs);
+        createdJobs.push(...bitBrowserResult.jobs);
+      }
 
-        for (const job of extensionResult.jobs) {
-          const session = await startExtensionPublishJob({
-            accessToken,
-            jobId: job.id,
-          });
-          try {
-            await startPlatformPublishExtensionSession({
-              session,
-              platform: job.platform,
-              apiBaseUrl: window.location.origin,
-            });
-          } catch (error) {
-            await syncExtensionPublishJob({
-              sessionToken: session.sessionToken,
-              status: "failed",
-              lastError: error instanceof Error ? error.message : "本地发布扩展启动失败",
-            });
-          }
-        }
+      if (createdJobs.length === 0) {
+        setHint("没有可创建的发布任务");
+        return;
       }
 
       setPublishJobs((prev) => mergeJobsById(prev, createdJobs));
       setPublishTarget(null);
       setHint(
-        extensionTargets.length > 0 && serverTargets.length > 0
-          ? "已创建发布任务：小红书/抖音/视频号由本机扩展执行，其余平台由后端执行。"
-          : extensionTargets.length > 0
-            ? "已创建发布任务：扩展正在用户本机浏览器执行发布流程。"
+        bitBrowserTargets.length > 0 && serverTargets.length > 0
+          ? "已创建发布任务：抖音/小红书/视频号由后台浏览器环境执行，其余平台由后端执行。"
+          : bitBrowserTargets.length > 0
+            ? "已创建发布任务：后台正在浏览器环境中执行发布。"
             : "已创建发布任务：后端正在执行发布流程。",
       );
       void refreshPublishJobs(true);
@@ -594,7 +565,7 @@ export default function Publishing() {
           <CardTitle>获客内容池</CardTitle>
         </CardHeader>
         <CardContent className="text-sm leading-6 text-zinc-300">
-          内容池展示已同步入池的正式素材。小红书、抖音、视频号走本机浏览器扩展执行，其余平台由后端执行发布流程。
+          内容池展示已同步入池的正式素材，发布任务会按平台自动进入对应执行流程。
         </CardContent>
       </Card>
 
@@ -767,7 +738,7 @@ export default function Publishing() {
               ) : null}
             </div>
 
-            <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
+            <div className="mt-4 flex gap-3 overflow-x-auto pt-1 pb-1">
               {visiblePlatformOptions.map((option) => {
                 const selected = selectedPlatforms.includes(option.key);
                 const active = activeEditorPlatform === option.key;
@@ -785,7 +756,7 @@ export default function Publishing() {
                   >
                     <span
                       className={`absolute -right-0.5 -top-0.5 z-10 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
-                        selected ? "bg-cyan-400 text-black" : "bg-white/10 text-zinc-300"
+                        selected ? "bg-cyan-400 text-white" : "bg-white/10 text-zinc-300"
                       }`}
                     >
                       {selected ? "✓" : "+"}
