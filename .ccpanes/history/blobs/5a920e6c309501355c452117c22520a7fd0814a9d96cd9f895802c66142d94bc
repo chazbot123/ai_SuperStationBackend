@@ -1,0 +1,24 @@
+# Debug Session: keepalive-no-motion
+- **Status**: [OPEN]
+- **Issue**: 点击“活跃账号”后页面没有切到前台，也没有滚动或轻量交互，保活仍失败
+- **Debug Server**: pending
+- **Log File**: `.dbg/trae-debug-log-keepalive-no-motion.ndjson`
+
+## Reproduction Steps
+1. 打开平台账号页
+2. 点击“活跃账号”
+3. 观察页面是否切到前台、是否滚动、是否发生轻量交互
+
+## Hypotheses & Verification
+| ID | Hypothesis | Likelihood | Effort | Evidence |
+|----|------------|------------|--------|----------|
+| A | 保活根本没执行到交互函数 | High | Low | Pending |
+| B | 保活执行了，但命中了错误的 page target | High | Med | Pending |
+| C | 交互打到了后台 tab，用户眼前窗口没被激活 | High | Med | Pending |
+| D | 保活在 `openProfile/openPlatformHome` 前就提前失败了 | Med | Low | Pending |
+
+## Log Evidence
+- Pending
+
+## Verification Conclusion
+- Pending

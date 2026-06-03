@@ -1,0 +1,20 @@
+[OPEN] Claude no response debug session
+
+## Session
+- session_id: `claude-no-response`
+- symptom: `Claude Code` 对话发送后无响应，界面提示所选模型可能不存在或无权限
+- scope: 本机 `Claude Code` 运行链路、环境变量、网关兼容性
+- constraint: 前 1-4 步不修改任何业务逻辑
+
+## Hypotheses
+- H1: 当前打开的 `Claude Code` 进程仍在使用旧环境变量，未读取到最新 `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` / `ANTHROPIC_API_KEY`
+- H2: `Claude Code` 客户端对模型名 `claude-sonnet-4.6` 或 `claude-sonnet-4-6` 做了本地校验，但网关别名映射与客户端识别不一致
+- H3: 当前网关对普通 `messages` 接口可用，但 `Claude Code` 实际依赖的附加接口或模型发现机制不完全兼容
+- H4: `Claude Code` 当前会话存在认证缓存或旧登录状态，导致 UI 请求未按最新 `API Key` 发送
+- H5: 发送请求后服务端有返回，但客户端前端/终端渲染未正确刷新，表现为“聊天没反应”
+
+## Evidence
+- pending
+
+## Next Step
+- 采集 `Claude` CLI/进程/环境变量/直接请求 的运行时证据

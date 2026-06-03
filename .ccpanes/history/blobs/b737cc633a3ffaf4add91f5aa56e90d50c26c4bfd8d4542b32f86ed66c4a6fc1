@@ -1,0 +1,21 @@
+# Debug Session: keepalive-cookie-timeout
+
+- Status: [OPEN]
+- Started: 2026-06-02
+- Symptom: 点击“活跃账号”失败，提示“扩展保活采集 Cookie 超时”
+- Scope: BitBrowser 保活 runtime bridge / 扩展命令拉取 / cookie 回传链路
+
+## Hypotheses
+
+1. `KEEPALIVE_COLLECT` 命令没有成功入队或没有被扩展拉取
+2. runtime session 未真正 ready，导致扩展没有进入命令派发阶段
+3. 扩展未命中 `KEEPALIVE_COLLECT` 分支，或命令状态没有正确 ack/complete
+4. 扩展已执行采集，但 `complete-command` 请求失败，后端一直等待超时
+5. `collectPlatformCookies()` / `collectPlatformCookiePayload()` 执行失败或卡住
+
+## Plan
+
+1. 为保活 runtime 命令链路加最小调试埋点
+2. 重启后端并让用户复现一次
+3. 对比 pre-fix 运行时日志，确认阻塞点
+4. 基于证据做最小修复

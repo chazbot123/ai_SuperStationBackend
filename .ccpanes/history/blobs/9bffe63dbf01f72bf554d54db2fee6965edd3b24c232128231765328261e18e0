@@ -1,0 +1,26 @@
+# Debug Session: video-login-500 [OPEN]
+
+## Symptoms
+- 点击视频号“重新登录”后，前端仍显示 `Internal server error`
+- 点击“活跃账号”后，状态识别仍不稳定
+- 点击小红书“重新登录”后，账号信息没有正确回填到平台列表
+
+## Expected
+- 视频号重新登录应复用原绑定 profile，并返回可读错误或成功打开登录窗口
+- 活跃账号结果应正确识别登录态，不出现异常聚合
+- 小红书重新登录完成后，应正确写回账号名、展示名等身份信息
+
+## Hypotheses
+1. `startPlatformExtensionLogin()` -> `startLoginRuntime()` 链路中存在普通异常，未转成业务异常，最终被包装为 500
+2. 视频号账号绑定的 `externalGroupId / profileBinding / owner` 未正确命中原 profile，导致重登打开失败
+3. 小红书扩展同步登录时上报的身份字段为空或弱值，后端 fallback 采集也未命中真实页面
+4. 保活接口返回结构或保活采集结果与前端展示预期不一致，导致“活跃账号没识别成功”
+
+## Plan
+1. 启动 Debug Server
+2. 在视频号重登、保活接口、小红书登录回填链路加最小埋点
+3. 请用户按路径复现
+4. 分析日志后再做最小修复
+
+## Evidence
+- Pending

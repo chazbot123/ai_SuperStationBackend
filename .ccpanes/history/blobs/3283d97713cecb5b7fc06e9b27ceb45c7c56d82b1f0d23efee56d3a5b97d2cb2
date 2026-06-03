@@ -1,0 +1,20 @@
+import { BitBrowserRuntimeSessionService } from './bitbrowser.runtime-session.service';
+import type { AckRuntimeCommandPayload, CompleteRuntimeCommandPayload, ExtensionBridgeReadyState, ExtensionHeartbeatPayload, ExtensionPageReadyBindPayload, ExtensionPageReadyBindResult, ExtensionReadyPayload, FailRuntimeCommandPayload, PullRuntimeCommandPayload, QueueKeepAliveCollectCommandPayload, QueueLoginCommandPayload, QueuePublishCommandPayload, RuntimeCommandEnvelope } from './bitbrowser.extension-bridge.types';
+export declare class BitBrowserExtensionBridgeError extends Error {
+}
+export declare class BitBrowserExtensionBridgeService {
+    private readonly runtimeSessionService;
+    constructor(runtimeSessionService: BitBrowserRuntimeSessionService);
+    registerReady(payload: ExtensionReadyPayload): Promise<ExtensionBridgeReadyState>;
+    heartbeat(payload: ExtensionHeartbeatPayload): Promise<ExtensionBridgeReadyState>;
+    bindRuntimeByPageReady(payload: ExtensionPageReadyBindPayload): Promise<ExtensionPageReadyBindResult>;
+    queueLoginPrepare(payload: QueueLoginCommandPayload): Promise<import("./bitbrowser.types").RuntimeCommand>;
+    queueLoginExecute(payload: QueueLoginCommandPayload): Promise<import("./bitbrowser.types").RuntimeCommand>;
+    queuePublishCommand(payload: QueuePublishCommandPayload): Promise<import("./bitbrowser.types").RuntimeCommand>;
+    queueKeepAliveCollect(payload: QueueKeepAliveCollectCommandPayload): Promise<import("./bitbrowser.types").RuntimeCommand>;
+    pullNextCommand(payload: PullRuntimeCommandPayload): Promise<RuntimeCommandEnvelope | null>;
+    ackCommand(payload: AckRuntimeCommandPayload): Promise<import("./bitbrowser.types").RuntimeCommand>;
+    completeCommand(payload: CompleteRuntimeCommandPayload): Promise<import("./bitbrowser.types").RuntimeCommand>;
+    failCommand(payload: FailRuntimeCommandPayload): Promise<import("./bitbrowser.types").RuntimeCommand>;
+    private assertCommandBelongsToSession;
+}

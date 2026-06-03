@@ -66,6 +66,11 @@ type FillBehaviorOptions = {
   perCharDelay?: number;
 };
 
+type ContextualLocatorMatch = {
+  context: LocatorContext;
+  locator: Locator;
+};
+
 @Injectable()
 export class PlatformLoginBrowserService implements OnModuleDestroy {
   private readonly logger = new Logger(PlatformLoginBrowserService.name);
@@ -297,13 +302,88 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     const headless = this.resolveHeadlessMode(options.preferVisible, options.purpose);
 
     try {
-      return await chromium.launchPersistentContext(sessionPath, {
+      const context = await chromium.launchPersistentContext(sessionPath, {
         headless,
         executablePath: this.resolveExecutablePath(),
       });
+      await this.installAutomationMitigations(context);
+      this.attachContextDialogGuards(context);
+      return context;
     } catch (error) {
       throw this.buildBrowserLaunchError(error, options.purpose, headless);
     }
+  }
+
+  private async installAutomationMitigations(context: BrowserContext) {
+    await context.addInitScript(() => {
+      try {
+        Object.defineProperty(navigator, 'webdriver', {
+          configurable: true,
+          get: () => undefined,
+        });
+      } catch {}
+
+      try {
+        Object.defineProperty(navigator, 'languages', {
+          configurable: true,
+          get: () => ['zh-CN', 'zh', 'en-US', 'en'],
+        });
+      } catch {}
+
+      try {
+        Object.defineProperty(navigator, 'plugins', {
+          configurable: true,
+          get: () => [1, 2, 3, 4],
+        });
+      } catch {}
+
+      try {
+        const originalQuery = window.navigator.permissions?.query?.bind(window.navigator.permissions);
+        if (originalQuery) {
+          window.navigator.permissions.query = (parameters: PermissionDescriptor) => {
+            if (parameters.name === 'notifications') {
+              return Promise.resolve({
+                name: 'notifications',
+                state: Notification.permission,
+                onchange: null,
+                addEventListener() {},
+                removeEventListener() {},
+                dispatchEvent() {
+                  return false;
+                },
+              } as unknown as PermissionStatus);
+            }
+            return originalQuery(parameters);
+          };
+        }
+      } catch {}
+
+      try {
+        const chromeLike = (window as Window & { chrome?: Record<string, unknown> }).chrome || {};
+        if (!chromeLike.runtime) {
+          chromeLike.runtime = {};
+        }
+        if (!chromeLike.app) {
+          chromeLike.app = {};
+        }
+        (window as Window & { chrome?: Record<string, unknown> }).chrome = chromeLike;
+      } catch {}
+    });
+  }
+
+  private attachContextDialogGuards(context: BrowserContext) {
+    for (const page of context.pages()) {
+      this.attachDialogGuardToPage(page);
+    }
+    context.on('page', (page) => {
+      this.attachDialogGuardToPage(page);
+    });
+  }
+
+  private attachDialogGuardToPage(page: Page) {
+    page.on('dialog', (dialog) => {
+      void dialog.dismiss().catch(() => undefined);
+    });
   }
 
   private resolveHeadlessMode(preferVisible: boolean, purpose: 'login' | 'publish' | 'read') {
@@ -708,6 +788,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       '[class*="editor"] [contenteditable="true"]',
     ];
     await this.enterXiaohongshuImagePublish(page);
+    await this.prepareInteractivePage(page, 'xiaohongshu-image-entry');
     await this.uploadFiles(page, uploadFiles, 'image', [
       'input[type="file"][accept*="image/png"]',
       'input[type="file"][accept*="image/jpeg"]',
@@ -717,6 +798,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       'input[accept*="image/*"]',
     ]);
     await this.waitForUploadSettled(page);
+    await this.prepareInteractivePage(page, 'xiaohongshu-image-editor');
     await this.fillFirst(page, [
       'div.input input.d-text',
       'input[placeholder*="标题"]',
@@ -765,8 +847,10 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       '[class*="editor"] [contenteditable="true"]',
     ];
     await this.enterXiaohongshuVideoPublish(page);
+    await this.prepareInteractivePage(page, 'xiaohongshu-video-entry');
     await this.uploadFiles(page, uploadFiles, 'video');
     await this.waitForUploadSettled(page);
+    await this.prepareInteractivePage(page, 'xiaohongshu-video-editor');
     await this.fillFirst(
       page,
       [
@@ -803,6 +887,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     this.logger.log(`[douyin-image-publish] start job=${input.jobId} tags=${input.tags.length}`);
     await this.prepareDouyinImagePublishMode(page);
+    await this.prepareInteractivePage(page, 'douyin-image-entry');
     await this.openDouyinImageUpload(page).catch(() => undefined);
     await this.uploadFiles(page, uploadFiles, 'image', [
       'input[type="file"][accept*="image/png"]',
@@ -830,6 +915,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     this.logger.log(`[douyin-video-publish] start job=${input.jobId} tags=${input.tags.length}`);
     await this.prepareDouyinVideoPublishMode(page);
+    await this.prepareInteractivePage(page, 'douyin-video-entry');
     await this.openDouyinVideoUpload(page).catch(() => undefined);
     await this.uploadFiles(page, uploadFiles, 'video', undefined, true);
     await this.finalizeDouyinPublish(page, input, true);
@@ -843,6 +929,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     let douyinBody = input.body;
     this.logger.log(`[douyin-publish] upload-finished job=${input.jobId}`);
     await this.waitForDouyinUploadSettled(page, hasVideo);
+    await this.prepareInteractivePage(page, 'douyin-editor');
     this.logger.log(`[douyin-publish] upload-settled job=${input.jobId}`);
     const normalizedTitle = input.title.trim();
     if (normalizedTitle) {
@@ -1501,22 +1588,27 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     ].flat();
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      for (const selector of selectors) {
-        const matched = page.locator(selector);
-        const count = await matched.count().catch(() => 0);
-        for (let index = 0; index < count; index += 1) {
-          const locator = matched.nth(index);
-          try {
-            await locator.setInputFiles(filePaths, { timeout: 5000 });
-            return;
-          } catch {
-            continue;
+      for (const context of this.getLocatorSearchContexts(page)) {
+        for (const selector of selectors) {
+          const matched = context.locator(selector);
+          const count = await matched.count().catch(() => 0);
+          for (let index = 0; index < count; index += 1) {
+            const locator = matched.nth(index);
+            try {
+              await locator.setInputFiles(filePaths, { timeout: 5000 });
+              return;
+            } catch {
+              continue;
+            }
           }
         }
       }
 
       if (attempt < 3) {
         await page.waitForTimeout(400);
+        if (this.isPageContext(page)) {
+          await this.dismissUnexpectedInterference(page, `upload-files-attempt-${attempt + 1}`);
+        }
       }
     }
 
@@ -1591,6 +1683,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       false,
     );
     if (ready) {
+      await this.humanPauseFast(page, 1200, 1800);
       return;
     }
 
@@ -1628,6 +1721,8 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       await page.waitForTimeout(1500);
       await this.ensureDouyinImageModeReady(page);
     }
+
+    await this.humanPauseFast(page, 1200, 1800);
   }
 
   private async prepareDouyinVideoPublishMode(page: Page) {
@@ -1716,6 +1811,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
 
     const locator = await this.findFirstLocator(page, selectors, true);
     if (locator) {
+      await this.dismissUnexpectedInterference(page, 'fill-first');
       await this.humanType(locator, normalized, {
         clearExisting: true,
         perCharDelay: options?.perCharDelay ?? 90,
@@ -1737,6 +1833,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       return null;
     }
 
+    await this.dismissUnexpectedInterference(page, 'fill-editor');
     const locator = await this.findFirstLocator(page, selectors, true);
     if (locator) {
       if (options?.humanizedMode === 'kuaishou-fast') {
@@ -1796,6 +1893,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     }
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
+      await this.dismissUnexpectedInterference(page, `douyin-description-${attempt + 1}`);
       const locator =
         (await this.findFirstLocator(page, douyinEditorSelectors, true)) ??
         (await this.findFirstLocator(page, douyinEditorSelectors, false));
@@ -2572,6 +2670,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private async clickXiaohongshuPublish(page: Page) {
+    await this.dismissUnexpectedInterference(page, 'xiaohongshu-before-publish');
     await page
       .evaluate(() => {
         window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' as ScrollBehavior });
@@ -2779,10 +2878,11 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private async findAndHighlightFirst(page: LocatorContext, selectors: string[]) {
-    const locator = await this.findFirstLocator(page, selectors, true);
-    if (!locator) {
+    const matched = await this.findFirstLocatorMatch(page, selectors, true);
+    if (!matched) {
       throw new ConflictException('未找到目标操作按钮');
     }
+    const locator = matched.locator;
 
     await locator.evaluate((node) => {
       if (!(node instanceof HTMLElement)) {
@@ -2800,8 +2900,10 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private async waitForUploadSettled(page: Page) {
+    await this.dismissUnexpectedInterference(page, 'wait-upload-start');
     await page.waitForTimeout(2500);
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => undefined);
+    await this.dismissUnexpectedInterference(page, 'wait-upload-finish');
   }
 
   private async openDouyinImageUpload(page: Page) {
@@ -2825,6 +2927,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       return;
     }
 
+    await this.dismissUnexpectedInterference(page, 'douyin-open-image-upload');
     await this.clickFirstSlow(page, [
       'button.container-drag-btn-k6XmB4:has-text("上传图文")',
       'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4:has-text("上传图文")',
@@ -2833,6 +2936,7 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
       .waitForSelector('input[type="file"]', { timeout: 10000 })
       .catch(() => undefined);
     await page.waitForTimeout(800);
+    await this.humanPauseFast(page, 1000, 2000);
   }
 
   private async openDouyinVideoUpload(page: Page) {
@@ -2866,8 +2970,13 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   private async waitForDouyinUploadSettled(page: Page, hasVideo: boolean) {
     const timeoutMs = hasVideo ? 45000 : 25000;
     const startedAt = Date.now();
+    let iteration = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
+      iteration += 1;
+      if (iteration === 1 || iteration % 3 === 0) {
+        await this.dismissUnexpectedInterference(page, `douyin-upload-wait-${iteration}`);
+      }
       const pageText = await this.readPageText(page);
       const matchedFailure = ['上传失败', '上传出错', '上传异常', '重新上传失败', '请重新上传'].find(
         (hint) => pageText.includes(hint),
@@ -3162,8 +3271,13 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     const timeoutMs = options.timeoutMs ?? 15000;
     const failureHints = options.failureHints ?? [];
     const startedAt = Date.now();
+    let iteration = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
+      iteration += 1;
+      if (iteration === 1 || iteration % 3 === 0) {
+        await this.dismissUnexpectedInterference(page, `action-finish-${iteration}`);
+      }
       const pageText = await this.readPageText(page);
       const matchedFailureHint = failureHints.find((hint) => pageText.includes(hint));
       if (matchedFailureHint) {
@@ -3193,8 +3307,13 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
     const successHints = ['发布成功', '作品发布成功', '发布完成', '审核中', '正在审核', '已发布', '作品管理'];
     const failureHints = ['发布失败', '请完善内容', '请先上传', '请先添加', '上传失败', '校验失败'];
     const startedAt = Date.now();
+    let iteration = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
+      iteration += 1;
+      if (iteration === 1 || iteration % 3 === 0) {
+        await this.dismissUnexpectedInterference(page, `douyin-publish-finish-${iteration}`);
+      }
       const pageText = await this.readPageText(page);
       const matchedFailure = failureHints.find((hint) => pageText.includes(hint));
       if (matchedFailure) {
@@ -3329,21 +3448,145 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private async findFirstLocator(page: LocatorContext, selectors: string[], visibleOnly: boolean) {
-    for (const selector of selectors) {
-      const matched = page.locator(selector);
-      const count = await matched.count().catch(() => 0);
-      for (let index = 0; index < count; index += 1) {
-        const locator = matched.nth(index);
-        if (!visibleOnly) {
-          return locator;
-        }
-        if (await locator.isVisible().catch(() => false)) {
-          return locator;
+    const matched = await this.findFirstLocatorMatch(page, selectors, visibleOnly);
+    return matched?.locator ?? null;
+  }
+
+  private async findFirstLocatorMatch(
+    page: LocatorContext,
+    selectors: string[],
+    visibleOnly: boolean,
+  ): Promise<ContextualLocatorMatch | null> {
+    for (const context of this.getLocatorSearchContexts(page)) {
+      for (const selector of selectors) {
+        const matched = context.locator(selector);
+        const count = await matched.count().catch(() => 0);
+        for (let index = 0; index < count; index += 1) {
+          const locator = matched.nth(index);
+          if (!visibleOnly) {
+            return { context, locator };
+          }
+          if (await locator.isVisible().catch(() => false)) {
+            return { context, locator };
+          }
         }
       }
     }
 
     return null;
+  }
+
+  private getLocatorSearchContexts(root: LocatorContext) {
+    if (this.isPageContext(root)) {
+      return [root, ...root.frames().filter((frame) => frame !== root.mainFrame())];
+    }
+
+    const contexts: LocatorContext[] = [root];
+    const stack = [...root.childFrames()];
+    while (stack.length > 0) {
+      const current = stack.shift();
+      if (!current) {
+        continue;
+      }
+      contexts.push(current);
+      stack.push(...current.childFrames());
+    }
+
+    return contexts;
+  }
+
+  private isPageContext(root: LocatorContext): root is Page {
+    return typeof (root as Page).frames === 'function' && typeof (root as Page).mainFrame === 'function';
+  }
+
+  private async prepareInteractivePage(page: Page, reason: string) {
+    await this.dismissUnexpectedInterference(page, `${reason}-before`);
+    await this.emulateHumanPresence(page);
+    await this.humanPauseFast(page, 260, 520);
+    await this.dismissUnexpectedInterference(page, `${reason}-after`);
+  }
+
+  private async emulateHumanPresence(page: Page) {
+    const viewport =
+      page.viewportSize() ||
+      (await page
+        .evaluate(() => ({
+          width: window.innerWidth || document.documentElement.clientWidth || 1280,
+          height: window.innerHeight || document.documentElement.clientHeight || 720,
+        }))
+        .catch(() => ({ width: 1280, height: 720 })));
+    const startX = this.getRandomDelay(60, Math.max(80, Math.floor(viewport.width * 0.28)));
+    const midX = this.getRandomDelay(Math.floor(viewport.width * 0.32), Math.floor(viewport.width * 0.68));
+    const endX = this.getRandomDelay(Math.floor(viewport.width * 0.62), Math.max(80, viewport.width - 60));
+    const startY = this.getRandomDelay(120, Math.max(140, Math.floor(viewport.height * 0.35)));
+    const midY = this.getRandomDelay(Math.floor(viewport.height * 0.36), Math.floor(viewport.height * 0.62));
+    const endY = this.getRandomDelay(Math.floor(viewport.height * 0.3), Math.floor(viewport.height * 0.72));
+    await page.mouse.move(startX, startY, { steps: this.getRandomDelay(6, 12) }).catch(() => undefined);
+    await page.waitForTimeout(this.getRandomDelay(80, 160));
+    await page.mouse.move(midX, midY, { steps: this.getRandomDelay(8, 16) }).catch(() => undefined);
+    await page.waitForTimeout(this.getRandomDelay(60, 140));
+    await page.mouse.move(endX, endY, { steps: this.getRandomDelay(8, 18) }).catch(() => undefined);
+    await page.mouse.wheel(0, this.getRandomDelay(120, 260)).catch(() => undefined);
+    await page.waitForTimeout(this.getRandomDelay(120, 220));
+    await page.mouse.wheel(0, -this.getRandomDelay(60, 180)).catch(() => undefined);
+  }
+
+  private async dismissUnexpectedInterference(page: Page, reason: string) {
+    const safeActionSelectors = [
+      '[role="dialog"] button:has-text("我知道了")',
+      '[role="dialog"] button:has-text("知道了")',
+      '[role="dialog"] button:has-text("稍后再说")',
+      '[role="dialog"] button:has-text("以后再说")',
+      '[role="dialog"] button:has-text("跳过")',
+      '[role="dialog"] button:has-text("继续")',
+      '[role="dialog"] button:has-text("同意")',
+      '[role="dialog"] button:has-text("允许")',
+      '[role="dialog"] button:has-text("关闭")',
+      '[role="dialog"] button:has-text("取消")',
+      '[aria-modal="true"] button:has-text("我知道了")',
+      '[aria-modal="true"] button:has-text("知道了")',
+      '[aria-modal="true"] button:has-text("稍后再说")',
+      '[aria-modal="true"] button:has-text("以后再说")',
+      '[aria-modal="true"] button:has-text("跳过")',
+      '[aria-modal="true"] button:has-text("继续")',
+      '[aria-modal="true"] button:has-text("同意")',
+      '[aria-modal="true"] button:has-text("允许")',
+      '[aria-modal="true"] button:has-text("关闭")',
+      '[aria-modal="true"] button:has-text("取消")',
+      '[class*="modal"] button:has-text("我知道了")',
+      '[class*="dialog"] button:has-text("我知道了")',
+      '[class*="popup"] button:has-text("我知道了")',
+      '[class*="modal"] button:has-text("知道了")',
+      '[class*="dialog"] button:has-text("知道了")',
+      '[class*="popup"] button:has-text("知道了")',
+      '[class*="modal"] button:has-text("关闭")',
+      '[class*="dialog"] button:has-text("关闭")',
+      '[class*="popup"] button:has-text("关闭")',
+      '[role="dialog"] [aria-label="关闭"]',
+      '[aria-modal="true"] [aria-label="关闭"]',
+      '[class*="modal"] [aria-label="关闭"]',
+      '[class*="dialog"] [aria-label="关闭"]',
+      '[class*="popup"] [aria-label="关闭"]',
+      '[class*="modal"] [class*="close"]',
+      '[class*="dialog"] [class*="close"]',
+      '[class*="popup"] [class*="close"]',
+    ];
+    let dismissedCount = 0;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const matched = await this.findFirstLocator(page, safeActionSelectors, true);
+      if (!matched) {
+        if (attempt === 0) {
+          await page.keyboard.press('Escape').catch(() => undefined);
+        }
+        break;
+      }
+      await this.humanClickFast(matched).catch(() => undefined);
+      dismissedCount += 1;
+      await page.waitForTimeout(this.getRandomDelay(220, 420));
+    }
+    if (dismissedCount > 0) {
+      this.logger.log(`[page-guard] dismissed-interference reason=${reason} count=${dismissedCount} url=${page.url()}`);
+    }
   }
 
   private async prepareUploadFiles(input: PlatformDraftSaveInput) {
@@ -3904,12 +4147,19 @@ export class PlatformLoginBrowserService implements OnModuleDestroy {
   }
 
   private async readPageText(page: LocatorContext) {
-    try {
-      const text = await page.locator('body').innerText({ timeout: 2000 });
-      return this.normalizeProfileText(text) || '';
-    } catch {
-      return '';
+    const texts: string[] = [];
+    for (const context of this.getLocatorSearchContexts(page)) {
+      try {
+        const text = await context.locator('body').innerText({ timeout: 1200 });
+        const normalized = this.normalizeProfileText(text) || '';
+        if (normalized) {
+          texts.push(normalized);
+        }
+      } catch {
+        // ignore unreadable frame/page context
+      }
     }
+    return Array.from(new Set(texts)).join('\n');
   }
 
   private async extractProfileFromScreenshot(page: Page, platform: LeadPublishPlatform) {

@@ -1,0 +1,98 @@
+import type {
+  AcquireProfileLockInput,
+  BindBitBrowserProfileInput,
+  BitBrowserBrowserCreatePayload,
+  BitBrowserCreateProfileResult,
+  BitBrowserOpenProfileResult,
+  BrowserProfileBinding,
+  BusinessOwner,
+  CreateBitBrowserProfileInput,
+  CreateBusinessOwnerInput,
+  CreateRuntimeCommandInput,
+  CreateRuntimeSessionInput,
+  OwnerRuntimeContext,
+  PlatformAccountBinding,
+  RegisterExtensionHandshakeInput,
+  RegisterPlatformAccountInput,
+  ReleaseProfileLockInput,
+  RuntimeCommand,
+  RuntimeSession,
+  ProfileRuntimeLock,
+  PlatformType,
+  UpdateRuntimeCommandStatusInput,
+  UpdateRuntimeSessionStatusInput,
+} from './bitbrowser.types';
+
+export interface BitBrowserRuntimeProvider {
+  createProfile(
+    input: CreateBitBrowserProfileInput,
+    payload: BitBrowserBrowserCreatePayload,
+  ): Promise<BitBrowserCreateProfileResult>;
+  openProfile(binding: BrowserProfileBinding): Promise<BitBrowserOpenProfileResult>;
+  closeProfile(binding: BrowserProfileBinding): Promise<void>;
+  openPlatformHome(
+    binding: BrowserProfileBinding,
+    platform: PlatformType,
+    runtime?: BitBrowserOpenProfileResult,
+  ): Promise<void>;
+}
+
+export interface BitBrowserBindingRepository {
+  createOwner(input: CreateBusinessOwnerInput): Promise<BusinessOwner>;
+  getOwnerById(creatorId: string, ownerId: string): Promise<BusinessOwner | null>;
+  listOwners(creatorId: string): Promise<BusinessOwner[]>;
+
+  bindProfile(input: BindBitBrowserProfileInput): Promise<BrowserProfileBinding>;
+  getProfileBindingByPlatformAccount(
+    creatorId: string,
+    ownerId: string,
+    platform: PlatformType,
+    accountId?: string | null,
+    accountName?: string | null,
+  ): Promise<BrowserProfileBinding | null>;
+  getProfileBindingById(
+    creatorId: string,
+    profileBindingId: string,
+  ): Promise<BrowserProfileBinding | null>;
+  touchProfileBinding(
+    creatorId: string,
+    profileBindingId: string,
+    usedAt: string,
+  ): Promise<void>;
+
+  registerPlatformAccount(
+    input: RegisterPlatformAccountInput,
+  ): Promise<PlatformAccountBinding>;
+  listPlatformAccountsByOwner(
+    creatorId: string,
+    ownerId: string,
+  ): Promise<PlatformAccountBinding[]>;
+
+  acquireProfileLock(input: AcquireProfileLockInput): Promise<ProfileRuntimeLock>;
+  getProfileLock(profileBindingId: string): Promise<ProfileRuntimeLock | null>;
+  releaseProfileLock(input: ReleaseProfileLockInput): Promise<void>;
+
+  createRuntimeSession(input: CreateRuntimeSessionInput): Promise<RuntimeSession>;
+  getRuntimeSessionById(runtimeSessionId: string): Promise<RuntimeSession | null>;
+  listRuntimeSessions(): Promise<RuntimeSession[]>;
+  listRuntimeSessionsByProfileBindingId(
+    profileBindingId: string,
+  ): Promise<RuntimeSession[]>;
+  registerExtensionHandshake(
+    input: RegisterExtensionHandshakeInput,
+  ): Promise<RuntimeSession>;
+  updateRuntimeSessionStatus(
+    input: UpdateRuntimeSessionStatusInput,
+  ): Promise<RuntimeSession>;
+
+  createRuntimeCommand(input: CreateRuntimeCommandInput): Promise<RuntimeCommand>;
+  listRuntimeCommandsBySessionId(runtimeSessionId: string): Promise<RuntimeCommand[]>;
+  updateRuntimeCommandStatus(
+    input: UpdateRuntimeCommandStatusInput,
+  ): Promise<RuntimeCommand>;
+}
+
+export interface PreparedBitBrowserRuntime {
+  runtime: BitBrowserOpenProfileResult;
+  context: OwnerRuntimeContext;
+}

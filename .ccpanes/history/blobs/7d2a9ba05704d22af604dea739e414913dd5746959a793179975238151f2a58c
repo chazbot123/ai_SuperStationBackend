@@ -1,0 +1,93 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var PublishingProfileKeepaliveService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PublishingProfileKeepaliveService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const publishing_service_1 = require("./publishing.service");
+let PublishingProfileKeepaliveService = PublishingProfileKeepaliveService_1 = class PublishingProfileKeepaliveService {
+    publishingService;
+    configService;
+    logger = new common_1.Logger(PublishingProfileKeepaliveService_1.name);
+    keepAliveTimer = null;
+    startupTimer = null;
+    running = false;
+    constructor(publishingService, configService) {
+        this.publishingService = publishingService;
+        this.configService = configService;
+    }
+    onModuleInit() {
+        if (!this.isEnabled()) {
+            return;
+        }
+        const intervalMs = this.resolveIntervalMs();
+        const initialDelayMs = this.resolveInitialDelayMs();
+        this.startupTimer = setTimeout(() => {
+            void this.executeScheduledKeepAlive();
+            this.keepAliveTimer = setInterval(() => {
+                void this.executeScheduledKeepAlive();
+            }, intervalMs);
+        }, initialDelayMs);
+    }
+    onModuleDestroy() {
+        if (this.startupTimer) {
+            clearTimeout(this.startupTimer);
+            this.startupTimer = null;
+        }
+        if (this.keepAliveTimer) {
+            clearInterval(this.keepAliveTimer);
+            this.keepAliveTimer = null;
+        }
+    }
+    async executeScheduledKeepAlive() {
+        if (!this.isEnabled()) {
+            return { skipped: true };
+        }
+        if (this.running) {
+            return { skipped: true, reason: 'running' };
+        }
+        this.running = true;
+        try {
+            const result = await this.publishingService.runScheduledKeepAliveForPlatformAccounts();
+            this.logger.log(`Profile keepalive finished: total=${result.total}, succeeded=${result.succeeded}, reauthRequired=${result.reauthRequired}, collectFailed=${result.collectFailed}, skipped=${result.skipped}`);
+            return result;
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.error(`Profile keepalive failed: ${message}`);
+            throw error;
+        }
+        finally {
+            this.running = false;
+        }
+    }
+    isEnabled() {
+        return this.configService.get('PUBLISH_PROFILE_KEEPALIVE_ENABLED', 'true') !== 'false';
+    }
+    resolveIntervalMs() {
+        const raw = this.configService.get('PUBLISH_PROFILE_KEEPALIVE_INTERVAL_MS', '86400000');
+        const parsed = Number.parseInt(String(raw), 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 86400000;
+    }
+    resolveInitialDelayMs() {
+        const raw = this.configService.get('PUBLISH_PROFILE_KEEPALIVE_INITIAL_DELAY_MS', '60000');
+        const parsed = Number.parseInt(String(raw), 10);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : 60000;
+    }
+};
+exports.PublishingProfileKeepaliveService = PublishingProfileKeepaliveService;
+exports.PublishingProfileKeepaliveService = PublishingProfileKeepaliveService = PublishingProfileKeepaliveService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [publishing_service_1.PublishingService,
+        config_1.ConfigService])
+], PublishingProfileKeepaliveService);
+//# sourceMappingURL=publishing-profile-keepalive.service.js.map

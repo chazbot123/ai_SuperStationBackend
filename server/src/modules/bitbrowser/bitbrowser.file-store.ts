@@ -113,8 +113,8 @@ async function reportDouyinLoginDebug(
 export class FileBitBrowserBindingRepository
   implements BitBrowserBindingRepository
 {
+  private static readonly writeQueues = new Map<string, Promise<void>>();
   private readonly storageFilePath: string;
-  private storeWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(storageFilePath = resolve(DEFAULT_BITBROWSER_STORAGE_FILE)) {
     this.storageFilePath = storageFilePath;
@@ -602,13 +602,50 @@ export class FileBitBrowserBindingRepository
     await mkdir(dirname(this.storageFilePath), { recursive: true });
     const tempPath = `${this.storageFilePath}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(tempPath, JSON.stringify(store, null, 2), 'utf8');
-    await rename(tempPath, this.storageFilePath);
+    await this.renameWithRetry(tempPath, this.storageFilePath);
   }
 
   private async runExclusiveStoreWrite<T>(operation: () => Promise<T>): Promise<T> {
-    const operationPromise = this.storeWriteQueue.catch(() => undefined).then(operation);
-    this.storeWriteQueue = operationPromise.then(() => undefined, () => undefined);
+    const queueKey = this.storageFilePath.toLowerCase();
+    const activeQueue =
+      FileBitBrowserBindingRepository.writeQueues.get(queueKey) ?? Promise.resolve();
+    const operationPromise = activeQueue.catch(() => undefined).then(operation);
+    FileBitBrowserBindingRepository.writeQueues.set(
+      queueKey,
+      operationPromise.then(() => undefined, () => undefined),
+    );
     return operationPromise;
+  }
+
+  private async renameWithRetry(fromPath: string, toPath: string) {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      try {
+        await rename(fromPath, toPath);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!this.isRetryableRenameError(error) || attempt === 6) {
+          break;
+        }
+        await this.sleep(attempt * 40);
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private isRetryableRenameError(error: unknown) {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+    const code = String((error as { code?: unknown }).code || '').trim().toUpperCase();
+    return code === 'EPERM' || code === 'EBUSY' || code === 'EACCES';
+  }
+
+  private async sleep(ms: number) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   private tryParseStore(raw: string): BitBrowserStoreSnapshot | null {

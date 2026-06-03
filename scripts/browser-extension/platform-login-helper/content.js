@@ -22,6 +22,7 @@
   };
   const profileDebugState = {
     douyinSignature: "",
+    xiaohongshuSignature: "",
   };
   const profileObserverState = {
     scheduled: false,
@@ -749,7 +750,7 @@
       for (const container of containers) {
         const scopedMetric = normalize(
           container?.querySelector?.(
-            ".finder-info-num, [class*='finder-info-num'], .numerical, [class*='numerical']",
+            ".number-No6ev9, [class*='number-'], .finder-info-num, [class*='finder-info-num'], .numerical, [class*='numerical']",
           )?.textContent || "",
         );
         const parsedScopedMetric = parseCountText(scopedMetric);
@@ -764,7 +765,7 @@
       const text = normalize(container.textContent || "");
       if (!text || !text.includes(label) || text.length > 160) continue;
       const scopedMetric = normalize(
-        container.querySelector?.(".finder-info-num, [class*='finder-info-num'], .numerical, [class*='numerical']")
+        container.querySelector?.(".number-No6ev9, [class*='number-'], .finder-info-num, [class*='finder-info-num'], .numerical, [class*='numerical']")
           ?.textContent || "",
       );
       const parsedScopedMetric = parseCountText(scopedMetric);
@@ -785,7 +786,7 @@
 
       const parent = node.parentElement;
       const nearbyCount = normalize(
-        parent?.querySelector?.(".numerical, [class*='numerical'], .finder-info-num, [class*='finder-info-num']")
+        parent?.querySelector?.(".number-No6ev9, [class*='number-'], .numerical, [class*='numerical'], .finder-info-num, [class*='finder-info-num']")
           ?.textContent || "",
       );
       const parsedNearby = parseCountText(nearbyCount);
@@ -928,12 +929,12 @@
       ],
       xiaohongshu: [
         {
-          account: /小红书(?:号|账号)\s*[:：]?\s*([A-Za-z0-9_-]+)/i,
-          display: /昵称\s*[:：]?\s*([^\s]{1,40})/i,
+          account: /小红书(?:号|账号|id)\s*[:：]?\s*([A-Za-z0-9_-]+)/i,
+          display: /(?:昵称|账号昵称|用户名)\s*[:：]?\s*([^\s]{1,40})/i,
         },
         {
-          account: /([^\s]{1,40})\s+小红书(?:号|账号)\s*[:：]?\s*([A-Za-z0-9_-]{4,})/i,
-          display: /([^\s]{1,40})\s+小红书(?:号|账号)\s*[:：]?\s*[A-Za-z0-9_-]{4,}/i,
+          account: /([^\s]{1,40})[\s\S]{0,40}?小红书(?:号|账号|ID)\s*[:：]?\s*([A-Za-z0-9_-]{4,})/i,
+          display: /([^\s]{1,40})[\s\S]{0,40}?小红书(?:号|账号|ID)\s*[:：]?\s*[A-Za-z0-9_-]{4,}/i,
         },
         {
           account: /([A-Za-z0-9_-]{4,})\s+(?:粉丝|获赞|收藏)/i,
@@ -1061,7 +1062,7 @@
   function extractProfile(platform) {
     const pageText = getPageText();
     const anchors = {
-      xiaohongshu: ["小红书号", "小红书账号"],
+      xiaohongshu: ["小红书号", "小红书账号", "昵称", "账号昵称", "用户名"],
       douyin: ["抖音号"],
       wechat_mp: ["视频号ID", "视频号 Id", "视频号"],
       kuaishou: ["快手号"],
@@ -1078,9 +1079,12 @@
             ".account-name",
             "div.account-name",
             "div.account-name[data-v-bf295dc2]",
+            "[class*='creator-name']",
+            "[class*='nickname']",
+            "[class*='nick-name']",
+            "[class*='user-nickname']",
             "[class*='user-name']",
             "[class*='username']",
-            "[class*='nickname']",
             "[class*='account-name']",
           ],
           douyin: [
@@ -1122,6 +1126,18 @@
               "[class*='douyin-id']",
             ]),
           ) || null
+        : platform === "xiaohongshu"
+          ? normalizeIdentityText(
+              findFirstText([
+                ".account-id",
+                "[class*='account-id']",
+                "[class*='user-id']",
+                "[class*='creator-id']",
+                "[class*='red-id']",
+                "[class*='blogger-id']",
+              ]),
+              platform,
+            ) || null
         : platform === "wechat_mp"
           ? normalizeIdentityText(
               findFirstText([
@@ -1189,14 +1205,14 @@
             findMetricCountByLabel("粉丝")
           : findMetricCountByLabel("粉丝")
         : platform === "douyin"
-          ? parseCountText(
+          ? findMetricCountByLabel("粉丝") ||
+            parseCountText(
               findFirstText([
                 "span.number-No6ev9",
                 "[class*='fans'] span.number-No6ev9",
                 "[class*='follower'] span.number-No6ev9",
               ]),
-            ) ||
-            findMetricCountByLabel("粉丝")
+            )
           : null;
 
     const normalizedDisplayName =
@@ -1232,6 +1248,42 @@
             hypothesisId: "H1",
             location: "scripts/browser-extension/platform-login-helper/content.js:extractProfile:douyin",
             msg: "[DEBUG] douyin profile extract result",
+            data: debugPayload,
+            ts: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      }
+    }
+    if (platform === "xiaohongshu") {
+      const debugPayload = {
+        href: window.location.href,
+        title: document.title || "",
+        directDisplayName,
+        directAccountName,
+        anchoredBlockText: anchoredBlockText ? anchoredBlockText.slice(0, 200) : "",
+        anchoredHasElement: Boolean(anchoredBlockElement),
+        profileFromAnchoredText,
+        profileFromPageText,
+        titleFallback,
+        normalizedAccountName,
+        normalizedDisplayName,
+        hasAvatar: Boolean(avatarUrl),
+        avatarUrl: avatarUrl || "",
+        followerCount,
+      };
+      const signature = JSON.stringify(debugPayload);
+      if (profileDebugState.xiaohongshuSignature !== signature) {
+        profileDebugState.xiaohongshuSignature = signature;
+        // #region debug-point X1:xiaohongshu-profile-extract
+        fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          body: JSON.stringify({
+            sessionId: "xiaohongshu-login-recognition",
+            runId: "pre-fix",
+            hypothesisId: "H1",
+            location: "scripts/browser-extension/platform-login-helper/content.js:extractProfile:xiaohongshu",
+            msg: "[DEBUG] xiaohongshu profile extract result",
             data: debugPayload,
             ts: Date.now(),
           }),

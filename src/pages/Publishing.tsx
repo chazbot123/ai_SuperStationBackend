@@ -738,7 +738,7 @@ export default function Publishing() {
               ) : null}
             </div>
 
-            <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
+            <div className="mt-4 flex gap-3 overflow-x-auto pt-1 pb-1">
               {visiblePlatformOptions.map((option) => {
                 const selected = selectedPlatforms.includes(option.key);
                 const active = activeEditorPlatform === option.key;

@@ -1,0 +1,686 @@
+# AI-SuperWeb 宝塔服务器部署手册（成功备案版）
+
+## 目标
+- 项目根目录固定为 `/data/ai-superweb`
+- 服务器不拉源码，只上传运行包
+- 本次不导入任何备份数据库
+- 数据库按空库初始化
+- 文档中的密码统一写为 `!ZHILIN1`
+- 图片、视频等文件由 `Nginx` 直出
+
+## 本次本机现成文件
+
+### 运行包目录
+- `D:\zhilin_project\backups\deploy_bundle_20260509_143128\project-root`
+
+## 当前推荐上线架构
+
+```text
+Browser
+  |
+  +-- https://admin.chilintec.com -> Nginx -> /data/ai-superweb/dist
+  |                                   \-> /api -> 127.0.0.1:3001
+  |
+  +-- https://www.chilintec.com -> Nginx -> /data/ai-superweb/ZL_Supersite/dist
+  |                                 \-> /api -> 127.0.0.1:3001
+  |
+  +-- https://files.chilintec.com -> Nginx -> 127.0.0.1:9000
+  |                                   \-> 图片 / 视频 / 文件直出
+  |
+  +-- 所有对外地址统一按域名口径
+
+BaoTa Server
+  |
+  +-- /data/ai-superweb
+       +-- dist
+       +-- ZL_Supersite/dist
+       +-- server
+       +-- data/postgres
+       +-- data/redis
+       +-- data/minio
+       +-- logs
+       +-- docker-compose.yml
+       +-- .env
+```
+
+## 运行包内应该有什么
+- 根目录 `dist`
+- `ZL_Supersite/dist`
+- `server/dist`
+- `server/package.json`
+- `server/package-lock.json`
+- `server/prisma/schema.prisma`
+- `server/prisma/seed.ts`
+- `docker-compose.yml`
+
+## 为什么这次不用拉源码
+- 前端只需要静态 `dist`
+- 后端运行包只带 `dist + package.json + package-lock.json + prisma + .env`
+- `server/node_modules` 不再本地打包上传，改成服务器执行 `npm ci`
+- 服务器只负责运行，不负责构建
+
+## 1. 宝塔服务器基础环境
+
+### 1.1 建议规格
+- `CentOS 7.9+ / Alibaba Cloud Linux 3 / Rocky Linux 8+`
+- 最少 `4 vCPU / 8 GB RAM / 100 GB SSD`
+
+### 1.2 宝塔面板建议安装
+- `Nginx`
+- `PM2 管理器`
+- `Docker 管理器`
+- `文件`
+- `终端`
+
+### 1.3 基础工具
+
+```bash
+yum makecache || dnf makecache
+yum install -y curl unzip wget jq ca-certificates gcc gcc-c++ make git vim tar || \
+dnf install -y curl unzip wget jq ca-certificates gcc gcc-c++ make git vim tar
+
+which yum || true
+which dnf || true
+cat /etc/os-release
+timedatectl set-timezone Asia/Shanghai
+```
+
+## 2. 安装 Docker 与 Compose
+
+```bash
+curl -fsSL https://get.docker.com | sh
+systemctl enable docker
+systemctl start docker
+
+docker --version
+docker compose version
+```
+
+## 3. 安装 Node.js 20、PM2、Chrome
+
+```bash
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+yum install -y nodejs || dnf install -y nodejs
+npm install -g pm2
+
+yum install -y gtk3 libXScrnSaver alsa-lib atk at-spi2-atk \
+  cups-libs libdrm libXcomposite libXdamage libXfixes libXrandr libgbm libxshmfence \
+  nss nspr xorg-x11-fonts-Type1 xorg-x11-utils wget ffmpeg || \
+dnf install -y gtk3 libXScrnSaver alsa-lib atk at-spi2-atk \
+  cups-libs libdrm libXcomposite libXdamage libXfixes libXrandr libgbm libxshmfence \
+  nss nspr xorg-x11-fonts-Type1 xorg-x11-utils wget ffmpeg
+
+cat > /etc/yum.repos.d/google-chrome.repo <<'EOF'
+[google-chrome]
+name=google-chrome
+baseurl=https://dl.google.com/linux/chrome/rpm/stable/x86_64
+enabled=1
+gpgcheck=1
+gpgkey=https://dl.google.com/linux/linux_signing_key.pub
+EOF
+
+yum makecache || dnf makecache
+yum install -y google-chrome-stable || dnf install -y google-chrome-stable
+
+node -v
+npm -v
+pm2 -v
+google-chrome --version
+ffmpeg -version | head -n 1
+```
+
+## 4. 创建服务器目录
+
+```bash
+mkdir -p /data/ai-superweb
+mkdir -p /data/ai-superweb/data
+mkdir -p /data/ai-superweb/logs
+mkdir -p /data/ai-superweb/scripts
+mkdir -p /data/ai-superweb/ZL_Supersite
+mkdir -p /data/ai-superweb/server
+```
+
+## 5. 上传运行包
+
+- 推荐把本机运行包目录内容上传到服务器 `/data/ai-superweb/`
+- 可用 `WinSCP`、`FinalShell`、宝塔文件上传
+
+```bash
+scp -r D:/zhilin_project/backups/deploy_bundle_20260509_143128/project-root/* root@8.134.35.29:/data/ai-superweb/
+```
+
+## 6. 确认服务器目录结构
+
+上传完成后，目录应接近这样：
+
+```text
+/data/ai-superweb
+  ├─ dist
+  ├─ scripts
+  ├─ ZL_Supersite/dist
+  ├─ server/dist
+  ├─ server/package.json
+  ├─ server/package-lock.json
+  ├─ server/prisma/schema.prisma
+  ├─ server/prisma/seed.ts
+  ├─ logs
+  ├─ docker-compose.yml
+  └─ data
+     ├─ postgres
+     ├─ redis
+     └─ minio
+```
+
+## 7. 安装后端依赖
+
+上传运行包后，先在服务器安装后端依赖：
+
+```bash
+cd /data/ai-superweb/server
+npm ci
+```
+
+说明：
+- 这一步会按 `package-lock.json` 安装后端依赖
+- 不再从本地上传 `server/node_modules`
+- 这样更快，也避免本地 `node_modules` 与服务器系统不兼容
+
+## 8. 配置根目录 `.env`
+
+根目录 `.env` 统一按正式域名口径写：
+
+```bash
+cd /data/ai-superweb
+cat > .env <<'EOF'
+POSTGRES_DB=ai_superweb
+POSTGRES_USER=ai_superweb
+POSTGRES_PASSWORD=!ZHILIN1
+POSTGRES_PORT=5432
+
+REDIS_PORT=6379
+
+MINIO_ROOT_USER=ai-superweb
+MINIO_ROOT_PASSWORD=!ZHILIN1
+MINIO_API_PORT=9000
+MINIO_CONSOLE_PORT=9001
+
+VITE_SUPERSITE_URL=https://www.chilintec.com/
+EOF
+```
+
+说明：
+- 这个 `.env` 给根目录 `docker-compose.yml` 使用
+- `PostgreSQL / Redis / MinIO` 从这里读取
+- `VITE_SUPERSITE_URL` 统一走正式前台域名
+- 如果你不重新在服务器构建前端，这个字段不会影响现有 `dist`
+
+## 9. 启动基础服务
+
+```bash
+cd /data/ai-superweb
+docker compose up -d postgres redis minio
+docker compose ps
+```
+
+确认：
+- `ai-superweb-postgres` 正常
+- `ai-superweb-redis` 正常
+- `ai-superweb-minio` 正常
+
+## 10. 配置后端 `server/.env`
+
+`server/.env` 统一按正式域名口径更新：
+
+```bash
+cd /data/ai-superweb/server
+cat > .env <<'EOF'
+# App
+PORT=3001
+NODE_ENV=production
+# 多域名场景建议先留空这一行，让后端保持开放跨域
+# CORS_ORIGIN=https://admin.chilintec.com
+
+# Auth
+JWT_SECRET=!ZHILIN1
+JWT_EXPIRES_IN=30d
+SESSION_DEVICE_LIMIT=2
+
+# Database
+DATABASE_URL=postgresql://ai_superweb:!ZHILIN1@127.0.0.1:5432/ai_superweb?schema=public
+
+# Redis
+REDIS_URL=redis://127.0.0.1:6379
+
+# MinIO
+MINIO_ENDPOINT=127.0.0.1
+MINIO_PORT=9000
+MINIO_USE_SSL=false
+MINIO_ACCESS_KEY=ai-superweb
+MINIO_SECRET_KEY=!ZHILIN1
+MINIO_BUCKET=ai-superweb
+
+# FFmpeg
+FFMPEG_PATH=/usr/bin/ffmpeg
+FFPROBE_PATH=/usr/bin/ffprobe
+
+# AMap
+AMAP_WEB_SERVICE_KEY=
+
+# Official OAuth
+PLATFORM_OAUTH_APP_BASE_URL=https://admin.chilintec.com
+DOUYIN_OPEN_CLIENT_KEY=
+DOUYIN_OPEN_CLIENT_SECRET=
+DOUYIN_OPEN_SCOPE=user_info
+KUAISHOU_OPEN_APP_ID=
+KUAISHOU_OPEN_APP_SECRET=
+KUAISHOU_OPEN_SCOPE=user_info,user_video_publish,user_video_info
+BILIBILI_OPEN_CLIENT_ID=
+BILIBILI_OPEN_CLIENT_SECRET=
+BILIBILI_OPEN_SCOPE=USER_INFO
+WECHAT_OPEN_COMPONENT_APP_ID=
+WECHAT_OPEN_COMPONENT_APP_SECRET=
+WECHAT_OPEN_AUTH_TYPE=1
+WECHAT_OPEN_PRE_AUTH_CODE=
+WECHAT_OPEN_COMPONENT_ACCESS_TOKEN=
+WECHAT_OPEN_BIZ_APP_ID=
+
+# BitBrowser
+BITBROWSER_LOCAL_API_BASE_URL=http://127.0.0.1:54345
+
+# Public Files
+MINIO_PUBLIC_BASE_URL=https://files.chilintec.com
+
+# Publishing Browser
+PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome
+PUBLISHING_BROWSER_HEADLESS=false
+EOF
+```
+
+说明：
+- 后端正式端口固定用 `3001`
+- 数据库密码已统一改为 `!ZHILIN1`
+- 当前文档已对齐 `server/.env.example` 的最新结构
+- `MINIO_*` 这 6 行是必填项，不能漏
+- 如果 `server/.env` 里缺少 `MINIO_ENDPOINT / MINIO_PORT / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / MINIO_BUCKET`，图片上传、知识库上传、视频生成都会报存储初始化失败
+- `MINIO_ACCESS_KEY` 必须等于根目录 `.env` 的 `MINIO_ROOT_USER`
+- `MINIO_SECRET_KEY` 必须等于根目录 `.env` 的 `MINIO_ROOT_PASSWORD`
+- `PUBLISHING_BROWSER_*` 虽然不在模板里，但当前发布链路实际会读取，生产环境建议保留
+
+## 11. 初始化空数据库
+
+当前项目还没有正式 migration 文件，生产初始化继续按现有口径用 `prisma db push`。
+
+### 11.1 生成 Prisma Client
+
+```bash
+cd /data/ai-superweb/server
+npx prisma generate
+```
+
+### 11.2 空库落表
+
+```bash
+cd /data/ai-superweb/server
+npx prisma db push
+```
+
+### 11.3 初始化默认管理员
+
+如果你需要先登录后台，建议执行：
+
+```bash
+cd /data/ai-superweb/server
+npx prisma db seed
+```
+
+执行后默认账号：
+- 用户名：`demo_admin`
+- 密码：`123456`
+
+## 12. 启动后端
+
+### 12.1 命令行启动
+
+```bash
+cd /data/ai-superweb/server
+pm2 delete ai-superweb-server || true
+pm2 start dist/main.js --name ai-superweb-server
+pm2 save
+pm2 startup
+```
+
+### 12.2 宝塔 PM2 面板启动
+- 进入宝塔面板 -> `PM2 管理器`
+- 新建项目
+- 名称填写 `ai-superweb-server`
+- 启动目录填写 `/data/ai-superweb/server`
+- 启动文件填写 `dist/main.js`
+- 解释器选择 `node`
+
+检查：
+
+```bash
+pm2 ls
+curl http://127.0.0.1:3001/api/health
+```
+
+正常应返回：
+
+```json
+{"status":"ok"}
+```
+
+## 13. 宝塔 Nginx 配置
+
+### 13.0 命令行写入配置
+- 当前服务器实际生效的是系统 `nginx`
+- 站点配置统一写到：`/etc/nginx/conf.d/`
+- 如果你不想在面板里手填，可以直接用下面命令写入配置文件
+- 写完后统一执行 `nginx -t` 和重载
+
+```bash
+mkdir -p /etc/nginx/conf.d
+```
+
+### 13.1 最终方案
+- 正式方案建议用 3 个域名：
+  - 后台：`admin.chilintec.com`
+  - 前台：`www.chilintec.com`
+  - 文件：`files.chilintec.com`
+- 这套方案同时解决：
+  - 图片和视频对外地址统一
+  - `Nginx` 图片/视频下载与预览超时
+  - 后台图片生成、视频生成时接口超时
+
+先切换后端 `server/.env`：
+
+```bash
+grep -q '^MINIO_PUBLIC_BASE_URL=' /data/ai-superweb/server/.env \
+  && sed -i 's|^MINIO_PUBLIC_BASE_URL=.*|MINIO_PUBLIC_BASE_URL=https://files.chilintec.com|' /data/ai-superweb/server/.env \
+  || echo 'MINIO_PUBLIC_BASE_URL=https://files.chilintec.com' >> /data/ai-superweb/server/.env
+```
+
+后台域名站点：
+
+```bash
+cat > /etc/nginx/conf.d/admin.chilintec.com.conf <<'EOF'
+server {
+    listen 80;
+    server_name admin.chilintec.com;
+
+    root /data/ai-superweb/dist;
+    index index.html;
+
+    client_max_body_size 500m;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    send_timeout 300s;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /api {
+        proxy_pass http://127.0.0.1:3001/api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOF
+```
+
+前台域名站点：
+
+```bash
+cat > /etc/nginx/conf.d/www.chilintec.com.conf <<'EOF'
+server {
+    listen 80;
+    server_name www.chilintec.com;
+
+    root /data/ai-superweb/ZL_Supersite/dist;
+    index index.html;
+
+    client_max_body_size 500m;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    send_timeout 300s;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /api {
+        proxy_pass http://127.0.0.1:3001/api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOF
+```
+
+文件域名站点：
+
+```bash
+cat > /etc/nginx/conf.d/files.chilintec.com.conf <<'EOF'
+server {
+    listen 80;
+    server_name files.chilintec.com;
+
+    client_max_body_size 500m;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    send_timeout 300s;
+
+    location / {
+        proxy_pass http://127.0.0.1:9000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host 127.0.0.1:9000;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+```
+
+执行重载：
+
+```bash
+nginx -t
+systemctl reload nginx
+pm2 restart ai-superweb-server
+```
+
+说明：
+- 图片和视频地址统一使用 `https://files.chilintec.com/ai-superweb/...`
+- 文件域名建议反代到 `127.0.0.1:9000`，不要再用旧的本地地址对外输出
+- `/api/` 和文件域名都保留 `300s` 超时配置，用于降低图片生成、视频生成和大文件预览时的 `504`
+
+### 13.2 测试与重载
+
+```bash
+nginx -t
+bt reload
+systemctl reload nginx
+```
+
+## 14. HTTPS
+
+### 14.1 宝塔面板配置
+- 宝塔 -> `网站` -> 目标站点 -> `SSL`
+- 有域名时申请 `Let's Encrypt`
+- 开启 `强制 HTTPS`
+
+### 14.2 注意
+- 正式环境建议后台、前台、文件站点都配域名
+
+## 15. 安全组与防火墙
+
+### 15.1 阿里云安全组
+- 放行 `22`
+- 放行 `80`
+- 放行 `443`
+- 放行 `8888`
+
+### 15.2 不建议公网开放
+- `3001`
+- `5432`
+- `6379`
+- `9000`
+- `9001`
+
+## 16. 上线检查清单
+
+### 16.1 基础服务
+
+```bash
+cd /data/ai-superweb
+docker compose ps
+```
+
+检查：
+- `postgres` 正常
+- `redis` 正常
+- `minio` 正常
+
+### 16.2 后端
+
+```bash
+curl http://127.0.0.1:3001/api/health
+pm2 logs ai-superweb-server --lines 100
+```
+
+### 16.3 空库初始化检查
+- `npx prisma db push` 已成功
+- 需要默认账号时，`npx prisma db seed` 已成功
+- 如执行 seed，确认 `demo_admin / 123456` 可登录
+
+### 16.4 后台前端
+- 打开 `https://admin.chilintec.com`
+- 检查登录页和后台首页
+
+### 16.5 超级站前台
+- 打开 `https://www.chilintec.com`
+- 检查首页、产品区、行业资讯、AI 客服
+
+### 16.6 文件访问
+- 上传后的图片能正常打开
+- 上传后的视频能拖动播放
+
+### 16.7 MinIO 存储排查
+如果视频生成或文件上传提示“初始化 MINIO bucket 失败”，按下面顺序检查：
+
+```bash
+cd /data/ai-superweb
+docker compose up -d minio
+docker compose ps
+docker compose logs minio --tail 100
+curl http://127.0.0.1:9000/minio/health/live
+
+echo '--- root .env ---'
+grep MINIO /data/ai-superweb/.env
+
+echo '--- server .env ---'
+grep MINIO /data/ai-superweb/server/.env
+```
+
+应看到：
+- 根目录 `.env` 已配置 `MINIO_ROOT_USER / MINIO_ROOT_PASSWORD`
+- `server/.env` 已配置 `MINIO_ENDPOINT / MINIO_PORT / MINIO_USE_SSL / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / MINIO_BUCKET`
+- `server/.env` 已配置：`MINIO_PUBLIC_BASE_URL=https://files.chilintec.com`
+- 后端跑在宿主机 `PM2` 上时，`MINIO_ENDPOINT` 固定写 `127.0.0.1`
+
+如果 `server/.env` 里没有 `MINIO_*`，直接补：
+
+```bash
+cat >> /data/ai-superweb/server/.env <<'EOF'
+
+MINIO_ENDPOINT=127.0.0.1
+MINIO_PORT=9000
+MINIO_USE_SSL=false
+MINIO_ACCESS_KEY=ai-superweb
+MINIO_SECRET_KEY=!ZHILIN1
+MINIO_BUCKET=ai-superweb
+EOF
+```
+
+补完后重启后端：
+
+```bash
+pm2 restart ai-superweb-server
+pm2 logs ai-superweb-server --lines 100
+```
+
+## 17. 这次实际坑点
+- 项目根目录就是 `/data/ai-superweb`，不是 `/www/wwwroot`
+- 这次不导入备份数据库，不能再执行旧的 SQL 恢复步骤
+- 后端运行包不再上传 `server/node_modules`
+- 服务器上传后要先执行 `cd /data/ai-superweb/server && npm ci`
+- 后端正式端口固定是 `3001`
+- 当前项目仍按 `prisma db push` 初始化空库，不是 `prisma migrate deploy`
+- `server/.env` 不能只写 `PORT=3001`
+- `server/.env` 也不能漏掉 `MINIO_*`，否则视频生成、图片上传、知识库上传会提示初始化 bucket 失败
+- 图片和视频地址统一走 `https://files.chilintec.com`
+- `CORS_ORIGIN` 如果写成空字符串，会直接变成无效配置，建议先不写这一行
+- 服务器发布链路当前只保留 `Chrome`
+
+## 18. 回滚方案
+
+如果上线后异常：
+
+```bash
+pm2 stop ai-superweb-server
+```
+
+回滚优先按这三类处理：
+- 前端：回滚 `dist` 和 `ZL_Supersite/dist`
+- 后端：回滚 `server/dist`、`server/package.json`、`server/package-lock.json`、`server/.env`
+- 配置：回滚宝塔站点 `Nginx` 配置和根目录 `.env`
+
+## 19. 推荐实际顺序
+1. 先安装 `Docker / Node.js / PM2 / Chrome`
+2. 创建 `/data/ai-superweb`
+3. 上传运行包到 `/data/ai-superweb`
+4. 进入 `server/` 执行 `npm ci`
+5. 配好根目录 `.env`
+6. 启动 `PostgreSQL / Redis / MinIO`
+7. 配好 `server/.env`
+8. 执行 `npx prisma generate`
+9. 执行 `npx prisma db push`
+10. 需要默认后台账号时执行 `npx prisma db seed`
+11. 用 `PM2` 启动后端
+12. 在宝塔里挂后台前端、前台、文件站点
+13. 最后做 HTTPS 和全链路检查

@@ -1,0 +1,247 @@
+export declare const BITBROWSER_PROVIDER: "bitbrowser";
+export declare const PROFILE_BINDING_MODE_DEDICATED_BY_ACCOUNT: "dedicated_by_account";
+export type BrowserProvider = typeof BITBROWSER_PROVIDER;
+export type ProfileBindingMode = typeof PROFILE_BINDING_MODE_DEDICATED_BY_ACCOUNT;
+export type BusinessOwnerStatus = 'active' | 'disabled';
+export type BrowserProfileStatus = 'active' | 'disabled' | 'busy';
+export type PlatformType = 'douyin' | 'xiaohongshu' | 'wechat_video' | 'kuaishou' | string;
+export type ProfileLockReason = 'login' | 'publish' | 'open_home' | 'keepalive';
+export type RuntimeSessionStatus = 'opening' | 'awaiting_extension' | 'ready' | 'running' | 'completed' | 'failed' | 'closed';
+export type RuntimeCommandStatus = 'queued' | 'dispatched' | 'acked' | 'completed' | 'failed' | 'cancelled';
+export type RuntimeCommandType = 'LOGIN_PREPARE' | 'LOGIN_EXECUTE' | 'LOGIN_SYNC_RESULT' | 'KEEPALIVE_COLLECT' | 'PUBLISH_PREPARE' | 'PUBLISH_EXECUTE' | 'PUBLISH_PROGRESS' | 'PUBLISH_RESULT';
+export type BitBrowserOsType = 'PC' | 'Android' | 'IOS';
+export type BitBrowserCoreProduct = 'chrome' | 'firefox';
+export type BitBrowserProxyType = 'noproxy' | 'http' | 'https' | 'socks5' | 'ssh';
+export interface BitBrowserFingerprintConfig {
+    coreProduct?: BitBrowserCoreProduct;
+    coreVersion?: string;
+    ostype?: BitBrowserOsType;
+    os?: string;
+    osVersion?: string;
+    version?: string;
+    languages?: string;
+    displayLanguages?: string;
+    openWidth?: number;
+    openHeight?: number;
+    resolutionType?: string;
+    resolution?: string;
+    devicePixelRatio?: number;
+    hardwareConcurrency?: string;
+    deviceMemory?: string;
+    launchArgs?: string;
+}
+export interface BitBrowserBrowserCreatePayload {
+    name: string;
+    groupId?: string;
+    platform?: string;
+    url?: string;
+    remark?: string;
+    proxyMethod?: number;
+    proxyType?: BitBrowserProxyType;
+    host?: string;
+    port?: number;
+    proxyUserName?: string;
+    proxyPassword?: string;
+    dynamicIpUrl?: string;
+    dynamicIpChannel?: string;
+    isDynamicIpChangeIp?: boolean;
+    syncExtensions?: boolean;
+    syncUserExtensions?: boolean;
+    webRTC?: string | number;
+    browserFingerPrint?: BitBrowserFingerprintConfig;
+}
+export interface BusinessOwner {
+    id: string;
+    creatorId: string;
+    name: string;
+    code: string;
+    status: BusinessOwnerStatus;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface BrowserProfileBinding {
+    id: string;
+    creatorId: string;
+    ownerId: string;
+    platform: PlatformType | null;
+    accountId: string | null;
+    accountName: string | null;
+    provider: BrowserProvider;
+    profileId: string;
+    profileName: string;
+    bindingMode: ProfileBindingMode;
+    proxyConfig: Record<string, unknown> | null;
+    browserConfig: BitBrowserBrowserCreatePayload | null;
+    status: BrowserProfileStatus;
+    lastUsedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface PlatformAccountBinding {
+    id: string;
+    creatorId: string;
+    ownerId: string;
+    profileBindingId: string;
+    platform: PlatformType;
+    accountName: string;
+    accountId: string | null;
+    authPayloadRef: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface ProfileRuntimeLock {
+    profileBindingId: string;
+    lockedByTaskId: string;
+    reason: ProfileLockReason;
+    lockedAt: string;
+    expiresAt: string;
+}
+export interface CreateBusinessOwnerInput {
+    creatorId: string;
+    name: string;
+    code: string;
+}
+export interface BindBitBrowserProfileInput {
+    creatorId: string;
+    ownerId: string;
+    platform?: PlatformType | null;
+    accountId?: string | null;
+    accountName?: string | null;
+    profileId: string;
+    profileName: string;
+    proxyConfig?: Record<string, unknown> | null;
+    browserConfig?: BitBrowserBrowserCreatePayload | null;
+}
+export interface CreateBitBrowserProfileInput {
+    creatorId: string;
+    ownerId: string;
+    profileName: string;
+    proxyConfig?: Record<string, unknown> | null;
+    browserConfig?: Partial<BitBrowserBrowserCreatePayload>;
+}
+export interface RegisterPlatformAccountInput {
+    creatorId: string;
+    ownerId: string;
+    profileBindingId: string;
+    platform: PlatformType;
+    accountName: string;
+    accountId?: string | null;
+    authPayloadRef?: string | null;
+}
+export interface AcquireProfileLockInput {
+    creatorId: string;
+    ownerId: string;
+    profileBindingId?: string | null;
+    taskId: string;
+    reason: ProfileLockReason;
+    expiresAt: string;
+}
+export interface ReleaseProfileLockInput {
+    creatorId: string;
+    taskId: string;
+}
+export interface PrepareOwnerRuntimeInput {
+    creatorId: string;
+    ownerId: string;
+    platform: PlatformType;
+    platformAccountId?: string | null;
+    taskId: string;
+    reason: ProfileLockReason;
+    expiresAt: string;
+}
+export interface OwnerRuntimeContext {
+    owner: BusinessOwner;
+    profileBinding: BrowserProfileBinding;
+    platformAccount: PlatformAccountBinding;
+    lock: ProfileRuntimeLock;
+}
+export interface BitBrowserOpenProfileResult {
+    profileId: string;
+    debugUrl: string;
+    wsEndpoint?: string | null;
+}
+export interface BitBrowserCreateProfileResult {
+    profileId: string;
+    profileName: string;
+    browserConfig: BitBrowserBrowserCreatePayload;
+}
+export interface RuntimeSession {
+    id: string;
+    creatorId: string;
+    ownerId: string;
+    platformAccountId: string | null;
+    profileBindingId: string;
+    profileId: string;
+    platform: PlatformType;
+    taskId: string;
+    reason: ProfileLockReason;
+    status: RuntimeSessionStatus;
+    debugUrl: string;
+    wsEndpoint: string | null;
+    extensionInstanceId: string | null;
+    extensionVersion: string | null;
+    tabId: number | null;
+    pageUrl: string | null;
+    handshakeAt: string | null;
+    lastHeartbeatAt: string | null;
+    expiresAt: string;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface RuntimeCommand {
+    id: string;
+    runtimeSessionId: string;
+    creatorId: string;
+    ownerId: string;
+    platform: PlatformType;
+    taskId: string;
+    type: RuntimeCommandType;
+    status: RuntimeCommandStatus;
+    payload: Record<string, unknown>;
+    resultPayload: Record<string, unknown> | null;
+    errorMessage: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface CreateRuntimeSessionInput {
+    creatorId: string;
+    ownerId: string;
+    platformAccountId?: string | null;
+    profileBindingId: string;
+    profileId: string;
+    platform: PlatformType;
+    taskId: string;
+    reason: ProfileLockReason;
+    debugUrl: string;
+    wsEndpoint?: string | null;
+    expiresAt: string;
+}
+export interface RegisterExtensionHandshakeInput {
+    runtimeSessionId: string;
+    extensionInstanceId: string;
+    tabId: number;
+    pageUrl: string;
+    extensionVersion?: string | null;
+    handshakeAt?: string;
+}
+export interface UpdateRuntimeSessionStatusInput {
+    runtimeSessionId: string;
+    status: RuntimeSessionStatus;
+    pageUrl?: string | null;
+    heartbeatAt?: string;
+}
+export interface CreateRuntimeCommandInput {
+    runtimeSessionId: string;
+    creatorId: string;
+    ownerId: string;
+    platform: PlatformType;
+    taskId: string;
+    type: RuntimeCommandType;
+    payload: Record<string, unknown>;
+}
+export interface UpdateRuntimeCommandStatusInput {
+    runtimeCommandId: string;
+    status: RuntimeCommandStatus;
+    resultPayload?: Record<string, unknown> | null;
+    errorMessage?: string | null;
+}

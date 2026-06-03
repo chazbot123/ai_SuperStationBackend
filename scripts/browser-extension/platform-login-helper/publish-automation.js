@@ -26,9 +26,39 @@
     console.log(`${debugPrefix}[${scope}] ${detail}`, extra);
   }
 
+  function getPublishDebugApiBaseUrl() {
+    try {
+      const url = new URL(window.location.href);
+      const directValue =
+        url.searchParams.get("ai_superweb_bridge_base_url")
+        || url.searchParams.get("ai_superweb_api_base_url")
+        || url.searchParams.get("apiBaseUrl");
+      if (directValue) {
+        return String(directValue).trim();
+      }
+      const hash = String(url.hash || "").replace(/^#/, "").trim();
+      if (!hash) {
+        return "http://127.0.0.1:3001";
+      }
+      const hashParams = new URLSearchParams(hash);
+      return (
+        String(
+          hashParams.get("ai_superweb_bridge_base_url")
+          || hashParams.get("ai_superweb_api_base_url")
+          || hashParams.get("apiBaseUrl")
+          || "http://127.0.0.1:3001",
+        ).trim()
+      );
+    } catch (_error) {
+      return "http://127.0.0.1:3001";
+    }
+  }
+
   function reportPublishAutomationDebug(hypothesisId, location, data) {
-    fetch("http://127.0.0.1:7778/event", {
+    const apiBaseUrl = getPublishDebugApiBaseUrl();
+    fetch(`${apiBaseUrl}/api/bitbrowser/debug/event`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: publishDebugSessionId,
         runId: publishDebugRunId,
@@ -70,6 +100,244 @@
   });
   //#endregion
 
+  function isDouyinEditorBouncePage(url = window.location.href) {
+    return String(url || "").includes("/creator-micro/content/post/image");
+  }
+
+  function buildDouyinEditorBounceSnapshot(extra = {}) {
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    const toastTexts = Array.from(
+      document.querySelectorAll(
+        [
+          '[role="alert"]',
+          '[aria-live="assertive"]',
+          '[aria-live="polite"]',
+          '.semi-toast',
+          '.semi-notification',
+          '.semi-banner',
+          '.semi-modal',
+          '.semi-portal',
+        ].join(", "),
+      ),
+    )
+      .map((node) => normalize(node.textContent || ""))
+      .filter(Boolean)
+      .slice(0, 8);
+    return {
+      currentUrl: window.location.href,
+      state: detectDouyinPublishState({ draftVideoUrl: null }),
+      readyState: document.readyState || "",
+      visibilityState: document.visibilityState || "",
+      title: document.title || "",
+      hasTitleInput: Boolean(
+        queryFirst(
+          [
+            'input[placeholder="添加作品标题"]',
+            'input.semi-input[placeholder*="添加作品标题"]',
+            'input[placeholder*="作品标题"]',
+            'input[placeholder*="添加标题"]',
+            'textarea[placeholder*="标题"]',
+          ],
+          document,
+          true,
+        ),
+      ),
+      hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+      hasUploadInput: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+      visibleButtonTexts: getDouyinVisibleButtonTexts(12),
+      errorHints: [
+        "请求过于频繁",
+        "登录已失效",
+        "登录失效",
+        "请重新登录",
+        "操作过于频繁",
+        "发布失败",
+        "保存失败",
+        "网络异常",
+        "加载中，请稍候",
+        "作品标题",
+      ].filter((hint) => pageText.includes(hint)),
+      toastTexts,
+      pageTextPreview: pageText.slice(0, 260),
+      ...extra,
+    };
+  }
+
+  function reportDouyinEditorBounceDebug(location, data = {}) {
+    reportPublishAutomationDebug(
+      "H5",
+      location,
+      buildDouyinEditorBounceSnapshot(data),
+    );
+  }
+
+  function scheduleDouyinEditorBounceSnapshots(reason, delays = [0, 150, 400, 900, 1800, 3200]) {
+    if (!isDouyinEditorBouncePage()) {
+      return;
+    }
+    const startedAt = Date.now();
+    delays.forEach((delayMs) => {
+      window.setTimeout(() => {
+        if (!isDouyinEditorBouncePage()) {
+          reportDouyinEditorBounceDebug(
+            "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:snapshot",
+            {
+              reason,
+              delayMs,
+              elapsedMs: Date.now() - startedAt,
+              editorStillPresent: false,
+            },
+          );
+          return;
+        }
+        reportDouyinEditorBounceDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:snapshot",
+          {
+            reason,
+            delayMs,
+            elapsedMs: Date.now() - startedAt,
+            editorStillPresent: true,
+          },
+        );
+      }, delayMs);
+    });
+  }
+
+  function installDouyinEditorBounceInstrumentation() {
+    if (window.__aiSuperwebDouyinEditorBounceInstrumentationInstalled) {
+      return;
+    }
+    window.__aiSuperwebDouyinEditorBounceInstrumentationInstalled = true;
+    const navigationEvents = ["visibilitychange", "pagehide", "beforeunload", "popstate", "hashchange"];
+    navigationEvents.forEach((eventName) => {
+      window.addEventListener(eventName, (event) => {
+        reportDouyinEditorBounceDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:event",
+          {
+            eventName,
+            persisted: typeof event?.persisted === "boolean" ? event.persisted : null,
+          },
+        );
+      });
+    });
+    if (!window.__aiSuperwebDouyinEditorBounceHistoryPatched) {
+      window.__aiSuperwebDouyinEditorBounceHistoryPatched = true;
+      const rawPushState = history.pushState.bind(history);
+      const rawReplaceState = history.replaceState.bind(history);
+      history.pushState = function (...args) {
+        const result = rawPushState(...args);
+        reportDouyinEditorBounceDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:history-pushState",
+          {
+            targetUrl: args.length >= 3 ? String(args[2] || "") : "",
+          },
+        );
+        return result;
+      };
+      history.replaceState = function (...args) {
+        const result = rawReplaceState(...args);
+        reportDouyinEditorBounceDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:history-replaceState",
+          {
+            targetUrl: args.length >= 3 ? String(args[2] || "") : "",
+          },
+        );
+        return result;
+      };
+    }
+    if (!window.__aiSuperwebDouyinEditorBounceFetchPatched) {
+      window.__aiSuperwebDouyinEditorBounceFetchPatched = true;
+      const rawFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const requestUrl =
+          typeof args[0] === "string"
+            ? args[0]
+            : args[0] && typeof args[0].url === "string"
+              ? args[0].url
+              : "";
+        try {
+          const response = await rawFetch(...args);
+          const responseUrl = String(response?.url || requestUrl || "");
+          if (
+            isDouyinEditorBouncePage()
+            && (response.status >= 400 || response.redirected)
+          ) {
+            reportDouyinEditorBounceDebug(
+              "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:fetch-response",
+              {
+                requestUrl: String(requestUrl || ""),
+                responseUrl,
+                status: Number(response.status || 0),
+                redirected: Boolean(response.redirected),
+                ok: Boolean(response.ok),
+              },
+            );
+          }
+          return response;
+        } catch (error) {
+          if (isDouyinEditorBouncePage()) {
+            reportDouyinEditorBounceDebug(
+              "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:fetch-error",
+              {
+                requestUrl: String(requestUrl || ""),
+                message: error instanceof Error ? error.message : String(error || ""),
+              },
+            );
+          }
+          throw error;
+        }
+      };
+    }
+    if (!window.__aiSuperwebDouyinEditorBounceXHRPatched) {
+      window.__aiSuperwebDouyinEditorBounceXHRPatched = true;
+      const rawOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+        this.__aiSuperwebDouyinEditorBounceRequestMeta = {
+          method: String(method || ""),
+          url: String(url || ""),
+        };
+        this.addEventListener("loadend", () => {
+          if (!isDouyinEditorBouncePage()) {
+            return;
+          }
+          const meta = this.__aiSuperwebDouyinEditorBounceRequestMeta || {};
+          if (this.status >= 400 || this.status === 0) {
+            reportDouyinEditorBounceDebug(
+              "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:xhr-loadend",
+              {
+                method: String(meta.method || ""),
+                requestUrl: String(meta.url || ""),
+                status: Number(this.status || 0),
+                responseUrl: String(this.responseURL || ""),
+              },
+            );
+          }
+        });
+        return rawOpen.call(this, method, url, ...rest);
+      };
+    }
+    reportDouyinEditorBounceDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:installed",
+      {},
+    );
+  }
+
+  function maybeInstallDouyinEditorBounceProbe(reason) {
+    if (!isDouyinEditorBouncePage()) {
+      return;
+    }
+    installDouyinEditorBounceInstrumentation();
+    scheduleDouyinEditorBounceSnapshots(reason);
+  }
+
+  window.addEventListener("pageshow", () => {
+    maybeInstallDouyinEditorBounceProbe("pageshow");
+  });
+
+  window.setTimeout(() => {
+    maybeInstallDouyinEditorBounceProbe("script-load");
+  }, 0);
+
   function inferFileName(url, fallbackName) {
     try {
       const pathname = new URL(url).pathname;
@@ -93,6 +361,262 @@
     };
   }
 
+  function roundDebugNumber(value) {
+    return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+  }
+
+  function getViewportDebugSnapshot() {
+    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+    const documentHeight = Math.max(
+      Number(document.body?.scrollHeight || 0),
+      Number(document.documentElement?.scrollHeight || 0),
+      Number(scrollingElement?.scrollHeight || 0),
+    );
+    return {
+      scrollX: roundDebugNumber(window.scrollX || window.pageXOffset || 0),
+      scrollY: roundDebugNumber(window.scrollY || window.pageYOffset || 0),
+      innerWidth: roundDebugNumber(window.innerWidth || 0),
+      innerHeight: roundDebugNumber(window.innerHeight || 0),
+      documentHeight: roundDebugNumber(documentHeight),
+      scrollBottomGap: roundDebugNumber(
+        documentHeight - ((window.scrollY || window.pageYOffset || 0) + (window.innerHeight || 0)),
+      ),
+    };
+  }
+
+  function getElementRectDebugSnapshot(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+    const rect = node.getBoundingClientRect();
+    return {
+      top: roundDebugNumber(rect.top),
+      right: roundDebugNumber(rect.right),
+      bottom: roundDebugNumber(rect.bottom),
+      left: roundDebugNumber(rect.left),
+      width: roundDebugNumber(rect.width),
+      height: roundDebugNumber(rect.height),
+      centerX: roundDebugNumber(rect.left + rect.width / 2),
+      centerY: roundDebugNumber(rect.top + rect.height / 2),
+    };
+  }
+
+  function clampViewportPoint(value, maxValue) {
+    if (!Number.isFinite(value) || !Number.isFinite(maxValue) || maxValue < 0) {
+      return null;
+    }
+    return Math.min(Math.max(value, 0), maxValue);
+  }
+
+  function getElementFromPointDebugSnapshot(x, y, expectedNode = null) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return {
+        point: { x: roundDebugNumber(x), y: roundDebugNumber(y) },
+        outOfViewport: true,
+        hitNode: null,
+        hitInsideExpected: false,
+      };
+    }
+    const maxX = Math.max((window.innerWidth || 0) - 1, 0);
+    const maxY = Math.max((window.innerHeight || 0) - 1, 0);
+    const probeX = clampViewportPoint(x, maxX);
+    const probeY = clampViewportPoint(y, maxY);
+    const outOfViewport = x < 0 || y < 0 || x > maxX || y > maxY;
+    const hitNode =
+      Number.isFinite(probeX) && Number.isFinite(probeY)
+        ? document.elementFromPoint(probeX, probeY)
+        : null;
+    return {
+      point: { x: roundDebugNumber(probeX), y: roundDebugNumber(probeY) },
+      outOfViewport,
+      hitNode: getElementDebugSnapshot(hitNode),
+      hitInsideExpected: Boolean(
+        expectedNode instanceof HTMLElement
+          && hitNode instanceof HTMLElement
+          && (hitNode === expectedNode || expectedNode.contains(hitNode)),
+      ),
+    };
+  }
+
+  function getXiaohongshuPublishViewportSnapshot(button) {
+    const viewport = getViewportDebugSnapshot();
+    const rect = getElementRectDebugSnapshot(button);
+    if (!rect) {
+      return {
+        ...viewport,
+        buttonRect: null,
+        buttonInViewport: false,
+        buttonCenterInViewport: false,
+        buttonBelowViewport: false,
+        buttonAboveViewport: false,
+        buttonPartiallyBelowViewport: false,
+        buttonPartiallyAboveViewport: false,
+        buttonDistanceToViewportBottom: null,
+        centerHit: null,
+        bottomEdgeHit: null,
+      };
+    }
+    const centerHit = getElementFromPointDebugSnapshot(rect.centerX, rect.centerY, button);
+    const bottomProbeY =
+      Number.isFinite(rect.bottom)
+        ? clampViewportPoint(rect.bottom - 4, Math.max((window.innerHeight || 0) - 1, 0))
+        : null;
+    const bottomEdgeHit = getElementFromPointDebugSnapshot(rect.centerX, bottomProbeY, button);
+    return {
+      ...viewport,
+      buttonRect: rect,
+      buttonInViewport:
+        Number(rect.bottom) > 0
+        && Number(rect.top) < (window.innerHeight || 0)
+        && Number(rect.right) > 0
+        && Number(rect.left) < (window.innerWidth || 0),
+      buttonCenterInViewport:
+        Number(rect.centerX) >= 0
+        && Number(rect.centerX) <= (window.innerWidth || 0)
+        && Number(rect.centerY) >= 0
+        && Number(rect.centerY) <= (window.innerHeight || 0),
+      buttonBelowViewport: Number(rect.top) >= (window.innerHeight || 0),
+      buttonAboveViewport: Number(rect.bottom) <= 0,
+      buttonPartiallyBelowViewport: Number(rect.bottom) > (window.innerHeight || 0),
+      buttonPartiallyAboveViewport: Number(rect.top) < 0,
+      buttonDistanceToViewportBottom: roundDebugNumber((window.innerHeight || 0) - Number(rect.bottom || 0)),
+      centerHit,
+      bottomEdgeHit,
+    };
+  }
+
+  function isXiaohongshuPublishPage(url = window.location.href) {
+    const currentUrl = String(url || "").toLowerCase();
+    return currentUrl.includes("creator.xiaohongshu.com/publish/publish");
+  }
+
+  function isXiaohongshuLoginPage(url = window.location.href) {
+    const currentUrl = String(url || "").toLowerCase();
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "").toLowerCase();
+    return (
+      currentUrl.includes("creator.xiaohongshu.com/login")
+      || currentUrl.includes("redirectreason=401")
+      || pageText.includes("登录后继续")
+      || pageText.includes("请登录")
+      || pageText.includes("手机号登录")
+      || pageText.includes("验证码登录")
+    );
+  }
+
+  function isDouyinLoginPage(url = window.location.href) {
+    const currentUrl = String(url || "").toLowerCase();
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "").toLowerCase();
+    return (
+      currentUrl.includes("creator.douyin.com/passport")
+      || currentUrl.includes("creator.douyin.com/login")
+      || currentUrl.includes("creator.douyin.com/auth")
+      || pageText.includes("登录抖音")
+      || pageText.includes("扫码登录")
+      || pageText.includes("手机验证码登录")
+      || pageText.includes("登录后即可发布")
+    );
+  }
+
+  function isWechatMpLoginPage(url = window.location.href) {
+    const currentUrl = String(url || "").toLowerCase();
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "").toLowerCase();
+    return (
+      currentUrl.includes("channels.weixin.qq.com/platform/login")
+      || currentUrl.includes("channels.weixin.qq.com/login")
+      || pageText.includes("视频号助手登录")
+      || pageText.includes("微信扫码登录")
+      || pageText.includes("请使用微信扫码登录")
+      || pageText.includes("登录后即可发表")
+    );
+  }
+
+  function isKuaishouLoginPage(url = window.location.href) {
+    const currentUrl = String(url || "").toLowerCase();
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "").toLowerCase();
+    return (
+      currentUrl.includes("cp.kuaishou.com/login")
+      || currentUrl.includes("passport.kuaishou.com")
+      || pageText.includes("登录快手创作者服务平台")
+      || pageText.includes("快手创作者服务平台")
+      || pageText.includes("您的登录状态已过期")
+      || pageText.includes("点击确定重新登录")
+    );
+  }
+
+  function getPlatformPublishLoginState(platform, url = window.location.href) {
+    const currentUrl = String(url || "");
+    const pageTextPreview = normalize(document.body?.innerText || document.body?.textContent || "").slice(0, 220);
+    const title = document.title || "";
+    const platformLabelMap = {
+      xiaohongshu: "小红书",
+      douyin: "抖音",
+      wechat_mp: "视频号",
+      kuaishou: "快手",
+    };
+    const state = {
+      platform,
+      platformLabel: platformLabelMap[platform] || "当前平台",
+      currentUrl,
+      title,
+      pageTextPreview,
+      isLoginPage: false,
+    };
+    switch (platform) {
+      case "xiaohongshu":
+        state.isLoginPage = isXiaohongshuLoginPage(currentUrl);
+        break;
+      case "douyin":
+        state.isLoginPage = isDouyinLoginPage(currentUrl);
+        break;
+      case "wechat_mp":
+        state.isLoginPage = isWechatMpLoginPage(currentUrl);
+        break;
+      case "kuaishou":
+        state.isLoginPage = isKuaishouLoginPage(currentUrl);
+        break;
+      default:
+        state.isLoginPage = false;
+        break;
+    }
+    return state;
+  }
+
+  function assertPlatformPublishLoginReady(platform, url = window.location.href) {
+    const state = getPlatformPublishLoginState(platform, url);
+    if (!state.isLoginPage) {
+      return state;
+    }
+    throw new Error(`${state.platformLabel}当前处于未登录页面，请重新登录后再发布`);
+  }
+
+  function getXiaohongshuPageStateSnapshot() {
+    const currentUrl = window.location.href;
+    let redirectReason = "";
+    let lastUrl = "";
+    try {
+      const url = new URL(currentUrl);
+      redirectReason = String(url.searchParams.get("redirectReason") || "");
+      lastUrl = String(url.searchParams.get("lastUrl") || "");
+    } catch (_error) {
+      redirectReason = "";
+      lastUrl = "";
+    }
+    return {
+      currentUrl,
+      pageState: isXiaohongshuLoginPage(currentUrl)
+        ? "login"
+        : isXiaohongshuPublishPage(currentUrl)
+          ? "publish"
+          : "other",
+      isLoginPage: isXiaohongshuLoginPage(currentUrl),
+      isPublishPage: isXiaohongshuPublishPage(currentUrl),
+      redirectReason,
+      lastUrl: lastUrl.slice(0, 260),
+      title: document.title || "",
+      readyState: document.readyState || "",
+    };
+  }
+
   function getXiaohongshuPublishSubmitSnapshot(selectors = []) {
     const normalizedSelectors = Array.isArray(selectors) ? selectors : [selectors];
     const button = queryFirst(normalizedSelectors, document, true);
@@ -107,14 +631,15 @@
       true,
     );
     const pageText = String(document.body?.innerText || document.body?.textContent || "");
-    return {
-      currentUrl: window.location.href,
+    const snapshot = {
+      ...getXiaohongshuPageStateSnapshot(),
       buttonFound: Boolean(button),
       buttonTagName: getElementDebugSnapshot(button).tagName,
       buttonText: getElementDebugSnapshot(button).text,
       buttonClassName: getElementDebugSnapshot(button).className,
       buttonDisabled: getElementDebugSnapshot(button).disabled,
       buttonAriaDisabled: getElementDebugSnapshot(button).ariaDisabled,
+      viewport: getXiaohongshuPublishViewportSnapshot(button),
       titleValue:
         titleInput instanceof HTMLInputElement || titleInput instanceof HTMLTextAreaElement
           ? String(titleInput.value || "").slice(0, 120)
@@ -131,6 +656,83 @@
         "校验失败",
       ].filter((hint) => pageText.includes(hint)),
     };
+    return {
+      ...snapshot,
+      publishBlockReason: inferXiaohongshuPublishBlockReason(snapshot),
+    };
+  }
+
+  function inferXiaohongshuPublishBlockReason(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return "unknown";
+    }
+    if (snapshot.isLoginPage || String(snapshot.redirectReason || "") === "401") {
+      return "redirected-to-login";
+    }
+    if (snapshot.pageState === "other") {
+      return "left-publish-page";
+    }
+    if (!snapshot.buttonFound) {
+      return "publish-button-missing";
+    }
+    if (snapshot.buttonDisabled || snapshot.buttonAriaDisabled === "true") {
+      return "publish-button-disabled";
+    }
+    if (Array.isArray(snapshot.pageErrorHints) && snapshot.pageErrorHints.includes("请先上传")) {
+      return "upload-incomplete";
+    }
+    if (Array.isArray(snapshot.pageErrorHints) && snapshot.pageErrorHints.includes("请填写标题")) {
+      return "title-missing";
+    }
+    if (Array.isArray(snapshot.pageErrorHints) && snapshot.pageErrorHints.includes("请完善")) {
+      return "validation-required";
+    }
+    if (snapshot.viewport?.buttonBelowViewport) {
+      return "publish-button-below-viewport";
+    }
+    if (
+      snapshot.viewport?.buttonCenterInViewport
+      && snapshot.viewport?.centerHit
+      && !snapshot.viewport.centerHit.hitInsideExpected
+    ) {
+      return "publish-button-covered";
+    }
+    if (
+      snapshot.viewport?.buttonInViewport
+      && snapshot.viewport?.bottomEdgeHit
+      && !snapshot.viewport.bottomEdgeHit.hitInsideExpected
+    ) {
+      return "publish-button-bottom-covered";
+    }
+    return "publish-click-no-success-hint";
+  }
+
+  function reportXiaohongshuPublishPhaseDebug(location, selectors = [], data = {}) {
+    reportPublishAutomationDebug(
+      "X1",
+      location,
+      {
+        ...getXiaohongshuPublishSubmitSnapshot(selectors),
+        ...data,
+      },
+    );
+  }
+
+  function scheduleXiaohongshuPublishPhaseSnapshots(reason, selectors = [], delays = [0, 500, 1400]) {
+    const startedAt = Date.now();
+    delays.forEach((delayMs) => {
+      window.setTimeout(() => {
+        reportXiaohongshuPublishPhaseDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuPublishPhase:snapshot",
+          selectors,
+          {
+            reason,
+            delayMs,
+            elapsedMs: Date.now() - startedAt,
+          },
+        );
+      }, delayMs);
+    });
   }
 
   function getDouyinPublishSubmitSnapshot(selectors = [], draftVideoUrl = null) {
@@ -361,6 +963,146 @@
     throw new Error(`未找到目标元素：${selectors[0] || "unknown"}`);
   }
 
+  function clampWithinRange(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function getVirtualMouseState() {
+    const current = window.__AI_SUPERWEB_VIRTUAL_MOUSE__;
+    if (!current || typeof current !== "object") {
+      return null;
+    }
+    const x = Number(current.x);
+    const y = Number(current.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return null;
+    }
+    return { x, y };
+  }
+
+  function setVirtualMouseState(x, y) {
+    window.__AI_SUPERWEB_VIRTUAL_MOUSE__ = {
+      x: Number(x),
+      y: Number(y),
+      updatedAt: Date.now(),
+    };
+  }
+
+  function getViewportMetrics() {
+    const width = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0, 1280);
+    const height = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0, 720);
+    return { width, height };
+  }
+
+  function resolveClickablePoint(rect, options = {}) {
+    const targetPadding = Math.max(6, Number(options.targetPadding ?? 8));
+    const targetDriftRadius = Math.max(0, Number(options.trajectoryTargetDriftRadius ?? 5));
+    const minX = rect.left + Math.min(targetPadding, Math.max(6, rect.width / 4));
+    const maxX = rect.right - Math.min(targetPadding, Math.max(6, rect.width / 4));
+    const minY = rect.top + Math.min(targetPadding, Math.max(6, rect.height / 4));
+    const maxY = rect.bottom - Math.min(targetPadding, Math.max(6, rect.height / 4));
+    const centerX = rect.left + rect.width * 0.5;
+    const centerY = rect.top + rect.height * 0.5;
+    return {
+      x: clampWithinRange(
+        Math.round(centerX + randomBetween(-targetDriftRadius, targetDriftRadius)),
+        Math.round(Math.min(minX, maxX)),
+        Math.round(Math.max(minX, maxX)),
+      ),
+      y: clampWithinRange(
+        Math.round(centerY + randomBetween(-targetDriftRadius, targetDriftRadius)),
+        Math.round(Math.min(minY, maxY)),
+        Math.round(Math.max(minY, maxY)),
+      ),
+    };
+  }
+
+  function cubicBezierPoint(start, control1, control2, end, progress) {
+    const inverse = 1 - progress;
+    return (
+      inverse * inverse * inverse * start
+      + 3 * inverse * inverse * progress * control1
+      + 3 * inverse * progress * progress * control2
+      + progress * progress * progress * end
+    );
+  }
+
+  function buildMouseTrajectory(node, options = {}) {
+    const rect = node.getBoundingClientRect();
+    const viewport = getViewportMetrics();
+    const targetPoint = resolveClickablePoint(rect, options);
+    const previousPoint = getVirtualMouseState();
+    const margin = Math.max(18, Number(options.trajectoryViewportMargin ?? 24));
+    const startFromLast = options.trajectoryStartFromLast !== false;
+    const startX = previousPoint && startFromLast
+      ? clampWithinRange(Math.round(previousPoint.x), margin, Math.max(margin, viewport.width - margin))
+      : randomBetween(margin, Math.max(margin + 1, Math.floor(viewport.width * 0.22)));
+    const startY = previousPoint && startFromLast
+      ? clampWithinRange(Math.round(previousPoint.y), margin, Math.max(margin, viewport.height - margin))
+      : randomBetween(margin, Math.max(margin + 1, Math.floor(viewport.height * 0.3)));
+    const spreadX = Math.max(36, Math.abs(targetPoint.x - startX));
+    const spreadY = Math.max(28, Math.abs(targetPoint.y - startY));
+    const control1 = {
+      x: clampWithinRange(
+        startX + randomBetween(Math.round(spreadX * 0.12), Math.round(spreadX * 0.38)),
+        margin,
+        Math.max(margin, viewport.width - margin),
+      ),
+      y: clampWithinRange(
+        startY + randomBetween(-Math.round(spreadY * 0.22), Math.round(spreadY * 0.18)),
+        margin,
+        Math.max(margin, viewport.height - margin),
+      ),
+    };
+    const control2 = {
+      x: clampWithinRange(
+        targetPoint.x - randomBetween(Math.round(spreadX * 0.08), Math.round(spreadX * 0.28)),
+        margin,
+        Math.max(margin, viewport.width - margin),
+      ),
+      y: clampWithinRange(
+        targetPoint.y + randomBetween(-Math.round(spreadY * 0.16), Math.round(spreadY * 0.16)),
+        margin,
+        Math.max(margin, viewport.height - margin),
+      ),
+    };
+    const stepCount = Math.max(
+      4,
+      randomBetween(Number(options.trajectoryStepMin ?? 10), Number(options.trajectoryStepMax ?? 18)),
+    );
+    const jitterRadius = Math.max(0, Number(options.trajectoryJitterRadius ?? 3));
+    const points = [];
+    for (let index = 1; index <= stepCount; index += 1) {
+      const progress = index / stepCount;
+      const lastPoint = index === stepCount;
+      const x = cubicBezierPoint(startX, control1.x, control2.x, targetPoint.x, progress);
+      const y = cubicBezierPoint(startY, control1.y, control2.y, targetPoint.y, progress);
+      points.push({
+        x: lastPoint
+          ? targetPoint.x
+          : clampWithinRange(
+              Math.round(x + randomBetween(-jitterRadius, jitterRadius)),
+              margin,
+              Math.max(margin, viewport.width - margin),
+            ),
+        y: lastPoint
+          ? targetPoint.y
+          : clampWithinRange(
+              Math.round(y + randomBetween(-jitterRadius, jitterRadius)),
+              margin,
+              Math.max(margin, viewport.height - margin),
+            ),
+      });
+    }
+    return {
+      startX,
+      startY,
+      targetX: targetPoint.x,
+      targetY: targetPoint.y,
+      points,
+    };
+  }
+
   async function humanClickElement(node, options = {}) {
     if (!(node instanceof HTMLElement)) {
       throw new Error("目标元素不可点击");
@@ -379,19 +1121,28 @@
     const holdPauseMax = options.holdPauseMax ?? 160;
     const afterClickMin = options.afterClickMin ?? 220;
     const afterClickMax = options.afterClickMax ?? 420;
+    const trajectoryEnabled = Boolean(options.trajectoryEnabled);
+    const trajectoryPauseMin = options.trajectoryPauseMin ?? 18;
+    const trajectoryPauseMax = options.trajectoryPauseMax ?? 42;
 
     node.scrollIntoView({ block: "center", inline: "center" });
     await sleep(randomBetween(beforeMoveMin, beforeMoveMax));
 
-    const rect = node.getBoundingClientRect();
-    const clientX = rect.left + Math.max(6, Math.min(rect.width - 6, rect.width * 0.45));
-    const clientY = rect.top + Math.max(6, Math.min(rect.height - 6, rect.height * 0.5));
+    const fallbackRect = node.getBoundingClientRect();
+    const fallbackPoint = resolveClickablePoint(fallbackRect, options);
 
-    const dispatchPointer = (type, overrides = {}) => {
+    const dispatchPointer = (target, type, clientX, clientY, overrides = {}) => {
       if (typeof PointerEvent === "undefined") {
         return;
       }
-      node.dispatchEvent(
+      const receiver =
+        target instanceof Element
+          ? target
+          : document.elementFromPoint(clientX, clientY)
+            || document.body
+            || document.documentElement
+            || node;
+      receiver.dispatchEvent(
         new PointerEvent(type, {
           bubbles: true,
           cancelable: true,
@@ -402,14 +1153,21 @@
           clientX,
           clientY,
           button: 0,
-          buttons: 1,
+          buttons: 0,
           ...overrides,
         }),
       );
     };
 
-    const dispatchMouse = (type, overrides = {}) => {
-      node.dispatchEvent(
+    const dispatchMouse = (target, type, clientX, clientY, overrides = {}) => {
+      const receiver =
+        target instanceof Element
+          ? target
+          : document.elementFromPoint(clientX, clientY)
+            || document.body
+            || document.documentElement
+            || node;
+      receiver.dispatchEvent(
         new MouseEvent(type, {
           bubbles: true,
           cancelable: true,
@@ -418,27 +1176,78 @@
           clientX,
           clientY,
           button: 0,
-          buttons: 1,
+          buttons: 0,
           ...overrides,
         }),
       );
     };
 
+    const moveAlongTrajectory = async () => {
+      const { startX, startY, targetX, targetY, points } = buildMouseTrajectory(node, options);
+      let currentHovered = null;
+
+      const getReceiverAtPoint = (x, y) =>
+        document.elementFromPoint(x, y) || document.body || document.documentElement || node;
+
+      const transitionHover = (nextHovered, x, y) => {
+        if (currentHovered === nextHovered) {
+          return;
+        }
+        if (currentHovered instanceof Element) {
+          dispatchPointer(currentHovered, "pointerout", x, y, { relatedTarget: nextHovered || null });
+          dispatchMouse(currentHovered, "mouseout", x, y, { relatedTarget: nextHovered || null });
+          dispatchPointer(currentHovered, "pointerleave", x, y, { bubbles: false, relatedTarget: nextHovered || null });
+          dispatchMouse(currentHovered, "mouseleave", x, y, { bubbles: false, relatedTarget: nextHovered || null });
+        }
+        if (nextHovered instanceof Element) {
+          dispatchPointer(nextHovered, "pointerover", x, y, { relatedTarget: currentHovered || null });
+          dispatchMouse(nextHovered, "mouseover", x, y, { relatedTarget: currentHovered || null });
+          dispatchPointer(nextHovered, "pointerenter", x, y, { bubbles: false, relatedTarget: currentHovered || null });
+          dispatchMouse(nextHovered, "mouseenter", x, y, { bubbles: false, relatedTarget: currentHovered || null });
+        }
+        currentHovered = nextHovered;
+      };
+
+      transitionHover(getReceiverAtPoint(startX, startY), startX, startY);
+      for (const point of points) {
+        const nextHovered = getReceiverAtPoint(point.x, point.y);
+        transitionHover(nextHovered, point.x, point.y);
+        dispatchPointer(nextHovered, "pointermove", point.x, point.y);
+        dispatchMouse(nextHovered, "mousemove", point.x, point.y);
+        setVirtualMouseState(point.x, point.y);
+        await sleep(randomBetween(trajectoryPauseMin, trajectoryPauseMax));
+      }
+
+      return {
+        clientX: targetX,
+        clientY: targetY,
+        trajectoryPointCount: points.length,
+      };
+    };
+
+    const clickPoint = trajectoryEnabled
+      ? await moveAlongTrajectory()
+      : {
+          clientX: fallbackPoint.x,
+          clientY: fallbackPoint.y,
+          trajectoryPointCount: 0,
+        };
+
     node.focus();
-    dispatchPointer("pointerover");
-    dispatchMouse("mouseover");
-    dispatchPointer("pointerenter");
-    dispatchMouse("mouseenter");
+    dispatchPointer(node, "pointerover", clickPoint.clientX, clickPoint.clientY, { buttons: 0 });
+    dispatchMouse(node, "mouseover", clickPoint.clientX, clickPoint.clientY, { buttons: 0 });
+    dispatchPointer(node, "pointerenter", clickPoint.clientX, clickPoint.clientY, { bubbles: false, buttons: 0 });
+    dispatchMouse(node, "mouseenter", clickPoint.clientX, clickPoint.clientY, { bubbles: false, buttons: 0 });
+    dispatchPointer(node, "pointermove", clickPoint.clientX, clickPoint.clientY, { buttons: 0 });
+    dispatchMouse(node, "mousemove", clickPoint.clientX, clickPoint.clientY, { buttons: 0 });
     await sleep(randomBetween(movePauseMin, movePauseMax));
-    dispatchPointer("pointermove");
-    dispatchMouse("mousemove");
-    await sleep(randomBetween(movePauseMin, movePauseMax));
-    dispatchPointer("pointerdown");
-    dispatchMouse("mousedown");
+    dispatchPointer(node, "pointerdown", clickPoint.clientX, clickPoint.clientY, { buttons: 1 });
+    dispatchMouse(node, "mousedown", clickPoint.clientX, clickPoint.clientY, { buttons: 1 });
     await sleep(randomBetween(holdPauseMin, holdPauseMax));
-    dispatchPointer("pointerup", { buttons: 0 });
-    dispatchMouse("mouseup", { buttons: 0 });
+    dispatchPointer(node, "pointerup", clickPoint.clientX, clickPoint.clientY, { buttons: 0 });
+    dispatchMouse(node, "mouseup", clickPoint.clientX, clickPoint.clientY, { buttons: 0 });
     node.click();
+    setVirtualMouseState(clickPoint.clientX, clickPoint.clientY);
     await sleep(randomBetween(afterClickMin, afterClickMax));
 
     if (debugScope) {
@@ -460,6 +1269,12 @@
           holdPauseMax,
           afterClickMin,
           afterClickMax,
+          trajectoryEnabled,
+          trajectoryPauseMin,
+          trajectoryPauseMax,
+          trajectoryPointCount: clickPoint.trajectoryPointCount,
+          clientX: clickPoint.clientX,
+          clientY: clickPoint.clientY,
           tagName: String(node.tagName || "").toLowerCase(),
           className: String(node.className || "").slice(0, 200),
           text: normalize(node.textContent || "").slice(0, 120),
@@ -714,6 +1529,10 @@
     }
 
     const node = await waitForVisible(selectors, timeoutMs, root, true);
+    if (options.clickBeforeType && node instanceof HTMLElement) {
+      await humanClickElement(node, options.clickOptions || {});
+      await sleep(randomBetween(120, 220));
+    }
     if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
       if (options.preferHumanType) {
         clearFormControl(node);
@@ -870,8 +1689,23 @@
     await sleep(randomBetween(240, 420));
   }
 
-  function douyinSlowClickOptions() {
+  function withDouyinTrajectory(options = {}) {
     return {
+      ...options,
+      trajectoryEnabled: true,
+      trajectoryPauseMin: options.trajectoryPauseMin ?? 18,
+      trajectoryPauseMax: options.trajectoryPauseMax ?? 42,
+      trajectoryStepMin: options.trajectoryStepMin ?? 11,
+      trajectoryStepMax: options.trajectoryStepMax ?? 19,
+      trajectoryJitterRadius: options.trajectoryJitterRadius ?? 3,
+      trajectoryTargetDriftRadius: options.trajectoryTargetDriftRadius ?? 5,
+      trajectoryViewportMargin: options.trajectoryViewportMargin ?? 28,
+      trajectoryStartFromLast: options.trajectoryStartFromLast ?? true,
+    };
+  }
+
+  function douyinSlowClickOptions() {
+    return withDouyinTrajectory({
       beforeMoveMin: 260,
       beforeMoveMax: 520,
       movePauseMin: 160,
@@ -880,11 +1714,11 @@
       holdPauseMax: 260,
       afterClickMin: 420,
       afterClickMax: 760,
-    };
+    });
   }
 
   function douyinSlowActionClickOptions() {
-    return {
+    return withDouyinTrajectory({
       beforeMoveMin: 240,
       beforeMoveMax: 500,
       movePauseMin: 150,
@@ -893,11 +1727,11 @@
       holdPauseMax: 240,
       afterClickMin: 360,
       afterClickMax: 680,
-    };
+    });
   }
 
   function douyinSlowPublishClickOptions() {
-    return {
+    return withDouyinTrajectory({
       beforeMoveMin: 320,
       beforeMoveMax: 620,
       movePauseMin: 200,
@@ -906,7 +1740,7 @@
       holdPauseMax: 320,
       afterClickMin: 520,
       afterClickMax: 960,
-    };
+    });
   }
 
   function escapeHasText(value) {
@@ -1635,6 +2469,21 @@
     if (isXiaohongshuAlreadyOnEditor()) {
       debugLog("xiaohongshu", "already-on-editor", { url: window.location.href });
       return;
+    }
+    if (!isVideo) {
+      await openXiaohongshuImagePublishCardEntry().catch(() => null);
+      await sleep(1200);
+      if (isXiaohongshuAlreadyOnEditor()) {
+        reportPublishAutomationDebug(
+          "X1",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureXiaohongshuPublishReady:image-card-success",
+          {
+            currentUrl: window.location.href,
+            pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+          },
+        );
+        return;
+      }
     }
     await clickFirst(
       [
@@ -2446,7 +3295,74 @@
     await sleep(1500);
   }
 
+  function findXiaohongshuImagePublishCard() {
+    const candidates = queryCandidates(
+      [
+        'div.publish-card',
+        '[class*="publish-card"]',
+        'div[class*="card"]',
+        'div[class*="publish"]',
+      ],
+      document,
+      true,
+    )
+      .map(resolveClickableCandidate)
+      .filter((node) => node instanceof HTMLElement);
+    return (
+      candidates.find((node) => {
+        const text = normalize(node?.textContent || "");
+        return text.includes("发布图文笔记") || (text.includes("图文笔记") && text.includes("png"));
+      }) || null
+    );
+  }
+
+  async function openXiaohongshuImagePublishCardEntry() {
+    const card = findXiaohongshuImagePublishCard();
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openXiaohongshuImagePublishCardEntry:resolved",
+      {
+        found: card instanceof HTMLElement,
+        cardText: normalize(card?.textContent || "").slice(0, 180),
+        cardClassName: String(card?.className || ""),
+      },
+    );
+    if (!(card instanceof HTMLElement)) {
+      return null;
+    }
+    await humanClickElement(card, {
+      beforeMoveMin: 260,
+      beforeMoveMax: 520,
+      movePauseMin: 160,
+      movePauseMax: 320,
+      holdPauseMin: 140,
+      holdPauseMax: 260,
+      afterClickMin: 420,
+      afterClickMax: 760,
+      debugScope: "xiaohongshu",
+      debugLabel: "publish-image-card",
+    });
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openXiaohongshuImagePublishCardEntry:clicked",
+      {
+        currentUrl: window.location.href,
+        cardText: normalize(card.textContent || "").slice(0, 180),
+        cardClassName: String(card.className || ""),
+      },
+    );
+    return card;
+  }
+
   function findXiaohongshuPublishButton(publishSelectors = []) {
+    const exactPublishButton = queryFirst(
+      ['div > div > button.ce-btn.bg-red', 'button.ce-btn.bg-red:has-text("发布")', 'button.ce-btn.bg-red'],
+      document,
+      true,
+    );
+    if (exactPublishButton instanceof HTMLElement && normalize(exactPublishButton.textContent || "") === "发布") {
+      return exactPublishButton;
+    }
     const directButton = queryFirst(publishSelectors, document, true);
     if (directButton instanceof HTMLElement) {
       return directButton;
@@ -2465,10 +3381,18 @@
     )
       .map(resolveClickableCandidate)
       .filter((node) => node instanceof HTMLElement);
-    const preferredTexts = new Set(["发布", "发布笔记"]);
-    return (
-      candidates.find((node) => preferredTexts.has(normalize(node.textContent || ""))) || null
+    const exactClassButton = candidates.find(
+      (node) =>
+        node instanceof HTMLButtonElement
+        && node.classList.contains("ce-btn")
+        && node.classList.contains("bg-red")
+        && normalize(node.textContent || "") === "发布",
     );
+    if (exactClassButton instanceof HTMLElement) {
+      return exactClassButton;
+    }
+    const preferredTexts = new Set(["发布", "发布笔记"]);
+    return candidates.find((node) => preferredTexts.has(normalize(node.textContent || ""))) || null;
   }
 
   function buildXiaohongshuTagCandidateSelectors(tag) {
@@ -2476,18 +3400,93 @@
     return [
       `[role="option"]:has-text("${safeTag}")`,
       `li[role="option"]:has-text("${safeTag}")`,
+      `[class*="suggest"] [role="option"]:has-text("${safeTag}")`,
+      `[class*="suggest"] li:has-text("${safeTag}")`,
       `[class*="suggest"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="topic"] [role="option"]:has-text("${safeTag}")`,
       `[class*="topic"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="tag"] [role="option"]:has-text("${safeTag}")`,
       `[class*="tag"] [class*="item"]:has-text("${safeTag}")`,
       `[class*="mention"] [class*="item"]:has-text("${safeTag}")`,
       `[class*="recommend"] [class*="item"]:has-text("${safeTag}")`,
       `[class*="option"]:has-text("${safeTag}")`,
-      `div:has-text("${safeTag}")`,
-      `span:has-text("${safeTag}")`,
     ];
   }
 
-  async function clickFirstVisibleXiaohongshuTagCandidate(tag) {
+  function buildXiaohongshuFirstTagCandidateSelectors() {
+    return [
+      '[role="listbox"] [role="option"]',
+      '[role="dialog"] [role="option"]',
+      '[class*="suggest"] [role="option"]',
+      '[class*="suggest"] li',
+      '[class*="suggest"] [class*="item"]',
+      '[class*="topic"] [role="option"]',
+      '[class*="topic"] [class*="item"]',
+      '[class*="tag"] [role="option"]',
+      '[class*="tag"] [class*="item"]',
+      '[class*="recommend"] [class*="item"]',
+      '[class*="mention"] [class*="item"]',
+      '[class*="option"]',
+    ];
+  }
+
+  function findFirstVisibleXiaohongshuTagCandidate() {
+    const candidates = queryCandidates(buildXiaohongshuFirstTagCandidateSelectors(), document, true)
+      .map(resolveClickableCandidate)
+      .filter((node) => node instanceof HTMLElement);
+    if (!candidates.length) {
+      return null;
+    }
+    return candidates
+      .slice()
+      .sort((left, right) => {
+        const leftRect = left.getBoundingClientRect();
+        const rightRect = right.getBoundingClientRect();
+        if (Math.abs(leftRect.top - rightRect.top) > 6) {
+          return leftRect.top - rightRect.top;
+        }
+        if (Math.abs(leftRect.left - rightRect.left) > 6) {
+          return leftRect.left - rightRect.left;
+        }
+        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+      })[0] || null;
+  }
+
+  function getXiaohongshuTagEditorSnapshot(editor) {
+    const pageText = String(document.body?.innerText || document.body?.textContent || "");
+    return {
+      currentUrl: window.location.href,
+      editorText: normalize(editor?.innerText || editor?.textContent || "").slice(0, 260),
+      pageTextPreview: pageText.slice(0, 260),
+      hasSuggestLayer:
+        pageText.includes("话题") ||
+        pageText.includes("标签") ||
+        Boolean(
+          queryFirst(
+            [
+              '[role="option"]',
+              '[class*="suggest"]',
+              '[class*="topic"]',
+              '[class*="tag"]',
+              '[class*="recommend"]',
+            ],
+            document,
+            true,
+          ),
+        ),
+    };
+  }
+
+  async function clickFirstVisibleXiaohongshuTagCandidate(tag, editor) {
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstVisibleXiaohongshuTagCandidate:start",
+      {
+        tag,
+        selectors: buildXiaohongshuTagCandidateSelectors(tag),
+        pageTextPreview: String(document.body?.innerText || document.body?.textContent || "").slice(0, 220),
+      },
+    );
     const tagCandidate = await clickCandidatesUntil(buildXiaohongshuTagCandidateSelectors(tag), {
       timeoutMs: 8000,
       scope: "xiaohongshu-tag",
@@ -2502,16 +3501,136 @@
         afterClickMax: 520,
       },
       successCheck: () => {
+        const editorText = normalize(editor?.innerText || editor?.textContent || "");
         const pageText = normalize(document.body?.innerText || "");
-        return !pageText.includes(`#${tag}`) || pageText.includes(tag);
+        const hasSuggestLayer = Boolean(
+          queryFirst(
+            [
+              '[role="option"]',
+              '[class*="suggest"] [class*="item"]',
+              '[class*="topic"] [class*="item"]',
+              '[class*="tag"] [class*="item"]',
+              '[class*="recommend"] [class*="item"]',
+            ],
+            document,
+            true,
+          ),
+        );
+        return !editorText.includes(`#${tag}`) || (!hasSuggestLayer && !pageText.includes(`#${tag}`));
       },
       postClickObserveMs: 1500,
       postClickPollMs: 200,
     }).catch(() => null);
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstVisibleXiaohongshuTagCandidate:done",
+      {
+        tag,
+        found: tagCandidate instanceof HTMLElement,
+        candidateText: normalize(tagCandidate?.textContent || ""),
+        candidateClassName: String(tagCandidate?.className || ""),
+        pageTextPreview: String(document.body?.innerText || document.body?.textContent || "").slice(0, 220),
+      },
+    );
     if (!(tagCandidate instanceof HTMLElement)) {
       throw new Error(`未找到小红书标签候选项：#${tag}`);
     }
     return tagCandidate;
+  }
+
+  async function clickFirstXiaohongshuTagCandidate(editor, tag) {
+    const rawTag = `#${tag}`;
+    const startedAt = Date.now();
+    let attempt = 0;
+    let lastCandidate = null;
+    while (Date.now() - startedAt < 10000) {
+      attempt += 1;
+      const editorTextBefore = normalize(editor?.innerText || editor?.textContent || "");
+      if (!editorTextBefore.includes(rawTag)) {
+        reportPublishAutomationDebug(
+          "X1",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstXiaohongshuTagCandidate:already-converted",
+          {
+            tag,
+            attempt,
+            editorText: editorTextBefore.slice(0, 260),
+          },
+        );
+        return lastCandidate;
+      }
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+      const candidateWaitStartedAt = Date.now();
+      let firstCandidate = null;
+      while (Date.now() - candidateWaitStartedAt < 2500) {
+        firstCandidate = findFirstVisibleXiaohongshuTagCandidate();
+        if (firstCandidate instanceof HTMLElement) {
+          break;
+        }
+        await sleep(180);
+      }
+      if (firstCandidate instanceof HTMLElement) {
+        await humanClickElement(firstCandidate, {
+          beforeMoveMin: 220,
+          beforeMoveMax: 420,
+          movePauseMin: 140,
+          movePauseMax: 260,
+          holdPauseMin: 120,
+          holdPauseMax: 220,
+          afterClickMin: 260,
+          afterClickMax: 520,
+        }).catch(() => null);
+        const observeStartedAt = Date.now();
+        while (Date.now() - observeStartedAt < 2200) {
+          const currentEditorText = normalize(editor?.innerText || editor?.textContent || "");
+          if (!currentEditorText.includes(rawTag)) {
+            break;
+          }
+          await sleep(200);
+        }
+      }
+      lastCandidate = firstCandidate instanceof HTMLElement ? firstCandidate : lastCandidate;
+      const editorTextAfter = normalize(editor?.innerText || editor?.textContent || "");
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstXiaohongshuTagCandidate:attempt",
+        {
+          tag,
+          attempt,
+          found: firstCandidate instanceof HTMLElement,
+          candidateText: normalize(firstCandidate?.textContent || ""),
+          candidateClassName: String(firstCandidate?.className || ""),
+          candidateRectTop:
+            firstCandidate instanceof HTMLElement
+              ? roundDebugNumber(firstCandidate.getBoundingClientRect().top)
+              : null,
+          candidateRectLeft:
+            firstCandidate instanceof HTMLElement
+              ? roundDebugNumber(firstCandidate.getBoundingClientRect().left)
+              : null,
+          editorTextBefore: editorTextBefore.slice(0, 260),
+          editorTextAfter: editorTextAfter.slice(0, 260),
+          converted: !editorTextAfter.includes(rawTag),
+        },
+      );
+      if (!editorTextAfter.includes(rawTag)) {
+        return firstCandidate;
+      }
+      await sleep(randomBetween(360, 620));
+    }
+    const finalEditorText = normalize(editor?.innerText || editor?.textContent || "");
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstXiaohongshuTagCandidate:skip-not-converted",
+      {
+        tag,
+        attempt,
+        candidateText: normalize(lastCandidate?.textContent || ""),
+        candidateClassName: String(lastCandidate?.className || ""),
+        editorText: finalEditorText.slice(0, 260),
+      },
+    );
+    return lastCandidate;
   }
 
   async function fillXiaohongshuBodyAndTags(job) {
@@ -2540,9 +3659,28 @@
     if (body) {
       await typeEditableTextHuman(editor, body, 80, 135);
       await sleep(randomBetween(260, 420));
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fillXiaohongshuBodyAndTags:body-filled",
+        {
+          bodyLength: body.length,
+          tags,
+          ...getXiaohongshuTagEditorSnapshot(editor),
+        },
+      );
     }
 
     for (const [index, tag] of tags.entries()) {
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fillXiaohongshuBodyAndTags:tag-start",
+        {
+          index,
+          tag,
+          tags,
+          ...getXiaohongshuTagEditorSnapshot(editor),
+        },
+      );
       await humanClickElement(editor, {
         beforeMoveMin: 180,
         beforeMoveMax: 360,
@@ -2555,8 +3693,16 @@
       }).catch(() => null);
       placeCaretAtEnd(editor);
       await sleep(randomBetween(180, 320));
-      if (body || index > 0) {
+      if (index === 0 && body) {
         await pressEditableEnter(editor);
+      } else if (index > 0) {
+        await appendText(
+          editorSelectors,
+          " ",
+          4000,
+          document,
+          { preferHumanType: true, perCharMin: 80, perCharMax: 120 },
+        );
       }
       await appendText(
         editorSelectors,
@@ -2565,17 +3711,37 @@
         document,
         { preferHumanType: true, perCharMin: 105, perCharMax: 175 },
       );
-      await sleep(randomBetween(620, 980));
-      await clickFirstVisibleXiaohongshuTagCandidate(tag);
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fillXiaohongshuBodyAndTags:tag-typed",
+        {
+          index,
+          tag,
+          ...getXiaohongshuTagEditorSnapshot(editor),
+        },
+      );
+      await sleep(randomBetween(700, 1100));
+      await clickFirstXiaohongshuTagCandidate(editor, tag);
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fillXiaohongshuBodyAndTags:tag-clicked",
+        {
+          index,
+          tag,
+          ...getXiaohongshuTagEditorSnapshot(editor),
+        },
+      );
       await sleep(randomBetween(420, 760));
     }
     return editor;
   }
 
   async function cdpClick(element) {
+    const beforeScroll = getXiaohongshuPublishViewportSnapshot(element);
     element.scrollIntoView({ block: "center", inline: "center" });
     await sleep(300);
     const rect = element.getBoundingClientRect();
+    const afterScroll = getXiaohongshuPublishViewportSnapshot(element);
     const x = rect.left + rect.width / 2 + window.screenX;
     const y = rect.top + rect.height / 2 + window.screenY;
     return new Promise((resolve) => {
@@ -2583,17 +3749,41 @@
         { type: "AI_SUPERWEB_CDP_CLICK", payload: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } },
         (resp) => {
           void chrome.runtime.lastError;
-          resolve(resp);
+          resolve({
+            response: resp,
+            beforeScroll,
+            afterScroll,
+            clickPoint: {
+              viewportX: roundDebugNumber(rect.left + rect.width / 2),
+              viewportY: roundDebugNumber(rect.top + rect.height / 2),
+              screenX: roundDebugNumber(x),
+              screenY: roundDebugNumber(y),
+            },
+          });
         },
       );
     });
   }
 
   async function xiaohongshuClickPublishButton(publishSelectors) {
+    scheduleXiaohongshuPublishPhaseSnapshots("click-publish-start", publishSelectors);
     const button =
       findXiaohongshuPublishButton(publishSelectors)
       || (await waitForVisible(publishSelectors, 30000, document, true).catch(() => null));
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:resolved",
+      publishSelectors,
+      {
+        resolvedButtonText: normalize(button?.textContent || ""),
+        resolvedButtonClassName: String(button?.className || ""),
+      },
+    );
     if (!(button instanceof HTMLElement)) {
+      reportXiaohongshuPublishPhaseDebug(
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:button-missing",
+        publishSelectors,
+        {},
+      );
       throw new Error("未找到小红书发布按钮");
     }
     const startedAt = Date.now();
@@ -2612,6 +3802,22 @@
       }
       break;
     }
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:ready-to-click",
+      publishSelectors,
+      {
+        resolvedButtonText: normalize(button?.textContent || ""),
+        resolvedButtonClassName: String(button?.className || ""),
+      },
+    );
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:before-click",
+      publishSelectors,
+      {
+        resolvedButtonText: normalize(button?.textContent || ""),
+        resolvedButtonClassName: String(button?.className || ""),
+      },
+    );
 
     const cdpResp = await cdpClick(button);
     debugLog("xiaohongshu", "cdp-click-result", cdpResp);
@@ -2619,8 +3825,27 @@
 
     const pageText = normalize(document.body?.innerText || "");
     const published = ["发布成功", "笔记发布成功", "审核中", "发布中"].some((h) => pageText.includes(h));
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:after-cdp-click",
+      publishSelectors,
+      {
+        resolvedButtonText: normalize(button?.textContent || ""),
+        resolvedButtonClassName: String(button?.className || ""),
+        cdpClick: cdpResp,
+        published,
+      },
+    );
     if (!published) {
       debugLog("xiaohongshu", "cdp-click-no-effect-fallback", { url: window.location.href });
+      reportXiaohongshuPublishPhaseDebug(
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:before-human-click-fallback",
+        publishSelectors,
+        {
+          resolvedButtonText: normalize(button?.textContent || ""),
+          resolvedButtonClassName: String(button?.className || ""),
+          cdpClick: cdpResp,
+        },
+      );
       await humanClickElement(button, {
         beforeMoveMin: 320,
         beforeMoveMax: 620,
@@ -2632,6 +3857,17 @@
         afterClickMax: 960,
       });
       await sleep(1200);
+      const pageTextAfterHumanClick = normalize(document.body?.innerText || "");
+      reportXiaohongshuPublishPhaseDebug(
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:after-human-click-fallback",
+        publishSelectors,
+        {
+          resolvedButtonText: normalize(button?.textContent || ""),
+          resolvedButtonClassName: String(button?.className || ""),
+          cdpClick: cdpResp,
+          published: ["发布成功", "笔记发布成功", "审核中", "发布中"].some((h) => pageTextAfterHumanClick.includes(h)),
+        },
+      );
     }
     return button;
   }
@@ -2639,7 +3875,9 @@
   async function publishXiaohongshu(job) {
     const isVideo = Boolean(job.draftVideoUrl);
     const publishSelectors = [
+      'div > div > button.ce-btn.bg-red',
       "button.ce-btn.bg-red",
+      'button.ce-btn.bg-red:has-text("发布")',
       'button.bg-red:has-text("发布")',
       'button.bg-red:has-text("发布笔记")',
       'button.ce-btn:has-text("发布")',
@@ -2672,33 +3910,36 @@
       { preferHumanType: true, perCharMin: 110, perCharMax: 190 },
     );
     await fillXiaohongshuBodyAndTags(job);
+    scheduleXiaohongshuPublishPhaseSnapshots("before-submit-click", publishSelectors);
     //#region debug-point xiaohongshu-publish-submit-before-click
-    reportPublishAutomationDebug(
-      "H1",
+    reportXiaohongshuPublishPhaseDebug(
       "scripts/browser-extension/platform-login-helper/publish-automation.js:publishXiaohongshu:before-submit-click",
-      getXiaohongshuPublishSubmitSnapshot(publishSelectors),
+      publishSelectors,
+      {
+        phase: "before-submit-click",
+      },
     );
     //#endregion
     try {
       const clickedNode = await xiaohongshuClickPublishButton(publishSelectors);
       //#region debug-point xiaohongshu-publish-submit-after-click
-      reportPublishAutomationDebug(
-        "H2",
+      reportXiaohongshuPublishPhaseDebug(
         "scripts/browser-extension/platform-login-helper/publish-automation.js:publishXiaohongshu:after-submit-click",
+        publishSelectors,
         {
-          ...getXiaohongshuPublishSubmitSnapshot(publishSelectors),
           clickedNode: getElementDebugSnapshot(clickedNode),
+          phase: "after-submit-click",
         },
       );
       //#endregion
     } catch (error) {
       //#region debug-point xiaohongshu-publish-submit-click-error
-      reportPublishAutomationDebug(
-        "H1",
+      reportXiaohongshuPublishPhaseDebug(
         "scripts/browser-extension/platform-login-helper/publish-automation.js:publishXiaohongshu:submit-click-error",
+        publishSelectors,
         {
-          ...getXiaohongshuPublishSubmitSnapshot(publishSelectors),
           message: error instanceof Error ? error.message : String(error),
+          phase: "submit-click-error",
         },
       );
       //#endregion
@@ -2725,6 +3966,7 @@
         {
           ...getXiaohongshuPublishSubmitSnapshot(publishSelectors),
           message: error instanceof Error ? error.message : String(error),
+          whyNotPublished: inferXiaohongshuPublishBlockReason(getXiaohongshuPublishSubmitSnapshot(publishSelectors)),
         },
       );
       //#endregion
@@ -2733,6 +3975,7 @@
   }
 
   async function finalizeDouyinImagePublish(job) {
+    maybeInstallDouyinEditorBounceProbe("finalize-start");
     //#region debug-point douyin-image-finalize-start
     reportPublishAutomationDebug(
       "H3",
@@ -2813,7 +4056,17 @@
         job.draftTitle,
         30000,
         document,
-        { preferHumanType: true, perCharMin: 115, perCharMax: 190 },
+        {
+          preferHumanType: true,
+          perCharMin: 115,
+          perCharMax: 190,
+          clickBeforeType: true,
+          clickOptions: {
+            ...douyinSlowActionClickOptions(),
+            debugScope: "douyin-image",
+            debugLabel: "title-input",
+          },
+        },
       ).catch(() => null);
       //#region debug-point douyin-image-finalize-after-title
       reportPublishAutomationDebug(
@@ -2962,7 +4215,17 @@
       job.draftTitle,
       30000,
       document,
-      { preferHumanType: true, perCharMin: 115, perCharMax: 190 },
+      {
+        preferHumanType: true,
+        perCharMin: 115,
+        perCharMax: 190,
+        clickBeforeType: true,
+        clickOptions: {
+          ...douyinSlowActionClickOptions(),
+          debugScope: "douyin-video",
+          debugLabel: "title-input",
+        },
+      },
     ).catch(() => null);
     await fillDouyinVideoDescriptionAndTopics(job);
     await selectDouyinNoDeclaration();
@@ -3125,6 +4388,7 @@
       //#endregion
       debugLog("douyin-adapter", "execute-image-start", this.getSnapshot(job));
       if (isDouyinImageEditorPage()) {
+        maybeInstallDouyinEditorBounceProbe("resume-editor");
         //#region debug-point douyin-image-resume-editor
         reportPublishAutomationDebug(
           "H3",
@@ -3563,6 +4827,14 @@
       hasVideo: Boolean(job.draftVideoUrl),
       sessionToken: String(session?.sessionToken || "").slice(0, 12),
     });
+
+    const loginState = getPlatformPublishLoginState(job.platform, window.location.href);
+    reportPublishAutomationDebug(
+      "H4",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:executePublishSession:login-precheck",
+      loginState,
+    );
+    assertPlatformPublishLoginReady(job.platform, window.location.href);
 
     reportPublishAutomationDebug(
       "H4",

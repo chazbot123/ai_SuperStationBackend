@@ -17,6 +17,7 @@ import youtubeIconUrl from "@/assets/youtube.svg";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import {
   deletePlatformAccount,
+  keepAlivePlatformAccounts,
   listPlatformAccounts,
   openExtensionPlatformAccountHome,
   startOfficialOauthLogin,
@@ -373,6 +374,25 @@ function loginStatusMeta(status: PlatformAccountItem["loginStatus"]) {
   return { label: "未登录", variant: "gray" as const };
 }
 
+function keepAliveMeta(status: PlatformAccountItem["keepAliveStatus"]) {
+  if (status === "success") return { label: "保活成功", variant: "green" as const };
+  if (status === "reauth_required") return { label: "需要登录", variant: "red" as const };
+  if (status === "collect_failed") return { label: "采集失败", variant: "yellow" as const };
+  return null;
+}
+
+function hasResolvedProfileData(item: PlatformAccountItem | null | undefined) {
+  if (!item || item.status !== "valid" || item.loginStatus !== "authenticated") {
+    return false;
+  }
+
+  if (item.platform === "xiaohongshu" || item.platform === "wechat_mp") {
+    return Boolean(item.displayName || item.avatarUrl || item.externalAccountId) || item.followerCount !== null;
+  }
+
+  return Boolean(item.displayName || item.avatarUrl || item.externalAccountId);
+}
+
 function isDeletedResult(
   value: { id: string; deleted?: boolean } | PlatformAccountItem,
 ): value is { id: string; deleted?: boolean } {
@@ -405,6 +425,7 @@ export default function PublishingPlatformLogin() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [autoRefreshingId, setAutoRefreshingId] = useState<string | null>(null);
+  const [keepingAlive, setKeepingAlive] = useState(false);
   const [startingPlatform, setStartingPlatform] = useState<LeadPlatformStyle | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
@@ -417,6 +438,15 @@ export default function PublishingPlatformLogin() {
   const [highlightedAccountId, setHighlightedAccountId] = useState<string | null>(null);
   const [localAgentReady, setLocalAgentReady] = useState<boolean | null>(null);
   const [localAgentStatus, setLocalAgentStatus] = useState<LocalAgentStatus | null>(null);
+  const [postStartRefreshTarget, setPostStartRefreshTarget] = useState<{
+    platform: LeadPlatformStyle;
+    requestedAt: number;
+    knownAccountIds: string[];
+  } | null>(null);
+  const [postRestartRefreshTarget, setPostRestartRefreshTarget] = useState<{
+    accountId: string;
+    requestedAt: number;
+  } | null>(null);
 
   const panelClassName = "rounded-xl border border-white/15 bg-[#0b1220]/90";
   const panelHeaderClassName = "border-b border-white/15";
@@ -505,6 +535,20 @@ export default function PublishingPlatformLogin() {
       window.clearInterval(timer);
     };
   }, [accessToken, loadAccounts]);
+
+  useEffect(() => {
+    if (!postStartRefreshTarget && !postRestartRefreshTarget) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadAccounts();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loadAccounts, postRestartRefreshTarget, postStartRefreshTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -621,55 +665,116 @@ export default function PublishingPlatformLogin() {
     }
   }
 
-  async function refreshPlatformAccount(item: PlatformAccountItem, options?: { silent?: boolean }) {
-    if (!accessToken) {
-      if (!options?.silent) {
-        setHint("登录已失效，请重新登录。");
+  const refreshPlatformAccount = useCallback(
+    async (item: PlatformAccountItem, options?: { silent?: boolean }) => {
+      if (!accessToken) {
+        if (!options?.silent) {
+          setHint("登录已失效，请重新登录。");
+        }
+        return null;
       }
-      return null;
+
+      try {
+        setValidatingId(item.id);
+        const next = await validatePlatformAccount({ accessToken, id: item.id });
+        setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
+        if (!options?.silent) {
+          setHint(next.status === "valid" ? "账号校验通过。" : next.lastError ?? "账号校验失败。");
+        }
+        return next;
+      } catch (error) {
+        if (!options?.silent) {
+          setHint(error instanceof Error ? error.message : "校验平台账号失败");
+        }
+        return null;
+      } finally {
+        setValidatingId(null);
+      }
+    },
+    [accessToken],
+  );
+
+  const autoRefreshPlatformAccount = useCallback(
+    async (item: PlatformAccountItem) => {
+      setAutoRefreshingId(item.id);
+      try {
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          const next = await refreshPlatformAccount(item, { silent: true });
+          if (hasResolvedProfileData(next)) {
+            await loadAccounts();
+            setHint("账号资料已自动刷新。");
+            return;
+          }
+          if (attempt < 11) {
+            await new Promise((resolve) => window.setTimeout(resolve, 2500));
+          }
+        }
+        await loadAccounts();
+        setHint("已自动尝试刷新账号资料，如仍未显示请确认账号后台首页已正常打开。");
+      } finally {
+        setAutoRefreshingId((current) => (current === item.id ? null : current));
+      }
+    },
+    [loadAccounts, refreshPlatformAccount],
+  );
+
+  useEffect(() => {
+    if (!postStartRefreshTarget || autoRefreshingId) {
+      return;
     }
 
-    try {
-      setValidatingId(item.id);
-      const next = await validatePlatformAccount({ accessToken, id: item.id });
-      setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
-      if (!options?.silent) {
-        setHint(next.status === "valid" ? "账号校验通过。" : next.lastError ?? "账号校验失败。");
-      }
-      return next;
-    } catch (error) {
-      if (!options?.silent) {
-        setHint(error instanceof Error ? error.message : "校验平台账号失败");
-      }
-      return null;
-    } finally {
-      setValidatingId(null);
+    const current = items
+      .filter(
+        (item) =>
+          item.platform === postStartRefreshTarget.platform &&
+          !postStartRefreshTarget.knownAccountIds.includes(item.id) &&
+          item.status === "valid" &&
+          item.loginStatus === "authenticated",
+      )
+      .sort((left, right) => {
+        const leftTime = left.lastLoginCompletedAt ? Date.parse(left.lastLoginCompletedAt) : 0;
+        const rightTime = right.lastLoginCompletedAt ? Date.parse(right.lastLoginCompletedAt) : 0;
+        return rightTime - leftTime;
+      })[0];
+    if (!current) {
+      return;
     }
-  }
 
-  async function autoRefreshPlatformAccount(item: PlatformAccountItem) {
-    setAutoRefreshingId(item.id);
-    try {
-      for (let attempt = 0; attempt < 6; attempt += 1) {
-        const next = await refreshPlatformAccount(item, { silent: true });
-        const hasEnoughProfileData =
-          next &&
-          (item.platform === "wechat_mp" || item.platform === "xiaohongshu"
-            ? Boolean(next.avatarUrl) && next.followerCount !== null
-            : Boolean(next.avatarUrl) || next.followerCount !== null);
-        if (hasEnoughProfileData) {
-          setHint("账号资料已自动刷新。");
-          return;
-        }
-        if (attempt < 5) {
-          await new Promise((resolve) => window.setTimeout(resolve, 2500));
-        }
-      }
-      setHint("已自动尝试刷新账号资料，如仍未显示请确认账号后台首页已正常打开。");
-    } finally {
-      setAutoRefreshingId((current) => (current === item.id ? null : current));
+    const completedAt = current.lastLoginCompletedAt ? Date.parse(current.lastLoginCompletedAt) : 0;
+    if (!Number.isFinite(completedAt) || completedAt < postStartRefreshTarget.requestedAt) {
+      return;
     }
-  }
+
+    setHighlightedAccountId(current.id);
+    void autoRefreshPlatformAccount(current).finally(() => {
+      setPostStartRefreshTarget((target) =>
+        target?.platform === current.platform ? null : target,
+      );
+    });
+  }, [autoRefreshingId, autoRefreshPlatformAccount, items, postStartRefreshTarget]);
+
+  useEffect(() => {
+    if (!postRestartRefreshTarget || autoRefreshingId) {
+      return;
+    }
+
+    const current = items.find((item) => item.id === postRestartRefreshTarget.accountId);
+    if (!current || current.loginStatus !== "authenticated") {
+      return;
+    }
+
+    const completedAt = current.lastLoginCompletedAt ? Date.parse(current.lastLoginCompletedAt) : 0;
+    if (!Number.isFinite(completedAt) || completedAt < postRestartRefreshTarget.requestedAt) {
+      return;
+    }
+
+    setHighlightedAccountId(current.id);
+    void autoRefreshPlatformAccount(current).finally(() => {
+      setPostRestartRefreshTarget((target) =>
+        target?.accountId === current.id ? null : target,
+      );
+    });
+  }, [autoRefreshingId, autoRefreshPlatformAccount, items, postRestartRefreshTarget]);
 
   async function handleStartLogin(platform: LeadPlatformStyle) {
     if (!accessToken) {
@@ -693,7 +798,16 @@ export default function PublishingPlatformLogin() {
       if (!ready) {
         return;
       }
+      const requestedAt = Date.now();
+      const knownAccountIds = items
+        .filter((item) => item.platform === platform)
+        .map((item) => item.id);
       const session = await startExtensionPlatformLogin({ accessToken, platform });
+      setPostStartRefreshTarget({
+        platform,
+        requestedAt,
+        knownAccountIds,
+      });
       setActivePlatform(platform);
       setHint(
         `已由后台在 BitBrowser 打开${platformLabel(platform)}登录页，请切到对应窗口完成登录。当前账号会自动绑定到 Profile ${session.externalGroupId ?? "A"}。`,
@@ -729,9 +843,18 @@ export default function PublishingPlatformLogin() {
         if (!ready) {
           return;
         }
+        const requestedAt = Date.now();
+        const knownAccountIds = items
+          .filter((item) => item.platform === platform.localLoginPlatform)
+          .map((item) => item.id);
         const session = await startExtensionPlatformLogin({
           accessToken,
           platform: platform.localLoginPlatform,
+        });
+        setPostStartRefreshTarget({
+          platform: platform.localLoginPlatform,
+          requestedAt,
+          knownAccountIds,
         });
         setActivePlatform(platform.localLoginPlatform);
         setHint(
@@ -845,6 +968,10 @@ export default function PublishingPlatformLogin() {
         platform: item.platform,
         accountId: item.id,
       });
+      setPostRestartRefreshTarget({
+        accountId: item.id,
+        requestedAt: Date.now(),
+      });
       setActivePlatform(item.platform);
       setHint(
         `已由后台在 BitBrowser 重新打开${platformLabel(item.platform)}登录页，请在原专属环境中重新登录，账号会继续保留在 Profile ${session.externalGroupId ?? item.externalGroupId ?? "A"}。`,
@@ -855,10 +982,6 @@ export default function PublishingPlatformLogin() {
     } finally {
       setRestartingId(null);
     }
-  }
-
-  async function handleValidate(item: PlatformAccountItem) {
-    await refreshPlatformAccount(item);
   }
 
   async function handleDelete(item: PlatformAccountItem) {
@@ -897,6 +1020,30 @@ export default function PublishingPlatformLogin() {
       setHint(error instanceof Error ? error.message : "打开账号对应 BitBrowser 页面失败");
     } finally {
       setOpeningId((current) => (current === item.id ? null : current));
+    }
+  }
+
+  async function handleKeepAliveAccounts() {
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    try {
+      setKeepingAlive(true);
+      const result = await keepAlivePlatformAccounts({ accessToken });
+      const succeeded = typeof result.succeeded === "number" ? result.succeeded : 0;
+      const reauthRequired = typeof result.reauthRequired === "number" ? result.reauthRequired : 0;
+      const collectFailed = typeof result.collectFailed === "number" ? result.collectFailed : 0;
+      const skipped = typeof result.skipped === "number" ? result.skipped : 0;
+      await loadAccounts();
+      setHint(
+        `活跃完成：共 ${result.total} 个，成功 ${succeeded} 个，需要登录 ${reauthRequired} 个，采集失败 ${collectFailed} 个，跳过 ${skipped} 个。`,
+      );
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "活跃账号失败");
+    } finally {
+      setKeepingAlive(false);
     }
   }
 
@@ -1054,6 +1201,14 @@ export default function PublishingPlatformLogin() {
                   <div className="text-sm font-semibold text-zinc-100">{activePlatformLabel}</div>
                   <div className="flex items-center gap-3">
                     <div className="text-xs text-zinc-500">{visibleAccounts.length} 个账号</div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void handleKeepAliveAccounts()}
+                      disabled={keepingAlive}
+                    >
+                      {keepingAlive ? "活跃中..." : "活跃账号"}
+                    </Button>
                     {activePlatform !== "all" ? (
                       <Button
                         size="sm"
@@ -1073,7 +1228,13 @@ export default function PublishingPlatformLogin() {
                   <div className="divide-y divide-white/10">
                     {visibleAccounts.map((item) => {
                       const meta = platformMeta(item.platform);
-                      const online = item.status === "valid" && item.loginStatus === "authenticated";
+                      const keepAlive = keepAliveMeta(item.keepAliveStatus);
+                      const reauthRequired = item.reauthRequired || item.keepAliveStatus === "reauth_required";
+                      const isFirstLoginPending =
+                        item.loginStatus === "pending" && !item.lastLoginCompletedAt;
+                      const online =
+                        item.status === "valid" && item.loginStatus === "authenticated" && !reauthRequired;
+                      const needsRelogin = !online && !isFirstLoginPending;
                       const actionBusy =
                         openingId === item.id ||
                         validatingId === item.id ||
@@ -1110,15 +1271,39 @@ export default function PublishingPlatformLogin() {
                                 </span>
                                 <span className="inline-flex items-center gap-1">
                                   <span
-                                    className={`h-2 w-2 rounded-full ${online ? "bg-emerald-400" : "bg-zinc-500"}`}
+                                    className={`h-2 w-2 rounded-full ${
+                                      isFirstLoginPending
+                                        ? "bg-amber-400"
+                                        : online
+                                          ? "bg-emerald-400"
+                                          : "bg-zinc-500"
+                                    }`}
                                   />
-                                  {online ? "在线" : "离线"}
+                                  {isFirstLoginPending ? "登录中" : online ? "在线" : "离线"}
                                 </span>
                                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
                                   {item.loginSourceLabel}
                                 </span>
+                                {keepAlive ? (
+                                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                    {keepAlive.label}
+                                  </span>
+                                ) : null}
                                 <span>粉丝：{item.followerCount ?? "-"}</span>
                               </div>
+                              {item.keepAliveStatus === "collect_failed" && item.keepAliveError ? (
+                                <div className="mt-1 text-xs text-amber-300">{item.keepAliveError}</div>
+                              ) : null}
+                              {isFirstLoginPending ? (
+                                <div className="mt-1 text-xs text-amber-300">
+                                  {item.lastError || "当前账号正在等待完成首次登录。"}
+                                </div>
+                              ) : null}
+                              {needsRelogin ? (
+                                <div className="mt-1 text-xs text-rose-300">
+                                  {item.keepAliveError || item.lastError || "当前账号需要重新登录。"}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
 
@@ -1126,18 +1311,24 @@ export default function PublishingPlatformLogin() {
                             <Button
                               size="sm"
                               variant="secondary"
-                              onClick={() => void handleOpenAccountHome(item)}
+                              onClick={() =>
+                                void ((isFirstLoginPending || needsRelogin)
+                                  ? handleRestartLogin(item)
+                                  : handleOpenAccountHome(item))
+                              }
                               disabled={actionBusy}
                             >
-                              {openingId === item.id ? "打开中..." : "打开"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => void handleValidate(item)}
-                              disabled={validatingId === item.id || actionBusy}
-                            >
-                              {validatingId === item.id ? "校验中..." : "校验"}
+                              {isFirstLoginPending
+                                ? restartingId === item.id
+                                  ? "继续登录中..."
+                                  : "继续登录"
+                                : needsRelogin
+                                ? restartingId === item.id
+                                  ? "重新登录中..."
+                                  : "重新登录"
+                                : openingId === item.id
+                                  ? "打开中..."
+                                  : "打开"}
                             </Button>
                             <Button
                               size="sm"

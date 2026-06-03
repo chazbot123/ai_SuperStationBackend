@@ -64,6 +64,12 @@ export interface QueuePublishCommandPayload {
   type?: Extract<RuntimeCommandType, 'PUBLISH_PREPARE' | 'PUBLISH_EXECUTE'>;
 }
 
+export interface QueueKeepAliveCollectCommandPayload {
+  runtimeSessionId: string;
+  payload?: Record<string, unknown>;
+  type?: Extract<RuntimeCommandType, 'KEEPALIVE_COLLECT'>;
+}
+
 export interface ExtensionBridgeReadyState {
   session: RuntimeSession;
   hasActiveHandshake: boolean;

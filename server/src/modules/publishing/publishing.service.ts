@@ -126,7 +126,7 @@ const PENDING_LOGIN_PREVIEW = '浏览器登录中，完成后自动回收 Cookie
 const EXTENSION_LOGIN_TOKEN_PURPOSE = 'publishing_extension_login';
 const EXTENSION_PUBLISH_TOKEN_PURPOSE = 'publishing_extension_publish';
 const OFFICIAL_OAUTH_STATE_PURPOSE = 'publishing_official_oauth';
-const EXTENSION_LOGIN_TTL_SECONDS = 5 * 60;
+const EXTENSION_LOGIN_TTL_SECONDS = 15 * 60;
 const EXTENSION_PUBLISH_TTL_SECONDS = 10 * 60;
 const SUPPORTED_AUTO_PUBLISH_PLATFORMS = new Set<LeadPublishPlatform>([
   LeadPublishPlatform.douyin,
@@ -590,6 +590,15 @@ export class PublishingService {
         include: leadPlatformAccountInclude,
       });
       await this.publishingBitBrowserService
+        .applyRealtimeCookieToProfile({
+          profileId: this.extractExternalProfileId(updatedAccount.externalMeta),
+          runtimeSessionId: dto.runtimeSessionId?.trim() || null,
+          authPayload: nextAuthPayload || null,
+          cookiePayload: nextCookiePayload,
+          source: 'sync-extension-publish-job',
+        })
+        .catch(() => undefined);
+      await this.publishingBitBrowserService
         .persistDedicatedProfileCookie({
           profileId: this.extractExternalProfileId(updatedAccount.externalMeta),
           runtimeSessionId: dto.runtimeSessionId?.trim() || null,
@@ -759,6 +768,17 @@ export class PublishingService {
   }
 
   async runScheduledKeepAliveForPlatformAccounts() {
+    if (!this.isAutomaticPlatformKeepAliveEnabled()) {
+      return {
+        trigger: 'schedule' as const,
+        total: 0,
+        succeeded: 0,
+        reauthRequired: 0,
+        collectFailed: 0,
+        skipped: 0,
+        items: [],
+      };
+    }
     return this.runKeepAliveForPlatformAccounts({
       creatorId: null,
       trigger: 'schedule',
@@ -922,6 +942,30 @@ export class PublishingService {
       syncedAccountId: null,
       runtimeSessionId: null,
     });
+    if (platform === LeadPublishPlatform.xiaohongshu) {
+      const tokenFingerprint = this.buildDebugTokenFingerprint(sessionToken);
+      void fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'xiaohongshu-login-recognition',
+          runId: 'pre-fix',
+          hypothesisId: 'H2',
+          location: 'server/src/modules/publishing/publishing.service.ts:startPlatformExtensionLogin:token-created',
+          msg: '[DEBUG] xiaohongshu extension login token created',
+          data: {
+            sessionId,
+            runtimeSessionId: '',
+            platform,
+            accountId,
+            tokenRawLength: tokenFingerprint.rawLength,
+            tokenTrimmedLength: tokenFingerprint.trimmedLength,
+            tokenHasOuterWhitespace: tokenFingerprint.hasOuterWhitespace,
+            tokenPreview: tokenFingerprint.preview,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => undefined);
+    }
 
     let runtime;
     try {
@@ -1031,6 +1075,17 @@ export class PublishingService {
     }).catch(() => undefined);
   }
   // #endregion
+
+  private buildDebugTokenFingerprint(token: string | null | undefined) {
+    const rawToken = String(token ?? '');
+    const trimmedToken = rawToken.trim();
+    return {
+      rawLength: rawToken.length,
+      trimmedLength: trimmedToken.length,
+      hasOuterWhitespace: rawToken.length !== trimmedToken.length,
+      preview: trimmedToken ? `${trimmedToken.slice(0, 6)}...${trimmedToken.slice(-6)}` : '',
+    };
+  }
 
   async startMcpPlatformLogin(_user: SessionUser, dto: StartMcpPlatformLoginDto) {
     const platform = dto.platform as LeadPublishPlatform;
@@ -1177,7 +1232,31 @@ export class PublishingService {
   async syncPlatformExtensionLogin(dto: SyncPlatformExtensionLoginDto) {
     this.cleanupExpiredExtensionLoginSessions();
 
-    const tokenPayload = await this.verifyExtensionLoginToken(dto.sessionToken);
+    const runtimeSessionIdFromDto = dto.runtimeSessionId?.trim() || '';
+    const tokenFingerprint = this.buildDebugTokenFingerprint(dto.sessionToken);
+    void fetch('http://127.0.0.1:7777/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: 'xiaohongshu-login-recognition',
+        runId: 'pre-fix',
+        hypothesisId: 'H2',
+        location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:before-verify-token',
+        msg: '[DEBUG] extension login sync before verify token',
+        data: {
+          runtimeSessionId: runtimeSessionIdFromDto,
+          tokenRawLength: tokenFingerprint.rawLength,
+          tokenTrimmedLength: tokenFingerprint.trimmedLength,
+          tokenHasOuterWhitespace: tokenFingerprint.hasOuterWhitespace,
+          tokenPreview: tokenFingerprint.preview,
+        },
+        ts: Date.now(),
+      }),
+    }).catch(() => undefined);
+
+    const tokenPayload = await this.verifyExtensionLoginToken(dto.sessionToken, {
+      runtimeSessionId: runtimeSessionIdFromDto,
+      debugSessionId: 'xiaohongshu-login-recognition',
+    });
     const session = this.extensionLoginSessions.get(tokenPayload.sid);
 
     if (!session || session.userId !== tokenPayload.uid || session.platform !== tokenPayload.platform) {
@@ -1223,6 +1302,39 @@ export class PublishingService {
           : null;
       const weakRequestedAccountName = this.isWeakExtensionIdentityValue(requestedAccountName);
       const weakDisplayName = this.isWeakExtensionIdentityValue(displayName);
+      if (session.platform === LeadPublishPlatform.xiaohongshu) {
+        // #region debug-point X5:xiaohongshu-sync-input
+        void fetch('http://127.0.0.1:7777/event', {
+          method: 'POST',
+          body: JSON.stringify({
+            sessionId: 'xiaohongshu-login-recognition',
+            runId: 'pre-fix',
+            hypothesisId: 'H2',
+            location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:input',
+            msg: '[DEBUG] xiaohongshu syncPlatformExtensionLogin input',
+            data: {
+              sessionId: session.sessionId,
+              runtimeSessionId,
+              dtoAccountName: dto.accountName?.trim() || '',
+              dtoExternalAccountId: dto.externalAccountId?.trim() || '',
+              dtoDisplayName: dto.displayName?.trim() || '',
+              dtoAvatarUrl: dto.avatarUrl?.trim() || '',
+              dtoFollowerCount:
+                typeof dto.followerCount === 'number' && Number.isFinite(dto.followerCount)
+                  ? dto.followerCount
+                  : null,
+              requestedAccountName,
+              externalAccountId,
+              displayName,
+              weakRequestedAccountName,
+              weakDisplayName,
+              sourceUrl: dto.sourceUrl?.trim() || '',
+            },
+            ts: Date.now(),
+          }),
+        }).catch(() => undefined);
+        // #endregion
+      }
 
       let fallbackProfile:
         | {
@@ -1271,6 +1383,26 @@ export class PublishingService {
             sourceUrl: collected.sourceUrl || null,
           };
         }
+        if (session.platform === LeadPublishPlatform.xiaohongshu) {
+          // #region debug-point X6:xiaohongshu-fallback
+          void fetch('http://127.0.0.1:7777/event', {
+            method: 'POST',
+            body: JSON.stringify({
+              sessionId: 'xiaohongshu-login-recognition',
+              runId: 'pre-fix',
+              hypothesisId: 'H3',
+              location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:fallback',
+              msg: '[DEBUG] xiaohongshu fallback profile result',
+              data: {
+                sessionId: session.sessionId,
+                runtimeSessionId,
+                fallbackProfile,
+              },
+              ts: Date.now(),
+            }),
+          }).catch(() => undefined);
+          // #endregion
+        }
       }
 
       const finalAccountName =
@@ -1288,6 +1420,31 @@ export class PublishingService {
       const finalFollowerCount =
         followerCount !== null ? followerCount : fallbackProfile?.followerCount ?? null;
       const finalSourceUrl = dto.sourceUrl?.trim() || fallbackProfile?.sourceUrl || null;
+      if (session.platform === LeadPublishPlatform.xiaohongshu) {
+        // #region debug-point X7:xiaohongshu-final-profile
+        void fetch('http://127.0.0.1:7777/event', {
+          method: 'POST',
+          body: JSON.stringify({
+            sessionId: 'xiaohongshu-login-recognition',
+            runId: 'pre-fix',
+            hypothesisId: 'H4',
+            location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:final',
+            msg: '[DEBUG] xiaohongshu final resolved profile',
+            data: {
+              sessionId: session.sessionId,
+              runtimeSessionId,
+              finalAccountName,
+              finalExternalAccountId,
+              finalDisplayName,
+              finalAvatarUrl,
+              finalFollowerCount,
+              finalSourceUrl,
+            },
+            ts: Date.now(),
+          }),
+        }).catch(() => undefined);
+        // #endregion
+      }
       // #region debug-point C:video-login-resolved
       void fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"video-login-500",runId:"pre-fix",hypothesisId:"C",location:"server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:resolved",msg:"[DEBUG] sync extension login resolved identity",data:{platform:session.platform,sessionId:session.sessionId,accountId:session.accountId,requestedAccountName,externalAccountId,displayName,weakRequestedAccountName,weakDisplayName,fallbackAccountName:fallbackProfile?.accountName||null,fallbackExternalAccountId:fallbackProfile?.externalAccountId||null,fallbackDisplayName:fallbackProfile?.displayName||null,finalAccountName,finalExternalAccountId,finalDisplayName,finalAvatarUrl,finalFollowerCount,finalSourceUrl},ts:Date.now()})}).catch(()=>undefined);
       // #endregion
@@ -1424,9 +1581,7 @@ export class PublishingService {
             lastValidatedAt: new Date(),
             lastError: null,
             externalMeta: {
-              ...(current.externalMeta && typeof current.externalMeta === 'object'
-                ? (current.externalMeta as Record<string, unknown>)
-                : {}),
+              ...this.clearPlatformAccountKeepAliveState(current.externalMeta),
               ...(session.profileId ? { profileId: session.profileId } : {}),
               ...(finalAvatarUrl ? { avatarUrl: finalAvatarUrl } : {}),
               ...(finalFollowerCount !== null ? { followerCount: finalFollowerCount } : {}),
@@ -1457,6 +1612,9 @@ export class PublishingService {
               lastError: null,
               remark,
               externalMeta: {
+                keepAliveStatus: 'success',
+                keepAliveError: null,
+                reauthRequired: false,
                 ...(session.profileId ? { profileId: session.profileId } : {}),
                 ...(finalAvatarUrl ? { avatarUrl: finalAvatarUrl } : {}),
                 ...(finalFollowerCount !== null ? { followerCount: finalFollowerCount } : {}),
@@ -1475,6 +1633,15 @@ export class PublishingService {
       // #endregion
       session.accountId = saved.id;
       session.syncedAccountId = saved.id;
+      await this.publishingBitBrowserService
+        .applyRealtimeCookieToProfile({
+          profileId: session.profileId || this.extractExternalProfileId(saved.externalMeta),
+          runtimeSessionId,
+          authPayload,
+          cookiePayload,
+          source: 'sync-platform-extension-login',
+        })
+        .catch(() => undefined);
       await this.publishingBitBrowserService
         .persistDedicatedProfileCookie({
           profileId: session.profileId || this.extractExternalProfileId(saved.externalMeta),
@@ -1550,7 +1717,33 @@ export class PublishingService {
         }),
       }).catch(() => undefined);
       // #endregion
-      if (!hasResolvedIdentity) {
+      if (session.platform === LeadPublishPlatform.xiaohongshu) {
+        // #region debug-point X8:xiaohongshu-saved
+        void fetch('http://127.0.0.1:7777/event', {
+          method: 'POST',
+          body: JSON.stringify({
+            sessionId: 'xiaohongshu-login-recognition',
+            runId: 'pre-fix',
+            hypothesisId: 'H5',
+            location: 'server/src/modules/publishing/publishing.service.ts:syncPlatformExtensionLogin:saved',
+            msg: '[DEBUG] xiaohongshu saved account',
+            data: {
+              sessionId: session.sessionId,
+              runtimeSessionId,
+              accountId: saved.id,
+              accountName: saved.accountName,
+              displayName: saved.displayName,
+              externalAccountId: saved.externalAccountId,
+              avatarUrl: this.extractExternalAvatarUrl(saved.externalMeta),
+              followerCount: this.extractExternalFollowerCount(saved.externalMeta),
+            },
+            ts: Date.now(),
+          }),
+        }).catch(() => undefined);
+        // #endregion
+      }
+      const allowWeakIdentityCompletion = session.platform === LeadPublishPlatform.xiaohongshu;
+      if (!hasResolvedIdentity && !allowWeakIdentityCompletion) {
         // #region debug-point H2:partial-sync-return
         this.reportDebugEvent('H2', 'pre-fix', 'publishing.service:syncPlatformExtensionLogin:partial-sync-return', {
           sessionId: session.sessionId,
@@ -2848,6 +3041,9 @@ export class PublishingService {
   }
 
   private async markPlatformAccountAuthExpiredIfNeeded(accountId: string, message: string) {
+    if (!this.isPublishFailureAutoInvalidateEnabled()) {
+      return;
+    }
     if (!this.isPlatformAuthExpiredMessage(message)) {
       return;
     }
@@ -2860,6 +3056,10 @@ export class PublishingService {
         lastError: message,
       },
     });
+  }
+
+  private isPublishFailureAutoInvalidateEnabled() {
+    return false;
   }
 
   private isPlatformAuthExpiredMessage(message: string) {
@@ -2969,6 +3169,7 @@ export class PublishingService {
       sessionToken,
       expiresAt: new Date(Date.now() + EXTENSION_PUBLISH_TTL_SECONDS * 1000).toISOString(),
       job: this.serializePublishJob(running),
+      shouldInjectCookies: false,
       accountAuthPayload,
       accountCookiePayload: this.getExtensionAccountCookiePayload(platformAccount),
       platformAccountId: platformAccount.id,
@@ -3927,10 +4128,19 @@ export class PublishingService {
           : '本地扩展';
     const avatarUrl = this.extractExternalAvatarUrl(item.externalMeta);
     const followerCount = this.extractExternalFollowerCount(item.externalMeta);
-    const keepAliveStatus = this.extractExternalKeepAliveStatus(item.externalMeta);
-    const keepAliveError = this.extractExternalKeepAliveError(item.externalMeta);
-    const keepAliveAt = this.extractExternalKeepAliveAt(item.externalMeta);
-    const reauthRequired = this.extractExternalReauthRequired(item.externalMeta);
+    const shouldExposeKeepAliveState = this.shouldExposeKeepAliveState(item.externalMeta);
+    const keepAliveStatus = shouldExposeKeepAliveState
+      ? this.extractExternalKeepAliveStatus(item.externalMeta)
+      : null;
+    const keepAliveError = shouldExposeKeepAliveState
+      ? this.extractExternalKeepAliveError(item.externalMeta)
+      : null;
+    const keepAliveAt = shouldExposeKeepAliveState
+      ? this.extractExternalKeepAliveAt(item.externalMeta)
+      : null;
+    const reauthRequired = shouldExposeKeepAliveState
+      ? this.extractExternalReauthRequired(item.externalMeta)
+      : false;
     return {
       id: item.id,
       creatorId: item.creatorId,
@@ -4033,8 +4243,21 @@ export class PublishingService {
         : {};
     delete next.keepAliveStatus;
     delete next.keepAliveError;
+    delete next.keepAliveTrigger;
     delete next.reauthRequired;
     return next;
+  }
+
+  private shouldExposeKeepAliveState(value: unknown) {
+    if (this.isAutomaticPlatformKeepAliveEnabled()) {
+      return true;
+    }
+    return this.extractExternalKeepAliveTrigger(value) !== 'schedule';
+  }
+
+  private extractExternalKeepAliveTrigger(value: unknown) {
+    const found = this.readFirstStringFromPaths(value, [['keepAliveTrigger']]);
+    return found || null;
   }
 
   private isPlatformReauthSourceUrl(
@@ -4076,6 +4299,10 @@ export class PublishingService {
   private extractExternalReauthRequired(value: unknown) {
     const found = this.readUnknownPath(value, ['reauthRequired']);
     return found === true;
+  }
+
+  public isAutomaticPlatformKeepAliveEnabled() {
+    return false;
   }
 
   private readFirstStringFromPaths(value: unknown, paths: string[][]) {
@@ -4412,7 +4639,13 @@ export class PublishingService {
     }
   }
 
-  private async verifyExtensionLoginToken(token: string) {
+  private async verifyExtensionLoginToken(
+    token: string,
+    debugContext?: {
+      runtimeSessionId?: string | null;
+      debugSessionId?: string;
+    },
+  ) {
     try {
       const payload = await this.jwtService.verifyAsync<ExtensionLoginTokenPayload>(token);
       if (payload.purpose !== EXTENSION_LOGIN_TOKEN_PURPOSE) {
@@ -4420,6 +4653,27 @@ export class PublishingService {
       }
       return payload;
     } catch (error) {
+      const tokenFingerprint = this.buildDebugTokenFingerprint(token);
+      void fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: debugContext?.debugSessionId || 'xiaohongshu-login-recognition',
+          runId: 'pre-fix',
+          hypothesisId: 'H3',
+          location: 'server/src/modules/publishing/publishing.service.ts:verifyExtensionLoginToken:error',
+          msg: '[DEBUG] verify extension login token error',
+          data: {
+            runtimeSessionId: debugContext?.runtimeSessionId || '',
+            errorName: error instanceof Error ? error.name : typeof error,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            tokenRawLength: tokenFingerprint.rawLength,
+            tokenTrimmedLength: tokenFingerprint.trimmedLength,
+            tokenHasOuterWhitespace: tokenFingerprint.hasOuterWhitespace,
+            tokenPreview: tokenFingerprint.preview,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => undefined);
       if (error instanceof UnauthorizedException) {
         throw error;
       }

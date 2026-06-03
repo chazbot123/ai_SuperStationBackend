@@ -1,0 +1,37 @@
+import { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PublishingService } from './publishing.service';
+export declare class PublishingProfileKeepaliveService implements OnModuleInit, OnModuleDestroy {
+    private readonly publishingService;
+    private readonly configService;
+    private readonly logger;
+    private keepAliveTimer;
+    private startupTimer;
+    private running;
+    constructor(publishingService: PublishingService, configService: ConfigService);
+    onModuleInit(): void;
+    onModuleDestroy(): void;
+    executeScheduledKeepAlive(): Promise<{
+        trigger: "manual" | "schedule";
+        total: number;
+        succeeded: number;
+        failed: number;
+        skipped: number;
+        items: {
+            id: string;
+            platform: import("@prisma/client").LeadPublishPlatform;
+            accountName: string;
+            status: "success" | "failed" | "skipped";
+            message: string;
+        }[];
+    } | {
+        skipped: boolean;
+        reason?: undefined;
+    } | {
+        skipped: boolean;
+        reason: string;
+    }>;
+    private isEnabled;
+    private resolveIntervalMs;
+    private resolveInitialDelayMs;
+}

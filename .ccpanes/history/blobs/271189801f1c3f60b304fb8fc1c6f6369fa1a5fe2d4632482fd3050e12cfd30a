@@ -1,0 +1,41 @@
+# 任务发现
+
+## 已确认
+- 前端为 `Vite + React 18 + TypeScript`
+- 后端为 `NestJS 11 + Prisma 7`
+- 后端默认监听端口为 `3000`
+- 后端统一前缀为 `/api`
+- 本地开发阶段前端通过 Vite 代理到 `http://localhost:3000`
+- 已存在基础设施编排文件 `docker-compose.yml`
+- 当前 Compose 只包含 `PostgreSQL`、`Redis`、`MinIO`
+
+## 环境变量
+- 后端已明确使用：`PORT`、`NODE_ENV`、`CORS_ORIGIN`、`JWT_SECRET`、`JWT_EXPIRES_IN`、`SESSION_DEVICE_LIMIT`、`DATABASE_URL`、`REDIS_URL`、`MINIO_*`
+- 根目录 AI 接口文件还使用：`DASHSCOPE_API_KEY`、`ALIYUN_API_KEY`、`DASHSCOPE_*`
+
+## 风险
+- 根目录 `README.md` 存在未解决的合并标记，本次按用户要求忽略
+- 现有 `production-server-config.md` 提到 `worker`，但当前仓库未落地对应服务
+- 前端未看到明确的生产环境 API 地址变量，现阶段更适合采用 Nginx 同域反代 `/api`
+
+## 本次补充
+- 新增命令版文档，覆盖 Ubuntu 初始化、Node.js、PM2、Nginx、Docker、Docker Compose
+- Docker 方案聚焦基础服务：`PostgreSQL`、`Redis`、`MinIO`
+- 当前仓库没有前后端生产 `Dockerfile`，因此未提供完整应用容器化部署命令
+
+## 2026-06-01 发布登录态补充
+- `publish-automation.js` 已加发布前登录页预检，命中未登录页会直接报错并终止
+- `publishing-bitbrowser.service.ts` 当前发布链路会复用账号专属 `profile` 并直接打开目标发布页
+- 当前发布链路未看到“发布前把保存的 Cookie 回灌到 BitBrowser profile / 当前运行时”的步骤
+- `publishing-bitbrowser.service.ts` 已具备通过 debug port 读取当前 profile Cookie 的能力：`collectLiveAuthPayloadFromDebugPort()`、`getCookiesInDebugTarget()`
+- `platform-login-browser.service.ts` 已具备 Cookie 注入映射思路：`applyAuthPayloadToContext()`、`buildPlatformCookiesForInjection()`
+- `publishing.service.ts:syncPlatformExtensionLogin()` 已在登录同步成功时把最新 `authPayload` 和 `cookiePayload` 写回平台账号表
+- 当前最小可行方案：
+- 预检失败时，先把账号表中的 `cookiePayload / authPayload` 回灌到当前 BitBrowser runtime，再重新打开目标页验证
+- 登录成功或发布成功后，再从当前 runtime 反读最新 Cookie，并写回账号表与 profile 详情
+
+## 2026-06-01 在线状态补充
+- 抖音账号“打开后实际命中登录页”时，原 `validatePlatformAccount()` BitBrowser 分支只要还能读到旧 Cookie，就可能继续判成有效
+- 这会导致前端列表仍拿到 `status=valid`、`loginStatus=authenticated`，从而继续显示“在线”
+- 已修复为：当 BitBrowser 快照 `sourceUrl` 命中抖音登录页时，直接写回 `status=invalid`、`loginStatus=failed`、`keepAliveStatus=reauth_required`、`reauthRequired=true`
+- 已同步在校验成功分支清理旧的 `keepAliveStatus / keepAliveError / reauthRequired`，避免状态残留

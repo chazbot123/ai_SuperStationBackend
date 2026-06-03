@@ -1,0 +1,27 @@
+[OPEN] douyin-home-return
+
+# 调试目标
+
+- 症状：抖音发布再次失败，页面退回 `home`
+- 期望：进入上传/发布链路后继续执行，不回到 `home`
+- 当前阶段：仅取证，不修改业务逻辑
+
+# 当前假设
+
+- H1：页面真实发生了 `upload -> home` 回跳，不是 background 没发命令
+- H2：runtime dispatch / page-ready 时机过早，命令在错误页面执行
+- H3：登录态或平台校验失效，进入上传页后被平台强制带回 `home`
+- H4：旧的 pending publish / resume 逻辑误触发，覆盖了当前页面状态
+- H5：`.dbg` 接收链异常，导致现象判断基于不完整日志
+
+# 取证计划
+
+- 检查 `.dbg` 最近日志是否持续写入
+- 检查 `server/.runtime/bitbrowser/bitbrowser.store.json` 最近 runtime / command
+- 对照 background / content 的已存在调试点判断命令链和页面跳转链
+
+# 当前进度
+
+- 已创建调试会话文件
+- 尚未修改业务逻辑
+- 下一步读取运行时证据

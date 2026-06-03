@@ -132,8 +132,28 @@ export type PlatformAccountItem = {
   lastLoginCompletedAt: string | null;
   lastValidatedAt: string | null;
   lastError: string | null;
+  keepAliveStatus: "success" | "reauth_required" | "collect_failed" | null;
+  keepAliveError: string | null;
+  keepAliveAt: string | null;
+  reauthRequired: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PlatformAccountsKeepAliveResult = {
+  trigger: "manual" | "schedule";
+  total: number;
+  succeeded: number;
+  reauthRequired: number;
+  collectFailed: number;
+  skipped: number;
+  items: Array<{
+    id: string;
+    platform: LeadPlatformStyle;
+    accountName: string;
+    status: "success" | "reauth_required" | "collect_failed" | "skipped";
+    message: string;
+  }>;
 };
 
 export type PlatformExtensionLoginSession = {
@@ -293,6 +313,13 @@ export async function openExtensionPlatformAccountHome(input: { accessToken: str
     method: "POST",
     headers: getAuthHeaders(input.accessToken),
     body: JSON.stringify({ accountId: input.accountId }),
+  });
+}
+
+export async function keepAlivePlatformAccounts(input: { accessToken: string }) {
+  return requestJson<PlatformAccountsKeepAliveResult>("/api/publishing/platform-accounts/keepalive", {
+    method: "POST",
+    headers: getAuthHeaders(input.accessToken),
   });
 }
 

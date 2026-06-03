@@ -290,8 +290,9 @@ export class BitBrowserProfileService {
     return {
       proxyMethod: 2,
       proxyType: 'noproxy',
-      syncExtensions: true,
-      syncUserExtensions: true,
+      syncExtensions: false,
+      syncUserExtensions: false,
+      webRTC: 2,
       browserFingerPrint: {
         coreProduct: 'chrome',
         coreVersion: '130',

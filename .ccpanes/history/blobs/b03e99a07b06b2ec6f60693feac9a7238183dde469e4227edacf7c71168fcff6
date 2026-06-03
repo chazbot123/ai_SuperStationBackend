@@ -1,0 +1,1444 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Download, KeyRound, ShieldCheck, Smartphone } from "lucide-react";
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import Modal from "@/components/ui/Modal";
+import bilibiliIconUrl from "@/assets/哔哩哔哩.svg";
+import facebookIconUrl from "@/assets/Facebook.svg";
+import instagramIconUrl from "@/assets/githair-instagram.svg";
+import linkedinIconUrl from "@/assets/linkedin.svg";
+import threadsIconUrl from "@/assets/threads-fill.svg";
+import tiktokIconUrl from "@/assets/TIKTOK.svg";
+import douyinIconUrl from "@/assets/抖音.svg";
+import wechatOfficialIconUrl from "@/assets/公众号.svg";
+import xTwitterIconUrl from "@/assets/XTwitter.svg?url";
+import youtubeIconUrl from "@/assets/youtube.svg";
+import { usePageMeta } from "@/hooks/usePageMeta";
+import {
+  deletePlatformAccount,
+  keepAlivePlatformAccounts,
+  listPlatformAccounts,
+  openExtensionPlatformAccountHome,
+  startOfficialOauthLogin,
+  startExtensionPlatformLogin,
+  type LeadPlatformStyle,
+  type PlatformAccountItem,
+  type PlatformAccountStatus,
+  updatePlatformAccount,
+  validatePlatformAccount,
+} from "@/lib/publishing";
+import {
+  getLocalAgentStatus,
+  pingLocalAgent,
+  startLocalAgentBitBrowser,
+  type LocalAgentStatus,
+} from "@/lib/localAgent";
+import { useAuthStore } from "@/store/authStore";
+
+function XiaohongshuIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect width="64" height="64" rx="18" fill="#FF2442" />
+      <text
+        x="32"
+        y="39"
+        fill="#FFFFFF"
+        fontSize="20"
+        fontWeight="800"
+        textAnchor="middle"
+        fontFamily="'Microsoft YaHei', 'PingFang SC', sans-serif"
+      >
+        小红书
+      </text>
+    </svg>
+  );
+}
+
+function DouyinIcon({ className = "" }: { className?: string }) {
+  return <AssetIcon src={douyinIconUrl} className={className} />;
+}
+
+function WechatVideoIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 1024 1024" className={className} aria-hidden="true">
+      <path
+        d="M282.04032 310.272c-2.96448 2.0736-9.33376 10.496-12.62592 32.22016-4.83328 31.85664-3.3792 95.90784 31.0016 220.20096 1.03936 3.4304 11.49952 37.6064 26.01472 73.73824 21.36064 53.18144 35.40992 71.08608 40.92928 76.61568 8.04864-3.29216 26.66496-15.33952 53.02272-47.40096 23.0656-28.0576 43.73504-61.53216 56.9856-91.9552-13.38368-23.23968-43.50976-74.47552-77.92128-126.04928C320.77312 329.74336 288.33792 312.6272 282.04032 310.272zM741.95968 310.272c-6.2976 2.3552-38.7328 19.47136-117.40672 137.3696-34.41152 51.57376-64.53248 102.8096-77.92128 126.04928 13.25568 30.42304 33.92 63.89248 56.9856 91.9552 26.35776 32.06144 44.9792 44.1088 53.02784 47.40096 5.52448-5.54496 19.63008-23.52128 41.08288-77.00992a985.216 985.216 0 0 0 25.85088-73.33888c34.37568-124.29312 35.83488-188.34944 31.0016-220.20608-3.29216-21.72416-9.66144-30.15168-12.6208-32.22016z"
+        fill="#FA9D3B"
+      />
+      <path
+        d="M849.92 51.2H174.08c-67.8656 0-122.88 55.0144-122.88 122.88v675.84c0 67.8656 55.0144 122.88 122.88 122.88h675.84c67.8656 0 122.88-55.0144 122.88-122.88V174.08c0-67.8656-55.0144-122.88-122.88-122.88z m-66.21184 528.50688l-0.1792 0.62976c-0.54784 1.83296-13.71136 45.57312-32.3584 90.07104-31.17568 74.37824-58.48064 106.11712-91.29472 106.11712-29.96736 0-64.49152-23.17824-102.61504-68.89472-16.52224-19.80928-32.03072-42.14784-45.2608-64.79872-13.23008 22.65088-28.73856 44.98944-45.2608 64.79872-38.12352 45.71648-72.64768 68.89472-102.61504 68.89472-32.81408 0-60.11904-31.73376-91.29472-106.11712-18.65216-44.4928-31.80544-88.23296-32.3584-90.07104l-0.1792-0.62976c-43.4944-157.11744-46.976-256.70656-10.65472-304.45056 19.60448-25.76896 44.35456-27.77088 51.47136-27.77088 0.54784 0 1.08544 0.01024 1.6128 0.03072 28.80512 0.38912 71.168 20.4288 165.12 160.11264 24.96512 37.12 47.62624 73.90208 64.1536 101.59104 16.53248-27.68896 39.18848-64.46592 64.1536-101.59104 93.952-139.68384 136.31488-159.72352 165.12-160.11264 0.52736-0.02048 1.06496-0.03072 1.6128-0.03072 7.1168 0 31.86688 2.00704 51.47136 27.77088 36.33152 47.744 32.84992 147.33312-10.64448 304.45056z"
+        fill="#FA9D3B"
+      />
+    </svg>
+  );
+}
+
+function KuaishouIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 1024 1024" className={className} aria-hidden="true">
+      <path
+        d="M299.27936 624.43008v87.48544c0 14.64832 10.70592 21.24288 23.78752 14.65856l83.49696-42.01984v-32.76288L323.072 609.7664c-13.08672-6.58432-23.79264 0.01536-23.79264 14.66368zM654.42304 436.03456c36.72064 0 66.59584-29.87008 66.59584-66.59072s-29.8752-66.59584-66.59584-66.59584c-36.71552 0-66.5856 29.8752-66.5856 66.59584s29.87008 66.59072 66.5856 66.59072zM443.56096 435.65056c47.73376 0 86.56384-38.8352 86.56384-86.56896s-38.83008-86.56896-86.56384-86.56896-86.56896 38.8352-86.56896 86.56896 38.8352 86.56896 86.56896 86.56896z"
+        fill="#FF4A08"
+      />
+      <path
+        d="M849.92 51.2H174.08c-67.8656 0-122.88 55.0144-122.88 122.88v675.84c0 67.8656 55.0144 122.88 122.88 122.88h675.84c67.8656 0 122.88-55.0144 122.88-122.88V174.08c0-67.8656-55.0144-122.88-122.88-122.88zM443.56096 204.8c54.05184 0 101.22752 29.89056 125.93664 73.99936 22.24128-20.85376 52.11136-33.664 84.93056-33.664 68.54656 0 124.30848 55.76704 124.30848 124.30848s-55.76704 124.30336-124.30848 124.30336c-41.40544 0-78.12608-20.37248-100.73088-51.60448-26.48576 31.29856-66.01728 51.22048-110.13632 51.22048-79.55968 0-144.2816-64.72704-144.2816-144.2816S364.00128 204.8 443.56096 204.8z m336.65536 505.63584c0 59.97568-48.78848 108.76416-108.76416 108.76416H515.328c-47.05792 0-87.22432-30.04416-102.34368-71.96672l-87.81824 42.40384c-9.43616 4.5568-18.97984 6.8608-28.37504 6.8608h-0.00512c-30.70976 0-53.00224-24.3712-53.00224-57.9328v-140.5696c0-33.57696 22.29248-57.94304 53.00736-57.94304 9.3952 0 18.93888 2.30912 28.36992 6.86592l87.59808 42.29632c14.93504-42.26048 55.26528-72.63232 102.56896-72.63232h156.11904c59.97568 0 108.76416 48.7936 108.76416 108.76928v85.08416z"
+        fill="#FF4A08"
+      />
+      <path
+        d="M671.45216 574.28992H515.328c-28.14976 0-51.05664 22.90688-51.05664 51.05664v85.08928c0 28.14976 22.90688 51.05664 51.05664 51.05664h156.11904c28.14976 0 51.05664-22.90688 51.05664-51.05664v-85.08928c0-28.14976-22.90176-51.05664-51.05152-51.05664z"
+        fill="#FF4A08"
+      />
+    </svg>
+  );
+}
+
+function AssetIcon({
+  src,
+  className = "",
+}: {
+  src: string;
+  className?: string;
+}) {
+  return (
+    <img src={src} alt="" className={`object-contain ${className}`} aria-hidden="true" />
+  );
+}
+
+function CircleLetterIcon({
+  text,
+  className = "",
+  bgClassName = "bg-zinc-700",
+}: {
+  text: string;
+  className?: string;
+  bgClassName?: string;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-center rounded-[10px] text-sm font-semibold text-white ${bgClassName} ${className}`}
+      aria-hidden="true"
+    >
+      {text}
+    </div>
+  );
+}
+
+function AccountAvatar({ avatarUrl, name }: { avatarUrl: string | null; name: string }) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt=""
+        className="h-11 w-11 rounded-full object-cover ring-1 ring-white/10"
+        loading="lazy"
+        aria-hidden="true"
+      />
+    );
+  }
+
+  const letter = (name || "?").trim().slice(0, 1).toUpperCase();
+  return (
+    <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/5 text-sm font-semibold text-zinc-200 ring-1 ring-white/10">
+      {letter}
+    </div>
+  );
+}
+
+const platformOptions: Array<{
+  value: LeadPlatformStyle;
+  label: string;
+  icon: JSX.Element;
+  iconWrapClassName: string;
+}> = [
+  {
+    value: "xiaohongshu",
+    label: "小红书",
+    icon: <XiaohongshuIcon className="h-7 w-7" />,
+    iconWrapClassName: "rounded-[9px]",
+  },
+  {
+    value: "douyin",
+    label: "抖音",
+    icon: <DouyinIcon className="h-8 w-8" />,
+    iconWrapClassName: "rounded-[10px]",
+  },
+  {
+    value: "wechat_mp",
+    label: "视频号",
+    icon: <WechatVideoIcon className="h-8 w-8" />,
+    iconWrapClassName: "rounded-[10px]",
+  },
+  {
+    value: "kuaishou",
+    label: "快手",
+    icon: <KuaishouIcon className="h-8 w-8" />,
+    iconWrapClassName: "rounded-[10px]",
+  },
+  {
+    value: "bilibili",
+    label: "哔哩哔哩",
+    icon: <AssetIcon src={bilibiliIconUrl} className="h-10 w-10" />,
+    iconWrapClassName: "rounded-[10px]",
+  },
+  {
+    value: "wechat_official",
+    label: "微信公众号",
+    icon: <AssetIcon src={wechatOfficialIconUrl} className="h-10 w-10" />,
+    iconWrapClassName: "rounded-[10px]",
+  },
+];
+
+const connectChannelIconClassName = "h-10 w-10";
+
+type ConnectChannelPlatform = {
+  key: string;
+  label: string;
+  icon: JSX.Element;
+  iconWrapClassName: string;
+  enabled: boolean;
+  badge?: string;
+  hint: string;
+  actionLabel: string;
+  localLoginPlatform?: Extract<LeadPlatformStyle, "xiaohongshu" | "douyin" | "wechat_mp">;
+  oauthPlatform?: Extract<LeadPlatformStyle, "kuaishou" | "bilibili" | "wechat_official">;
+};
+
+const connectChannelPlatforms: ConnectChannelPlatform[] = [
+  {
+    key: "xiaohongshu",
+    label: "小红书",
+    icon: <XiaohongshuIcon className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    badge: "浏览器插件",
+    hint: "点击后由后台接管 BitBrowser，在该账号专属 profile 中打开登录页，登录完成后自动保存账号。",
+    actionLabel: "立即登录",
+    localLoginPlatform: "xiaohongshu",
+  },
+  {
+    key: "kuaishou",
+    label: "快手",
+    icon: <KuaishouIcon className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    hint: "已预留官方 OAuth 入口，本轮优先接入。",
+    actionLabel: "即将接入",
+    oauthPlatform: "kuaishou",
+  },
+  {
+    key: "bilibili",
+    label: "哔哩哔哩",
+    icon: <AssetIcon src={bilibiliIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    hint: "已预留哔哩哔哩官方 OAuth 入口，本轮接入。",
+    actionLabel: "立即授权",
+    oauthPlatform: "bilibili",
+  },
+  {
+    key: "douyin",
+    label: "抖音",
+    icon: <DouyinIcon className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    badge: "浏览器插件",
+    hint: "点击后由后台接管 BitBrowser，在该账号专属 profile 中打开登录页，登录完成后自动保存账号。",
+    actionLabel: "立即登录",
+    localLoginPlatform: "douyin",
+  },
+  {
+    key: "wechat_video",
+    label: "微信视频号",
+    icon: <WechatVideoIcon className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    badge: "浏览器插件",
+    hint: "点击后由后台接管 BitBrowser，在该账号专属 profile 中打开登录页，登录完成后自动保存账号。",
+    actionLabel: "立即登录",
+    localLoginPlatform: "wechat_mp",
+  },
+  {
+    key: "wechat_official",
+    label: "微信公众号",
+    icon: <AssetIcon src={wechatOfficialIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: true,
+    hint: "已预留微信公众号第三方平台授权入口，本轮接入。",
+    actionLabel: "立即授权",
+    oauthPlatform: "wechat_official",
+  },
+  {
+    key: "tiktok",
+    label: "TikTok",
+    icon: <AssetIcon src={tiktokIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "youtube",
+    label: "YouTube",
+    icon: <AssetIcon src={youtubeIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "twitter",
+    label: "Twitter",
+    icon: <AssetIcon src={xTwitterIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "facebook",
+    label: "Facebook",
+    icon: <AssetIcon src={facebookIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "instagram",
+    label: "Instagram",
+    icon: <AssetIcon src={instagramIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "threads",
+    label: "Threads",
+    icon: <AssetIcon src={threadsIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "pinterest",
+    label: "Pinterest",
+    icon: <CircleLetterIcon text="P" className="h-11 w-11 bg-zinc-500" />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+  {
+    key: "linkedin",
+    label: "LinkedIn",
+    icon: <AssetIcon src={linkedinIconUrl} className={connectChannelIconClassName} />,
+    iconWrapClassName: "rounded-[10px]",
+    enabled: false,
+    hint: "当前项目暂未开放该平台接入，先做占位。",
+    actionLabel: "暂未开放",
+  },
+];
+
+const PLATFORM_LOGIN_CLIENT_DOWNLOAD_URL = "/api/bitbrowser/local-client/download";
+
+function platformLabel(platform: LeadPlatformStyle) {
+  return platformOptions.find((item) => item.value === platform)?.label ?? platform;
+}
+
+function platformMeta(platform: LeadPlatformStyle) {
+  return (
+    platformOptions.find((item) => item.value === platform) ?? {
+      value: platform,
+      label: platform,
+      icon: <span className="text-xs font-semibold text-zinc-300">P</span>,
+      iconWrapClassName: "rounded-full bg-white/10 ring-1 ring-white/10",
+    }
+  );
+}
+
+function statusMeta(status: PlatformAccountStatus) {
+  if (status === "valid") return { label: "有效", variant: "green" as const };
+  if (status === "invalid") return { label: "失效", variant: "red" as const };
+  if (status === "disabled") return { label: "停用", variant: "blue" as const };
+  return { label: "待校验", variant: "gray" as const };
+}
+
+function loginStatusMeta(status: PlatformAccountItem["loginStatus"]) {
+  if (status === "pending") return { label: "登录中", variant: "blue" as const };
+  if (status === "authenticated") return { label: "已登录", variant: "green" as const };
+  if (status === "failed") return { label: "登录失败", variant: "red" as const };
+  if (status === "cancelled") return { label: "已取消", variant: "gray" as const };
+  return { label: "未登录", variant: "gray" as const };
+}
+
+function keepAliveMeta(status: PlatformAccountItem["keepAliveStatus"]) {
+  if (status === "success") return { label: "保活成功", variant: "green" as const };
+  if (status === "reauth_required") return { label: "需要登录", variant: "red" as const };
+  if (status === "collect_failed") return { label: "采集失败", variant: "yellow" as const };
+  return null;
+}
+
+function hasResolvedProfileData(item: PlatformAccountItem | null | undefined) {
+  if (!item || item.status !== "valid" || item.loginStatus !== "authenticated") {
+    return false;
+  }
+
+  if (item.platform === "xiaohongshu" || item.platform === "wechat_mp") {
+    return Boolean(item.displayName || item.avatarUrl || item.externalAccountId) || item.followerCount !== null;
+  }
+
+  return Boolean(item.displayName || item.avatarUrl || item.externalAccountId);
+}
+
+function isDeletedResult(
+  value: { id: string; deleted?: boolean } | PlatformAccountItem,
+): value is { id: string; deleted?: boolean } {
+  return "deleted" in value;
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
+}
+
+function isExtensionLoginPlatform(platform: LeadPlatformStyle) {
+  return (
+    platform === "xiaohongshu" ||
+    platform === "douyin" ||
+    platform === "wechat_mp" ||
+    platform === "kuaishou"
+  );
+}
+
+export default function PublishingPlatformLogin() {
+  usePageMeta("平台登录");
+  const accessToken = useAuthStore((s) => s.accessToken);
+
+  const [items, setItems] = useState<PlatformAccountItem[]>([]);
+  const [hint, setHint] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [validatingId, setValidatingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [autoRefreshingId, setAutoRefreshingId] = useState<string | null>(null);
+  const [keepingAlive, setKeepingAlive] = useState(false);
+  const [startingPlatform, setStartingPlatform] = useState<LeadPlatformStyle | null>(null);
+  const [restartingId, setRestartingId] = useState<string | null>(null);
+  const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<PlatformAccountItem | null>(null);
+  const [accountName, setAccountName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [remark, setRemark] = useState("");
+  const [activePlatform, setActivePlatform] = useState<LeadPlatformStyle | "all">("all");
+  const [highlightedAccountId, setHighlightedAccountId] = useState<string | null>(null);
+  const [localAgentReady, setLocalAgentReady] = useState<boolean | null>(null);
+  const [localAgentStatus, setLocalAgentStatus] = useState<LocalAgentStatus | null>(null);
+  const [postStartRefreshTarget, setPostStartRefreshTarget] = useState<{
+    platform: LeadPlatformStyle;
+    requestedAt: number;
+    knownAccountIds: string[];
+  } | null>(null);
+  const [postRestartRefreshTarget, setPostRestartRefreshTarget] = useState<{
+    accountId: string;
+    requestedAt: number;
+  } | null>(null);
+
+  const panelClassName = "rounded-xl border border-white/15 bg-[#0b1220]/90";
+  const panelHeaderClassName = "border-b border-white/15";
+
+  const loadAccounts = useCallback(
+    async (showLoading = false) => {
+      if (!accessToken) {
+        setItems([]);
+        return;
+      }
+
+      try {
+        if (showLoading) setLoading(true);
+        const result = await listPlatformAccounts({ accessToken, page: 1, limit: 50, autoComplete: "none" });
+        setItems(result.items);
+        setHint(null);
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : "加载平台账号失败");
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [accessToken],
+  );
+
+  useEffect(() => {
+    void loadAccounts(true);
+  }, [loadAccounts]);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const oauthStatus = searchParams.get("oauth_status");
+    if (!oauthStatus) return;
+
+    const oauthPlatform = searchParams.get("oauth_platform");
+    const oauthAccountId = searchParams.get("oauth_account_id");
+    const oauthError = searchParams.get("oauth_error");
+    if (oauthStatus === "success") {
+      if (oauthPlatform) {
+        setActivePlatform(oauthPlatform as LeadPlatformStyle);
+      }
+      if (oauthAccountId) {
+        setHighlightedAccountId(oauthAccountId);
+      }
+      setHint(`${oauthPlatform ? `${platformLabel(oauthPlatform as LeadPlatformStyle)} ` : ""}官方授权已完成，账号已自动保存。`);
+      void loadAccounts();
+    } else {
+      setHint(oauthError || "官方授权失败");
+    }
+
+    searchParams.delete("oauth_status");
+    searchParams.delete("oauth_platform");
+    searchParams.delete("oauth_account_id");
+    searchParams.delete("oauth_error");
+    const nextQuery = searchParams.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+  }, [loadAccounts]);
+
+  useEffect(() => {
+    if (!highlightedAccountId) return;
+    const target = document.querySelector<HTMLElement>(`[data-account-id="${highlightedAccountId}"]`);
+    if (!target) return;
+
+    window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    const timer = window.setTimeout(() => {
+      setHighlightedAccountId((current) => (current === highlightedAccountId ? null : current));
+    }, 4000);
+
+    return () => window.clearTimeout(timer);
+  }, [highlightedAccountId, items]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadAccounts();
+    }, 5000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [accessToken, loadAccounts]);
+
+  useEffect(() => {
+    if (!postStartRefreshTarget && !postRestartRefreshTarget) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadAccounts();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loadAccounts, postRestartRefreshTarget, postStartRefreshTarget]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshLocalAgentStatus() {
+      const ready = await pingLocalAgent();
+      if (cancelled) {
+        return;
+      }
+      setLocalAgentReady(ready);
+      if (!ready) {
+        setLocalAgentStatus(null);
+        return;
+      }
+
+      try {
+        const status = await getLocalAgentStatus();
+        if (!cancelled) {
+          setLocalAgentStatus(status);
+        }
+      } catch {
+        if (!cancelled) {
+          setLocalAgentStatus(null);
+        }
+      }
+    }
+
+    void refreshLocalAgentStatus();
+    const timer = window.setInterval(() => {
+      void refreshLocalAgentStatus();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const summary = useMemo(() => {
+    const validCount = items.filter((item) => item.status === "valid").length;
+    const pendingCount = items.filter((item) => item.loginStatus === "pending").length;
+    return { total: items.length, validCount, pendingCount };
+  }, [items]);
+
+  const platformSidebar = useMemo(() => {
+    const counts = new Map<LeadPlatformStyle, number>();
+    for (const item of items) {
+      counts.set(item.platform, (counts.get(item.platform) ?? 0) + 1);
+    }
+    return platformOptions.map((option) => ({
+      ...option,
+      count: counts.get(option.value) ?? 0,
+    }));
+  }, [items]);
+
+  const visibleAccounts = useMemo(() => {
+    if (activePlatform === "all") return items;
+    return items.filter((item) => item.platform === activePlatform);
+  }, [activePlatform, items]);
+
+  const activePlatformLabel = useMemo(() => {
+    if (activePlatform === "all") return "全部平台";
+    return platformLabel(activePlatform);
+  }, [activePlatform]);
+
+  function resetEditForm() {
+    setRemark("");
+    setAccountName("");
+    setDisplayName("");
+    setEditingItem(null);
+  }
+
+  function openEditModal(item: PlatformAccountItem) {
+    setEditingItem(item);
+    setAccountName(item.accountName);
+    setDisplayName(item.displayName ?? "");
+    setRemark(item.remark ?? "");
+    setEditorOpen(true);
+  }
+
+  function openExternalUrl(targetUrl: string) {
+    const normalizedUrl = targetUrl.trim();
+    if (!normalizedUrl) {
+      setHint("跳转地址为空，请稍后重试。");
+      return false;
+    }
+
+    const opened = window.open(normalizedUrl, "_blank", "noopener");
+    if (opened) {
+      opened.focus?.();
+      return true;
+    }
+
+    setHint("浏览器拦截了新窗口，请允许当前站点打开新标签页后重试。");
+    return false;
+  }
+
+  function handleDownloadClient() {
+    openExternalUrl(PLATFORM_LOGIN_CLIENT_DOWNLOAD_URL);
+  }
+
+  async function ensureLocalClientRuntime() {
+    if (localAgentReady !== true) {
+      setHint("未检测到本地客户端，请先启动本地客户端后再继续。");
+      return false;
+    }
+
+    try {
+      await startLocalAgentBitBrowser();
+      return true;
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "本地客户端启动 BitBrowser 失败");
+      return false;
+    }
+  }
+
+  const refreshPlatformAccount = useCallback(
+    async (item: PlatformAccountItem, options?: { silent?: boolean }) => {
+      if (!accessToken) {
+        if (!options?.silent) {
+          setHint("登录已失效，请重新登录。");
+        }
+        return null;
+      }
+
+      try {
+        setValidatingId(item.id);
+        const next = await validatePlatformAccount({ accessToken, id: item.id });
+        setItems((current) => current.map((entry) => (entry.id === item.id ? next : entry)));
+        if (!options?.silent) {
+          setHint(next.status === "valid" ? "账号校验通过。" : next.lastError ?? "账号校验失败。");
+        }
+        return next;
+      } catch (error) {
+        if (!options?.silent) {
+          setHint(error instanceof Error ? error.message : "校验平台账号失败");
+        }
+        return null;
+      } finally {
+        setValidatingId(null);
+      }
+    },
+    [accessToken],
+  );
+
+  const autoRefreshPlatformAccount = useCallback(
+    async (item: PlatformAccountItem) => {
+      setAutoRefreshingId(item.id);
+      try {
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          const next = await refreshPlatformAccount(item, { silent: true });
+          if (hasResolvedProfileData(next)) {
+            await loadAccounts();
+            setHint("账号资料已自动刷新。");
+            return;
+          }
+          if (attempt < 11) {
+            await new Promise((resolve) => window.setTimeout(resolve, 2500));
+          }
+        }
+        await loadAccounts();
+        setHint("已自动尝试刷新账号资料，如仍未显示请确认账号后台首页已正常打开。");
+      } finally {
+        setAutoRefreshingId((current) => (current === item.id ? null : current));
+      }
+    },
+    [loadAccounts, refreshPlatformAccount],
+  );
+
+  useEffect(() => {
+    if (!postStartRefreshTarget || autoRefreshingId) {
+      return;
+    }
+
+    const current = items
+      .filter(
+        (item) =>
+          item.platform === postStartRefreshTarget.platform &&
+          !postStartRefreshTarget.knownAccountIds.includes(item.id) &&
+          item.status === "valid" &&
+          item.loginStatus === "authenticated",
+      )
+      .sort((left, right) => {
+        const leftTime = left.lastLoginCompletedAt ? Date.parse(left.lastLoginCompletedAt) : 0;
+        const rightTime = right.lastLoginCompletedAt ? Date.parse(right.lastLoginCompletedAt) : 0;
+        return rightTime - leftTime;
+      })[0];
+    if (!current) {
+      return;
+    }
+
+    const completedAt = current.lastLoginCompletedAt ? Date.parse(current.lastLoginCompletedAt) : 0;
+    if (!Number.isFinite(completedAt) || completedAt < postStartRefreshTarget.requestedAt) {
+      return;
+    }
+
+    setHighlightedAccountId(current.id);
+    void autoRefreshPlatformAccount(current).finally(() => {
+      setPostStartRefreshTarget((target) =>
+        target?.platform === current.platform ? null : target,
+      );
+    });
+  }, [autoRefreshingId, autoRefreshPlatformAccount, items, postStartRefreshTarget]);
+
+  useEffect(() => {
+    if (!postRestartRefreshTarget || autoRefreshingId) {
+      return;
+    }
+
+    const current = items.find((item) => item.id === postRestartRefreshTarget.accountId);
+    if (!current || current.loginStatus !== "authenticated") {
+      return;
+    }
+
+    const completedAt = current.lastLoginCompletedAt ? Date.parse(current.lastLoginCompletedAt) : 0;
+    if (!Number.isFinite(completedAt) || completedAt < postRestartRefreshTarget.requestedAt) {
+      return;
+    }
+
+    setHighlightedAccountId(current.id);
+    void autoRefreshPlatformAccount(current).finally(() => {
+      setPostRestartRefreshTarget((target) =>
+        target?.accountId === current.id ? null : target,
+      );
+    });
+  }, [autoRefreshingId, autoRefreshPlatformAccount, items, postRestartRefreshTarget]);
+
+  async function handleStartLogin(platform: LeadPlatformStyle) {
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    if (!isExtensionLoginPlatform(platform)) {
+      setHint(`${platformLabel(platform)} 当前请走“连接新频道”里的官方授权入口。`);
+      return;
+    }
+
+    if (localAgentReady !== true) {
+      setHint("未检测到本地客户端，请先启动本地客户端后再登录。");
+      return;
+    }
+
+    try {
+      setStartingPlatform(platform);
+      const ready = await ensureLocalClientRuntime();
+      if (!ready) {
+        return;
+      }
+      const requestedAt = Date.now();
+      const knownAccountIds = items
+        .filter((item) => item.platform === platform)
+        .map((item) => item.id);
+      const session = await startExtensionPlatformLogin({ accessToken, platform });
+      setPostStartRefreshTarget({
+        platform,
+        requestedAt,
+        knownAccountIds,
+      });
+      setActivePlatform(platform);
+      setHint(
+        `已由后台在 BitBrowser 打开${platformLabel(platform)}登录页，请切到对应窗口完成登录。当前账号会自动绑定到 Profile ${session.externalGroupId ?? "A"}。`,
+      );
+      void loadAccounts();
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "发起平台登录失败");
+    } finally {
+      setStartingPlatform(null);
+    }
+  }
+
+  async function handleConnectChannel(platform: ConnectChannelPlatform) {
+    if (!platform.enabled) {
+      setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
+      return;
+    }
+
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    if (platform.localLoginPlatform) {
+      if (localAgentReady !== true) {
+        setHint("未检测到本地客户端，请先启动本地客户端后再登录。");
+        return;
+      }
+
+      try {
+        setConnectingPlatform(platform.key);
+        const ready = await ensureLocalClientRuntime();
+        if (!ready) {
+          return;
+        }
+        const requestedAt = Date.now();
+        const knownAccountIds = items
+          .filter((item) => item.platform === platform.localLoginPlatform)
+          .map((item) => item.id);
+        const session = await startExtensionPlatformLogin({
+          accessToken,
+          platform: platform.localLoginPlatform,
+        });
+        setPostStartRefreshTarget({
+          platform: platform.localLoginPlatform,
+          requestedAt,
+          knownAccountIds,
+        });
+        setActivePlatform(platform.localLoginPlatform);
+        setHint(
+          `已由后台在 BitBrowser 打开${platform.label}登录页，请切到对应窗口完成登录。当前账号会自动绑定到 Profile ${session.externalGroupId ?? "A"}。`,
+        );
+        void loadAccounts();
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : `${platform.label} 本地登录发起失败`);
+      } finally {
+        setConnectingPlatform(null);
+      }
+      return;
+    }
+
+    if (!platform.oauthPlatform) {
+      setHint(`${platform.label} 暂未开放，当前先做占位展示。`);
+      return;
+    }
+
+    try {
+      setConnectingPlatform(platform.key);
+      const session = await startOfficialOauthLogin({
+        accessToken,
+        platform: platform.oauthPlatform,
+      });
+      openExternalUrl(session.loginUrl);
+      setHint(`${platform.label} 已打开官方授权页，授权完成后会自动回到平台登录页。`);
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : `${platform.label} 官方授权发起失败`);
+    } finally {
+      setConnectingPlatform(null);
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!accessToken || !editingItem) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    const normalizedAccountName = accountName.trim();
+    const normalizedDisplayName = displayName.trim();
+    const normalizedRemark = remark.trim();
+
+    if (!normalizedAccountName) {
+      setHint("请填写平台账号。");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const next = await updatePlatformAccount({
+        accessToken,
+        id: editingItem.id,
+        accountName: normalizedAccountName,
+        displayName: normalizedDisplayName || undefined,
+        remark: normalizedRemark || undefined,
+      });
+      setItems((current) => current.map((item) => (item.id === next.id ? next : item)));
+      setHint("账号信息已更新。");
+
+      setEditorOpen(false);
+      resetEditForm();
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "保存平台账号失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRestartLogin(item: PlatformAccountItem) {
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    if (item.provider === "official_oauth") {
+      try {
+        setRestartingId(item.id);
+        const session = await startOfficialOauthLogin({
+          accessToken,
+          platform: item.platform as Extract<
+            LeadPlatformStyle,
+            "douyin" | "kuaishou" | "bilibili" | "wechat_official"
+          >,
+          accountId: item.id,
+        });
+        openExternalUrl(session.loginUrl);
+        setHint(`${platformLabel(item.platform)} 已重新打开官方授权页。`);
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : "重新发起官方授权失败");
+      } finally {
+        setRestartingId(null);
+      }
+      return;
+    }
+
+    if (localAgentReady !== true) {
+      setHint("未检测到本地客户端，请先启动本地客户端后再重新登录。");
+      return;
+    }
+
+    try {
+      setRestartingId(item.id);
+      const ready = await ensureLocalClientRuntime();
+      if (!ready) {
+        return;
+      }
+      const session = await startExtensionPlatformLogin({
+        accessToken,
+        platform: item.platform,
+        accountId: item.id,
+      });
+      setPostRestartRefreshTarget({
+        accountId: item.id,
+        requestedAt: Date.now(),
+      });
+      setActivePlatform(item.platform);
+      setHint(
+        `已由后台在 BitBrowser 重新打开${platformLabel(item.platform)}登录页，请在原专属环境中重新登录，账号会继续保留在 Profile ${session.externalGroupId ?? item.externalGroupId ?? "A"}。`,
+      );
+      void loadAccounts();
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "重新发起登录失败");
+    } finally {
+      setRestartingId(null);
+    }
+  }
+
+  async function handleDelete(item: PlatformAccountItem) {
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    try {
+      setDeletingId(item.id);
+      await deletePlatformAccount({ accessToken, id: item.id });
+      setItems((current) => current.filter((entry) => entry.id !== item.id));
+      setHint("平台账号已删除。");
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "删除平台账号失败");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function handleOpenAccountHome(item: PlatformAccountItem) {
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    try {
+      setOpeningId(item.id);
+      await openExtensionPlatformAccountHome({
+        accessToken,
+        accountId: item.id,
+      });
+      setHint(`已打开${platformLabel(item.platform)}账号对应的 BitBrowser 创作者页面，正在刷新账号资料。`);
+      void autoRefreshPlatformAccount(item);
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "打开账号对应 BitBrowser 页面失败");
+    } finally {
+      setOpeningId((current) => (current === item.id ? null : current));
+    }
+  }
+
+  async function handleKeepAliveAccounts() {
+    if (!accessToken) {
+      setHint("登录已失效，请重新登录。");
+      return;
+    }
+
+    try {
+      setKeepingAlive(true);
+      const result = await keepAlivePlatformAccounts({ accessToken });
+      const succeeded = typeof result.succeeded === "number" ? result.succeeded : 0;
+      const reauthRequired = typeof result.reauthRequired === "number" ? result.reauthRequired : 0;
+      const collectFailed = typeof result.collectFailed === "number" ? result.collectFailed : 0;
+      const skipped = typeof result.skipped === "number" ? result.skipped : 0;
+      await loadAccounts();
+      setHint(
+        `活跃完成：共 ${result.total} 个，成功 ${succeeded} 个，需要登录 ${reauthRequired} 个，采集失败 ${collectFailed} 个，跳过 ${skipped} 个。`,
+      );
+    } catch (error) {
+      setHint(error instanceof Error ? error.message : "活跃账号失败");
+    } finally {
+      setKeepingAlive(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>平台登录</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-zinc-300">
+          <div className="flex flex-wrap gap-2 text-xs text-zinc-400">
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+              <KeyRound className="h-3.5 w-3.5" />
+              本地客户端登录
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              官方授权占位
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+              <Smartphone className="h-3.5 w-3.5" />
+              分平台逐步开放
+            </span>
+          </div>
+          <div className="text-xs text-zinc-500">
+            本地客户端状态：
+            {localAgentReady === true
+              ? " 已连接"
+              : localAgentReady === false
+                ? " 未连接"
+                : " 检测中..."}
+            {localAgentReady === true && localAgentStatus?.bitBrowserPath
+              ? `，BitBrowser 已配置`
+              : ""}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={handleDownloadClient}>
+              <Download className="h-4 w-4" />
+              下载本地客户端
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-3 text-xs text-zinc-400">
+            <span>账号总数：{summary.total}</span>
+            <span>有效账号：{summary.validCount}</span>
+            <span>登录中：{summary.pendingCount}</span>
+          </div>
+          <div className={`${panelClassName} space-y-3 px-3 py-3`}>
+            <div className="text-sm font-semibold text-zinc-100">连接新频道</div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
+              {connectChannelPlatforms.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => void handleConnectChannel(item)}
+                  disabled={connectingPlatform !== null && connectingPlatform !== item.key}
+                  className={`relative flex min-h-28 flex-col items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-center transition-colors disabled:cursor-not-allowed ${
+                    item.enabled
+                      ? "border-white/10 bg-white/5 hover:border-orange-400/40 hover:bg-orange-500/10"
+                      : "border-white/8 bg-zinc-900/40 opacity-65"
+                  }`}
+                >
+                  {item.badge ? (
+                    <span
+                      className={`absolute right-2 top-2 inline-flex items-center rounded-full px-2 py-0.5 text-center text-[10px] ring-1 ${
+                        item.enabled
+                          ? "bg-orange-500/15 text-orange-200 ring-orange-400/20"
+                          : "bg-white/10 text-zinc-200 ring-white/15"
+                      }`}
+                    >
+                      客户端接管
+                    </span>
+                  ) : null}
+                  <span
+                    className={`inline-flex h-11 w-11 items-center justify-center overflow-hidden ${item.iconWrapClassName}`}
+                    aria-hidden="true"
+                  >
+                    {item.icon}
+                  </span>
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium text-zinc-100">{item.label}</div>
+                    <div className={`text-xs ${item.enabled ? "text-zinc-400" : "text-zinc-500"}`}>
+                      {connectingPlatform === item.key ? "处理中..." : item.actionLabel}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className={`${panelClassName} px-4 py-3 text-xs text-zinc-400`}>
+              {connectingPlatform
+                ? connectChannelPlatforms.find((item) => item.key === connectingPlatform)?.hint
+                : "当前抖音、小红书、微信视频号均使用平台账号专属 BitBrowser profile 登录；快手、哔哩哔哩、微信公众号走官方 OAuth。"}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>平台账号列表</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {hint ? <div className="text-xs text-zinc-400">{hint}</div> : null}
+          {loading ? <div className="py-10 text-center text-zinc-400">加载中...</div> : null}
+
+          {!loading ? (
+            <div className="flex flex-col gap-3 lg:flex-row">
+              <div className={`${panelClassName} p-2 lg:w-64`}>
+                <button
+                  type="button"
+                  onClick={() => setActivePlatform("all")}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+                    activePlatform === "all"
+                      ? "bg-white/5 text-zinc-100"
+                      : "text-zinc-300 hover:bg-white/5 hover:text-zinc-100"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] bg-white/5 ring-1 ring-white/10">
+                      全
+                    </span>
+                    全部
+                  </span>
+                  <Badge variant="gray">{items.length}</Badge>
+                </button>
+
+                <div className="mt-2 space-y-1">
+                  {platformSidebar.map((platformItem) => (
+                    <button
+                      key={platformItem.value}
+                      type="button"
+                      onClick={() => setActivePlatform(platformItem.value)}
+                      className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+                        activePlatform === platformItem.value
+                          ? "bg-white/5 text-zinc-100"
+                          : "text-zinc-300 hover:bg-white/5 hover:text-zinc-100"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span
+                          className={`inline-flex h-8 w-8 items-center justify-center overflow-hidden ${platformItem.iconWrapClassName}`}
+                          aria-hidden="true"
+                        >
+                          {platformItem.icon}
+                        </span>
+                        {platformItem.label}
+                      </span>
+                      <Badge variant={platformItem.count > 0 ? "gray" : "blue"}>{platformItem.count}</Badge>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`${panelClassName} min-w-0 flex-1 overflow-hidden`}>
+                <div className={`flex items-center justify-between px-4 py-3 ${panelHeaderClassName}`}>
+                  <div className="text-sm font-semibold text-zinc-100">{activePlatformLabel}</div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-xs text-zinc-500">{visibleAccounts.length} 个账号</div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void handleKeepAliveAccounts()}
+                      disabled={keepingAlive}
+                    >
+                      {keepingAlive ? "活跃中..." : "活跃账号"}
+                    </Button>
+                    {activePlatform !== "all" ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleStartLogin(activePlatform)}
+                        disabled={startingPlatform === activePlatform}
+                      >
+                        {startingPlatform === activePlatform ? "发起中..." : "新增账号"}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {visibleAccounts.length === 0 ? (
+                  <div className="px-4 py-8 text-sm text-zinc-500">暂无平台账号。</div>
+                ) : (
+                  <div className="divide-y divide-white/10">
+                    {visibleAccounts.map((item) => {
+                      const meta = platformMeta(item.platform);
+                      const keepAlive = keepAliveMeta(item.keepAliveStatus);
+                      const reauthRequired = item.reauthRequired || item.keepAliveStatus === "reauth_required";
+                      const isFirstLoginPending =
+                        item.loginStatus === "pending" && !item.lastLoginCompletedAt;
+                      const online =
+                        item.status === "valid" && item.loginStatus === "authenticated" && !reauthRequired;
+                      const needsRelogin = !online && !isFirstLoginPending;
+                      const actionBusy =
+                        openingId === item.id ||
+                        validatingId === item.id ||
+                        deletingId === item.id ||
+                        restartingId === item.id ||
+                        autoRefreshingId === item.id;
+                      const title = item.displayName || item.accountName;
+                      const externalId = item.externalAccountId || item.accountName;
+
+                      return (
+                        <div
+                          key={item.id}
+                          data-account-id={item.id}
+                          className={`flex flex-col gap-3 px-4 py-4 transition-colors lg:flex-row lg:items-center ${
+                            highlightedAccountId === item.id ? "bg-emerald-500/10" : ""
+                          }`}
+                        >
+                          <div className="flex flex-1 items-center gap-3">
+                            <AccountAvatar avatarUrl={item.avatarUrl} name={title} />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold text-zinc-100">{title}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                  ID {externalId}
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <span
+                                    className={`inline-flex h-5 w-5 items-center justify-center overflow-hidden ${meta.iconWrapClassName}`}
+                                    aria-hidden="true"
+                                  >
+                                    {meta.icon}
+                                  </span>
+                                  {meta.label}
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <span
+                                    className={`h-2 w-2 rounded-full ${
+                                      isFirstLoginPending
+                                        ? "bg-amber-400"
+                                        : online
+                                          ? "bg-emerald-400"
+                                          : "bg-zinc-500"
+                                    }`}
+                                  />
+                                  {isFirstLoginPending ? "登录中" : online ? "在线" : "离线"}
+                                </span>
+                                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                  {item.loginSourceLabel}
+                                </span>
+                                {keepAlive ? (
+                                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                    {keepAlive.label}
+                                  </span>
+                                ) : null}
+                                <span>粉丝：{item.followerCount ?? "-"}</span>
+                              </div>
+                              {item.keepAliveStatus === "collect_failed" && item.keepAliveError ? (
+                                <div className="mt-1 text-xs text-amber-300">{item.keepAliveError}</div>
+                              ) : null}
+                              {isFirstLoginPending ? (
+                                <div className="mt-1 text-xs text-amber-300">
+                                  {item.lastError || "当前账号正在等待完成首次登录。"}
+                                </div>
+                              ) : null}
+                              {needsRelogin ? (
+                                <div className="mt-1 text-xs text-rose-300">
+                                  {item.keepAliveError || item.lastError || "当前账号需要重新登录。"}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2 lg:justify-end">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() =>
+                                void ((isFirstLoginPending || needsRelogin)
+                                  ? handleRestartLogin(item)
+                                  : handleOpenAccountHome(item))
+                              }
+                              disabled={actionBusy}
+                            >
+                              {isFirstLoginPending
+                                ? restartingId === item.id
+                                  ? "继续登录中..."
+                                  : "继续登录"
+                                : needsRelogin
+                                ? restartingId === item.id
+                                  ? "重新登录中..."
+                                  : "重新登录"
+                                : openingId === item.id
+                                  ? "打开中..."
+                                  : "打开"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => void handleDelete(item)}
+                              disabled={deletingId === item.id || actionBusy}
+                            >
+                              {deletingId === item.id ? "删除中..." : "删除"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Modal
+        open={editorOpen}
+        title={
+          editingItem
+            ? `编辑 ${platformLabel(editingItem.platform)} 账号`
+            : "编辑平台账号"
+        }
+        onClose={() => {
+          setEditorOpen(false);
+          resetEditForm();
+        }}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setEditorOpen(false);
+                resetEditForm();
+              }}
+              disabled={saving}
+            >
+              取消
+            </Button>
+            <Button onClick={() => void handleSaveEdit()} disabled={saving || !editingItem}>
+              {saving ? "保存中..." : "保存"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {editingItem ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <div className="text-sm text-zinc-200">平台</div>
+                <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-200">
+                  {platformLabel(editingItem.platform)}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm text-zinc-200">登录类型</div>
+                <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-200">
+                  {editingItem.authType === "cookie" ? "Cookie" : "Token"}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm text-zinc-200">平台账号</div>
+              <input
+                value={accountName}
+                onChange={(event) => setAccountName(event.target.value)}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30"
+                placeholder="例如：账号 ID、手机号或平台昵称"
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm text-zinc-200">展示名称</div>
+              <input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30"
+                placeholder="例如：品牌主账号"
+              />
+            </div>
+          </div>
+
+          {editingItem?.authPayloadPreview ? (
+            <div className="space-y-2">
+              <div className="text-sm text-zinc-200">当前登录信息</div>
+              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-3 font-mono text-xs text-zinc-400">
+                {editingItem.authPayloadPreview}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <div className="text-sm text-zinc-200">备注</div>
+            <textarea
+              value={remark}
+              onChange={(event) => setRemark(event.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-100 outline-none transition-shadow placeholder:text-zinc-400 focus:ring-2 focus:ring-amber-400/30"
+              placeholder="例如：品牌主账号、测试账号、备用账号"
+            />
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}

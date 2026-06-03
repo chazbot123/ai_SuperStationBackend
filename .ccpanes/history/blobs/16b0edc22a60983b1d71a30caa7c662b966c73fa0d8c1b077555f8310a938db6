@@ -1,0 +1,335 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PublishingController = void 0;
+const common_1 = require("@nestjs/common");
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
+const create_platform_account_dto_1 = require("./dto/create-platform-account.dto");
+const import_gaode_stores_dto_1 = require("./dto/import-gaode-stores.dto");
+const list_store_search_regions_query_dto_1 = require("./dto/list-store-search-regions-query.dto");
+const list_publishing_contents_query_dto_1 = require("./dto/list-publishing-contents-query.dto");
+const list_publishing_jobs_query_dto_1 = require("./dto/list-publishing-jobs-query.dto");
+const list_platform_accounts_query_dto_1 = require("./dto/list-platform-accounts-query.dto");
+const publish_lead_content_dto_1 = require("./dto/publish-lead-content.dto");
+const search_gaode_stores_dto_1 = require("./dto/search-gaode-stores.dto");
+const start_mcp_platform_login_dto_1 = require("./dto/start-mcp-platform-login.dto");
+const start_platform_extension_login_dto_1 = require("./dto/start-platform-extension-login.dto");
+const start_platform_login_dto_1 = require("./dto/start-platform-login.dto");
+const sync_publishing_content_dto_1 = require("./dto/sync-publishing-content.dto");
+const update_store_search_config_dto_1 = require("./dto/update-store-search-config.dto");
+const update_platform_account_dto_1 = require("./dto/update-platform-account.dto");
+const publishing_store_search_service_1 = require("./publishing-store-search.service");
+const publishing_service_1 = require("./publishing.service");
+let PublishingController = class PublishingController {
+    publishingService;
+    publishingStoreSearchService;
+    constructor(publishingService, publishingStoreSearchService) {
+        this.publishingService = publishingService;
+        this.publishingStoreSearchService = publishingStoreSearchService;
+    }
+    listContents(req, query) {
+        return this.publishingService.listContents(req.user, query);
+    }
+    getContentById(req, id) {
+        return this.publishingService.getContentById(req.user, id);
+    }
+    syncFromSource(req, dto) {
+        return this.publishingService.syncFromSource(req.user, dto);
+    }
+    publishContent(req, id, dto) {
+        return this.publishingService.publishContent(req.user, id, dto);
+    }
+    getStoreSearchConfig(req) {
+        return this.publishingStoreSearchService.getConfig(req.user);
+    }
+    updateStoreSearchConfig(req, dto) {
+        return this.publishingStoreSearchService.updateConfig(req.user, dto);
+    }
+    listStoreSearchRegions(req, query) {
+        return this.publishingStoreSearchService.listRegions(req.user, query);
+    }
+    searchStores(req, dto) {
+        return this.publishingStoreSearchService.search(req.user, dto);
+    }
+    importStores(req, dto) {
+        return this.publishingStoreSearchService.importToCustomerManagement(req.user, dto);
+    }
+    listJobs(req, query) {
+        return this.publishingService.listJobs(req.user, query);
+    }
+    getJobById(req, id) {
+        return this.publishingService.getJobById(req.user, id);
+    }
+    retryJob(req, id) {
+        return this.publishingService.retryJob(req.user, id);
+    }
+    deleteJob(req, id) {
+        return this.publishingService.deleteJob(req.user, id);
+    }
+    listPlatformAccounts(req, query) {
+        return this.publishingService.listPlatformAccounts(req.user, query);
+    }
+    createPlatformAccount(req, dto) {
+        return this.publishingService.createPlatformAccount(req.user, dto);
+    }
+    startPlatformLogin(req, dto) {
+        return this.publishingService.startPlatformLogin(req.user, dto);
+    }
+    startPlatformExtensionLogin(req, dto) {
+        return this.publishingService.startPlatformExtensionLogin(req.user, dto);
+    }
+    startPlatformMcpLogin(req, dto) {
+        return this.publishingService.startMcpPlatformLogin(req.user, dto);
+    }
+    updatePlatformAccount(req, id, dto) {
+        return this.publishingService.updatePlatformAccount(req.user, id, dto);
+    }
+    deletePlatformAccount(req, id) {
+        return this.publishingService.deletePlatformAccount(req.user, id);
+    }
+    validatePlatformAccount(req, id) {
+        return this.publishingService.validatePlatformAccount(req.user, id);
+    }
+    keepAlivePlatformAccounts(req) {
+        return this.publishingService.keepAliveLoggedInPlatformAccounts(req.user);
+    }
+    restartPlatformLogin(req, id) {
+        return this.publishingService.restartPlatformLogin(req.user, id);
+    }
+    completePlatformLogin(req, id) {
+        return this.publishingService.completePlatformLogin(req.user, id);
+    }
+    checkPlatformLogin(req, id) {
+        return this.publishingService.completePlatformLogin(req.user, id);
+    }
+    cancelPlatformLogin(req, id) {
+        return this.publishingService.cancelPlatformLogin(req.user, id);
+    }
+};
+exports.PublishingController = PublishingController;
+__decorate([
+    (0, common_1.Get)('contents'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, list_publishing_contents_query_dto_1.ListPublishingContentsQueryDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "listContents", null);
+__decorate([
+    (0, common_1.Get)('contents/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "getContentById", null);
+__decorate([
+    (0, common_1.Post)('contents/sync-from-source'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, sync_publishing_content_dto_1.SyncPublishingContentDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "syncFromSource", null);
+__decorate([
+    (0, common_1.Post)('contents/:id/publish'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, publish_lead_content_dto_1.PublishLeadContentDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "publishContent", null);
+__decorate([
+    (0, common_1.Get)('store-search/config'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "getStoreSearchConfig", null);
+__decorate([
+    (0, common_1.Put)('store-search/config'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, update_store_search_config_dto_1.UpdateStoreSearchConfigDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "updateStoreSearchConfig", null);
+__decorate([
+    (0, common_1.Get)('store-search/regions'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, list_store_search_regions_query_dto_1.ListStoreSearchRegionsQueryDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "listStoreSearchRegions", null);
+__decorate([
+    (0, common_1.Post)('store-search/search'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, search_gaode_stores_dto_1.SearchGaodeStoresDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "searchStores", null);
+__decorate([
+    (0, common_1.Post)('store-search/import'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, import_gaode_stores_dto_1.ImportGaodeStoresDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "importStores", null);
+__decorate([
+    (0, common_1.Get)('jobs'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, list_publishing_jobs_query_dto_1.ListPublishingJobsQueryDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "listJobs", null);
+__decorate([
+    (0, common_1.Get)('jobs/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "getJobById", null);
+__decorate([
+    (0, common_1.Post)('jobs/:id/retry'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "retryJob", null);
+__decorate([
+    (0, common_1.Post)('jobs/:id/delete'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "deleteJob", null);
+__decorate([
+    (0, common_1.Get)('platform-accounts'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, list_platform_accounts_query_dto_1.ListPlatformAccountsQueryDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "listPlatformAccounts", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, create_platform_account_dto_1.CreatePlatformAccountDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "createPlatformAccount", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/hosted-login/start'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, start_platform_login_dto_1.StartPlatformLoginDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "startPlatformLogin", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/extension-login/start'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, start_platform_extension_login_dto_1.StartPlatformExtensionLoginDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "startPlatformExtensionLogin", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/mcp-login/start'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, start_mcp_platform_login_dto_1.StartMcpPlatformLoginDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "startPlatformMcpLogin", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/:id/update'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, update_platform_account_dto_1.UpdatePlatformAccountDto]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "updatePlatformAccount", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/:id/delete'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "deletePlatformAccount", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/:id/validate'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "validatePlatformAccount", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/keepalive'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "keepAlivePlatformAccounts", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/:id/hosted-login/start'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "restartPlatformLogin", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/:id/hosted-login/complete'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "completePlatformLogin", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/:id/hosted-login/check'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "checkPlatformLogin", null);
+__decorate([
+    (0, common_1.Post)('platform-accounts/:id/hosted-login/cancel'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], PublishingController.prototype, "cancelPlatformLogin", null);
+exports.PublishingController = PublishingController = __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Controller)('publishing'),
+    __metadata("design:paramtypes", [publishing_service_1.PublishingService,
+        publishing_store_search_service_1.PublishingStoreSearchService])
+], PublishingController);
+//# sourceMappingURL=publishing.controller.js.map

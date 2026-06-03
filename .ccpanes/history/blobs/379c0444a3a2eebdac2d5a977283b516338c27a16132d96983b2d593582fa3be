@@ -1,0 +1,90 @@
+import type { BitBrowserRuntimeProvider } from './bitbrowser.contracts';
+import type { BitBrowserBrowserCreatePayload, BitBrowserCreateProfileResult, BitBrowserOpenProfileResult, BrowserProfileBinding, CreateBitBrowserProfileInput, PlatformType } from './bitbrowser.types';
+export interface BitBrowserGatewayEndpointConfig {
+    health: string;
+    updateBrowser: string;
+    updateBrowserPartial: string;
+    openBrowser: string;
+    closeBrowser: string;
+    deleteBrowser: string;
+    browserDetail: string;
+    setBrowserCookies: string;
+    groupList: string;
+    groupAdd: string;
+}
+export interface BitBrowserGatewayConfig {
+    baseUrl: string;
+    apiKey?: string;
+    timeoutMs?: number;
+    endpoints?: Partial<BitBrowserGatewayEndpointConfig>;
+    platformHomeUrls?: Partial<Record<PlatformType, string>>;
+    openArgs?: string[];
+    queueOpen?: boolean;
+}
+interface BitBrowserBrowserDetailData {
+    id: string;
+    name?: string;
+    remark?: string;
+    platform?: string;
+    url?: string;
+    cookie?: string;
+    groupId?: string;
+    proxyMethod?: number;
+    proxyType?: string;
+    syncExtensions?: boolean;
+    syncUserExtensions?: boolean;
+}
+interface BitBrowserBrowserUpdateData {
+    id?: string;
+    name?: string;
+}
+interface BitBrowserCookieSetData {
+    browserId?: string;
+    count?: number;
+}
+export interface BitBrowserCookieItem {
+    name: string;
+    value: string;
+    domain?: string;
+    path?: string;
+    secure?: boolean;
+    httpOnly?: boolean;
+    sameSite?: string;
+    expirationDate?: number;
+}
+export declare function createBitBrowserGatewayEndpoints(config: BitBrowserGatewayConfig): BitBrowserGatewayEndpointConfig;
+export declare class BitBrowserGatewayClient implements BitBrowserRuntimeProvider {
+    private readonly config;
+    private readonly endpoints;
+    private readonly platformHomeUrls;
+    constructor(config: BitBrowserGatewayConfig);
+    healthcheck(): Promise<{
+        status: 'ok' | 'error';
+        message?: string;
+    }>;
+    createProfile(input: CreateBitBrowserProfileInput, payload: BitBrowserBrowserCreatePayload): Promise<BitBrowserCreateProfileResult>;
+    openProfile(binding: BrowserProfileBinding): Promise<BitBrowserOpenProfileResult>;
+    closeProfile(binding: BrowserProfileBinding): Promise<void>;
+    closeProfileById(profileId: string): Promise<void>;
+    deleteProfileById(profileId: string): Promise<void>;
+    openPlatformHome(binding: BrowserProfileBinding, platform: PlatformType, runtime?: BitBrowserOpenProfileResult): Promise<void>;
+    openPage(binding: BrowserProfileBinding, pageUrl: string, runtime?: BitBrowserOpenProfileResult): Promise<void>;
+    private forceOpenPageViaDebugPort;
+    private resolveDebugBaseUrl;
+    detailBrowser(profileId: string): Promise<BitBrowserBrowserDetailData | null>;
+    updateBrowser(payload: BitBrowserBrowserCreatePayload | Record<string, unknown>): Promise<BitBrowserBrowserUpdateData>;
+    updateBrowserPartial(ids: string[], payload: Record<string, unknown>): Promise<BitBrowserBrowserUpdateData>;
+    setBrowserCookies(browserId: string, cookies: BitBrowserCookieItem[]): Promise<BitBrowserCookieSetData>;
+    ensureProfileGroupedByPlatform(binding: BrowserProfileBinding, platform: PlatformType): Promise<void>;
+    private ensureProfileExtensionPolicy;
+    private findOrCreateGroupId;
+    private findGroupByName;
+    private createGroup;
+    private extractGroupList;
+    private resolvePlatformGroupName;
+    private normalizeName;
+    private isRecord;
+    private requestEnvelope;
+    private unwrapResponse;
+}
+export {};

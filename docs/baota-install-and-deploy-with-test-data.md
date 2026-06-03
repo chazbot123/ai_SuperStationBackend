@@ -1,4 +1,4 @@
-# AI-SuperWeb 宝塔服务器部署手册
+# AI-SuperWeb 宝塔服务器部署手册（成功备案版）
 
 ## 目标
 - 项目根目录固定为 `/data/ai-superweb`
@@ -15,36 +15,6 @@
 
 ## 当前推荐上线架构
 
-### 未备案阶段
-
-```text
-Browser
-  |
-  +-- http://8.134.35.29 -> Nginx -> /data/ai-superweb/dist
-  |                             \-> /api -> 127.0.0.1:3001
-  |                             \-> /minio -> 127.0.0.1:9000
-  |
-  +-- http://8.134.35.29:8080 -> Nginx -> /data/ai-superweb/ZL_Supersite/dist
-  |                                  \-> /api -> 127.0.0.1:3001
-  |
-  +-- 所有对外地址统一按 IP 口径
-
-BaoTa Server
-  |
-  +-- /data/ai-superweb
-       +-- dist
-       +-- ZL_Supersite/dist
-       +-- server
-       +-- data/postgres
-       +-- data/redis
-       +-- data/minio
-       +-- logs
-       +-- docker-compose.yml
-       +-- .env
-```
-
-### 备案完成后
-
 ```text
 Browser
   |
@@ -58,6 +28,19 @@ Browser
   |                                   \-> 图片 / 视频 / 文件直出
   |
   +-- 所有对外地址统一按域名口径
+
+BaoTa Server
+  |
+  +-- /data/ai-superweb
+       +-- dist
+       +-- ZL_Supersite/dist
+       +-- server
+       +-- data/postgres
+       +-- data/redis
+       +-- data/minio
+       +-- logs
+       +-- docker-compose.yml
+       +-- .env
 ```
 
 ## 运行包内应该有什么
@@ -204,9 +187,7 @@ npm ci
 
 ## 8. 配置根目录 `.env`
 
-### 8.1 未备案阶段
-
-根目录 `.env` 统一按 IP 口径写：
+根目录 `.env` 统一按正式域名口径写：
 
 ```bash
 cd /data/ai-superweb
@@ -223,23 +204,15 @@ MINIO_ROOT_PASSWORD=!ZHILIN1
 MINIO_API_PORT=9000
 MINIO_CONSOLE_PORT=9001
 
-VITE_SUPERSITE_URL=http://8.134.35.29:8080/
+VITE_SUPERSITE_URL=https://www.chilintec.com/
 EOF
 ```
 
 说明：
 - 这个 `.env` 给根目录 `docker-compose.yml` 使用
 - `PostgreSQL / Redis / MinIO` 从这里读取
-- 未备案时，`VITE_SUPERSITE_URL` 统一走前台 IP 地址
+- `VITE_SUPERSITE_URL` 统一走正式前台域名
 - 如果你不重新在服务器构建前端，这个字段不会影响现有 `dist`
-
-### 8.2 备案完成后
-
-备案完成后，把根目录 `.env` 中这一行改成：
-
-```bash
-sed -i 's|^VITE_SUPERSITE_URL=.*|VITE_SUPERSITE_URL=https://www.chilintec.com/|' /data/ai-superweb/.env
-```
 
 ## 9. 启动基础服务
 
@@ -256,9 +229,7 @@ docker compose ps
 
 ## 10. 配置后端 `server/.env`
 
-### 10.1 未备案阶段
-
-`server/.env` 统一按 IP 口径更新：
+`server/.env` 统一按正式域名口径更新：
 
 ```bash
 cd /data/ai-superweb/server
@@ -267,7 +238,7 @@ cat > .env <<'EOF'
 PORT=3001
 NODE_ENV=production
 # 多域名场景建议先留空这一行，让后端保持开放跨域
-# CORS_ORIGIN=http://8.134.35.29
+# CORS_ORIGIN=https://admin.chilintec.com
 
 # Auth
 JWT_SECRET=!ZHILIN1
@@ -296,7 +267,7 @@ FFPROBE_PATH=/usr/bin/ffprobe
 AMAP_WEB_SERVICE_KEY=
 
 # Official OAuth
-PLATFORM_OAUTH_APP_BASE_URL=http://8.134.35.29
+PLATFORM_OAUTH_APP_BASE_URL=https://admin.chilintec.com
 DOUYIN_OPEN_CLIENT_KEY=
 DOUYIN_OPEN_CLIENT_SECRET=
 DOUYIN_OPEN_SCOPE=user_info
@@ -317,7 +288,7 @@ WECHAT_OPEN_BIZ_APP_ID=
 BITBROWSER_LOCAL_API_BASE_URL=http://127.0.0.1:54345
 
 # Public Files
-MINIO_PUBLIC_BASE_URL=http://8.134.35.29/minio
+MINIO_PUBLIC_BASE_URL=https://files.chilintec.com
 
 # Publishing Browser
 PUBLISHING_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome
@@ -335,37 +306,25 @@ EOF
 - `MINIO_SECRET_KEY` 必须等于根目录 `.env` 的 `MINIO_ROOT_PASSWORD`
 - `PUBLISHING_BROWSER_*` 虽然不在模板里，但当前发布链路实际会读取，生产环境建议保留
 
-### 10.2 备案完成后
-
-备案完成后，把 `server/.env` 中对外地址改成域名口径：
-
-```bash
-sed -i 's|^PLATFORM_OAUTH_APP_BASE_URL=.*|PLATFORM_OAUTH_APP_BASE_URL=https://admin.chilintec.com|' /data/ai-superweb/server/.env
-
-grep -q '^MINIO_PUBLIC_BASE_URL=' /data/ai-superweb/server/.env \
-  && sed -i 's|^MINIO_PUBLIC_BASE_URL=.*|MINIO_PUBLIC_BASE_URL=https://files.chilintec.com|' /data/ai-superweb/server/.env \
-  || echo 'MINIO_PUBLIC_BASE_URL=https://files.chilintec.com' >> /data/ai-superweb/server/.env
-```
-
 ## 11. 初始化空数据库
 
 当前项目还没有正式 migration 文件，生产初始化继续按现有口径用 `prisma db push`。
 
-### 10.1 生成 Prisma Client
+### 11.1 生成 Prisma Client
 
 ```bash
 cd /data/ai-superweb/server
 npx prisma generate
 ```
 
-### 10.2 空库落表
+### 11.2 空库落表
 
 ```bash
 cd /data/ai-superweb/server
 npx prisma db push
 ```
 
-### 10.3 初始化默认管理员
+### 11.3 初始化默认管理员
 
 如果你需要先登录后台，建议执行：
 
@@ -380,7 +339,7 @@ npx prisma db seed
 
 ## 12. 启动后端
 
-### 11.1 命令行启动
+### 12.1 命令行启动
 
 ```bash
 cd /data/ai-superweb/server
@@ -390,7 +349,7 @@ pm2 save
 pm2 startup
 ```
 
-### 11.2 宝塔 PM2 面板启动
+### 12.2 宝塔 PM2 面板启动
 - 进入宝塔面板 -> `PM2 管理器`
 - 新建项目
 - 名称填写 `ai-superweb-server`
@@ -423,99 +382,7 @@ curl http://127.0.0.1:3001/api/health
 mkdir -p /etc/nginx/conf.d
 ```
 
-### 13.1 未备案时的最终方案
-- 当前文件域名还没备案时，文件访问先统一走：`http://8.134.35.29/minio`
-- 这套方案适合你当前环境
-- 目标是同时解决：
-  - 图片地址指向内网 `127.0.0.1:9000 / localhost:9000` 导致浏览器打不开
-  - 图片生成、视频生成、大文件预览时 `Nginx 504 Gateway Time-out`
-
-先写后端 `server/.env`：
-
-```bash
-grep -q '^MINIO_PUBLIC_BASE_URL=' /data/ai-superweb/server/.env \
-  && sed -i 's|^MINIO_PUBLIC_BASE_URL=.*|MINIO_PUBLIC_BASE_URL=http://8.134.35.29/minio|' /data/ai-superweb/server/.env \
-  || echo 'MINIO_PUBLIC_BASE_URL=http://8.134.35.29/minio' >> /data/ai-superweb/server/.env
-```
-
-后台 IP 站点最终配置：
-
-```bash
-cat > /etc/nginx/conf.d/admin-http.conf <<'EOF'
-server {
-    listen 80 default_server;
-    server_name _ 8.134.35.29;
-
-    root /data/ai-superweb/dist;
-    index index.html;
-
-    client_max_body_size 500m;
-    proxy_connect_timeout 300s;
-    proxy_send_timeout 300s;
-    proxy_read_timeout 300s;
-    send_timeout 300s;
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:3001/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location = /api {
-        proxy_pass http://127.0.0.1:3001/api;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /minio/ {
-        proxy_pass http://127.0.0.1:9000/;
-        proxy_http_version 1.1;
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_connect_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        proxy_set_header Host 127.0.0.1:9000;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-EOF
-```
-
-执行重载：
-
-```bash
-nginx -t
-systemctl reload nginx
-pm2 restart ai-superweb-server
-```
-
-验证：
-
-```bash
-curl -I http://8.134.35.29/minio/
-curl -I http://127.0.0.1:3001/api/health
-```
-
-说明：
-- 未备案时不要再写 `https://files.chilintec.com`
-- 图片、视频会统一生成成 `http://8.134.35.29/minio/ai-superweb/...`
-- `/api/` 和 `/minio/` 都加了 `300s` 超时，先解决生成时的网关超时问题
-
-### 13.2 域名备案成功后的最终方案
-- 文件域名备案完成后，切换回正式地址：`https://files.chilintec.com`
+### 13.1 最终方案
 - 正式方案建议用 3 个域名：
   - 后台：`admin.chilintec.com`
   - 前台：`www.chilintec.com`
@@ -658,11 +525,11 @@ pm2 restart ai-superweb-server
 ```
 
 说明：
-- 域名备案成功后，图片和视频地址统一使用 `https://files.chilintec.com/ai-superweb/...`
+- 图片和视频地址统一使用 `https://files.chilintec.com/ai-superweb/...`
 - 文件域名建议反代到 `127.0.0.1:9000`，不要再用旧的本地地址对外输出
 - `/api/` 和文件域名都保留 `300s` 超时配置，用于降低图片生成、视频生成和大文件预览时的 `504`
 
-### 13.4 测试与重载
+### 13.2 测试与重载
 
 ```bash
 nginx -t
@@ -672,24 +539,207 @@ systemctl reload nginx
 
 ## 14. HTTPS
 
-### 13.1 宝塔面板配置
+### 14.1 宝塔面板申请证书
 - 宝塔 -> `网站` -> 目标站点 -> `SSL`
 - 有域名时申请 `Let's Encrypt`
 - 开启 `强制 HTTPS`
 
-### 13.2 注意
-- 直接用 IP 不适合正式证书
+### 14.2 命令行检查证书
+
+宝塔签发成功后，先确认这 3 组证书文件已存在：
+
+```bash
+ls -lah /www/server/panel/vhost/cert/admin.chilintec.com/
+ls -lah /www/server/panel/vhost/cert/www.chilintec.com/
+ls -lah /www/server/panel/vhost/cert/files.chilintec.com/
+```
+
+### 14.3 命令行写入 HTTPS 配置
+
+后台域名：
+
+```bash
+cat > /etc/nginx/conf.d/admin.chilintec.com.conf <<'EOF'
+server {
+    listen 80;
+    server_name admin.chilintec.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name admin.chilintec.com;
+
+    ssl_certificate /www/server/panel/vhost/cert/admin.chilintec.com/fullchain.pem;
+    ssl_certificate_key /www/server/panel/vhost/cert/admin.chilintec.com/privkey.pem;
+    ssl_session_timeout 10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:!MD5:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!3DES:!PSK:!CAMELLIA;
+    ssl_prefer_server_ciphers on;
+
+    root /data/ai-superweb/dist;
+    index index.html;
+
+    client_max_body_size 500m;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    send_timeout 300s;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /api {
+        proxy_pass http://127.0.0.1:3001/api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOF
+```
+
+前台域名：
+
+```bash
+cat > /etc/nginx/conf.d/www.chilintec.com.conf <<'EOF'
+server {
+    listen 80;
+    server_name www.chilintec.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name www.chilintec.com;
+
+    ssl_certificate /www/server/panel/vhost/cert/www.chilintec.com/fullchain.pem;
+    ssl_certificate_key /www/server/panel/vhost/cert/www.chilintec.com/privkey.pem;
+    ssl_session_timeout 10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:!MD5:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!3DES:!PSK:!CAMELLIA;
+    ssl_prefer_server_ciphers on;
+
+    root /data/ai-superweb/ZL_Supersite/dist;
+    index index.html;
+
+    client_max_body_size 500m;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    send_timeout 300s;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /api {
+        proxy_pass http://127.0.0.1:3001/api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOF
+```
+
+文件域名：
+
+```bash
+cat > /etc/nginx/conf.d/files.chilintec.com.conf <<'EOF'
+server {
+    listen 80;
+    server_name files.chilintec.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name files.chilintec.com;
+
+    ssl_certificate /www/server/panel/vhost/cert/files.chilintec.com/fullchain.pem;
+    ssl_certificate_key /www/server/panel/vhost/cert/files.chilintec.com/privkey.pem;
+    ssl_session_timeout 10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:!MD5:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!3DES:!PSK:!CAMELLIA;
+    ssl_prefer_server_ciphers on;
+
+    client_max_body_size 500m;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    send_timeout 300s;
+
+    location / {
+        proxy_pass http://127.0.0.1:9000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host 127.0.0.1:9000;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+```
+
+写完后执行：
+
+```bash
+nginx -t
+systemctl reload nginx
+pm2 restart ai-superweb-server
+```
+
+验证：
+
+```bash
+curl -I https://admin.chilintec.com
+curl -I https://www.chilintec.com
+curl -I https://files.chilintec.com
+```
+
+### 14.4 注意
 - 正式环境建议后台、前台、文件站点都配域名
+- 如果宝塔证书目录不是 `/www/server/panel/vhost/cert/`，按实际证书路径改 `ssl_certificate` 和 `ssl_certificate_key`
 
 ## 15. 安全组与防火墙
 
-### 14.1 阿里云安全组
+### 15.1 阿里云安全组
 - 放行 `22`
 - 放行 `80`
 - 放行 `443`
 - 放行 `8888`
 
-### 14.2 不建议公网开放
+### 15.2 不建议公网开放
 - `3001`
 - `5432`
 - `6379`
@@ -698,7 +748,7 @@ systemctl reload nginx
 
 ## 16. 上线检查清单
 
-### 15.1 基础服务
+### 16.1 基础服务
 
 ```bash
 cd /data/ai-superweb
@@ -710,31 +760,31 @@ docker compose ps
 - `redis` 正常
 - `minio` 正常
 
-### 15.2 后端
+### 16.2 后端
 
 ```bash
 curl http://127.0.0.1:3001/api/health
 pm2 logs ai-superweb-server --lines 100
 ```
 
-### 15.3 空库初始化检查
+### 16.3 空库初始化检查
 - `npx prisma db push` 已成功
 - 需要默认账号时，`npx prisma db seed` 已成功
 - 如执行 seed，确认 `demo_admin / 123456` 可登录
 
-### 15.4 后台前端
-- 打开 `http://8.134.35.29`
+### 16.4 后台前端
+- 打开 `https://admin.chilintec.com`
 - 检查登录页和后台首页
 
-### 15.5 超级站前台
+### 16.5 超级站前台
 - 打开 `https://www.chilintec.com`
 - 检查首页、产品区、行业资讯、AI 客服
 
-### 15.6 文件访问
+### 16.6 文件访问
 - 上传后的图片能正常打开
 - 上传后的视频能拖动播放
 
-### 15.7 MinIO 存储排查
+### 16.7 MinIO 存储排查
 如果视频生成或文件上传提示“初始化 MINIO bucket 失败”，按下面顺序检查：
 
 ```bash
@@ -754,8 +804,7 @@ grep MINIO /data/ai-superweb/server/.env
 应看到：
 - 根目录 `.env` 已配置 `MINIO_ROOT_USER / MINIO_ROOT_PASSWORD`
 - `server/.env` 已配置 `MINIO_ENDPOINT / MINIO_PORT / MINIO_USE_SSL / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / MINIO_BUCKET`
-- 未备案时，`server/.env` 还应配置：`MINIO_PUBLIC_BASE_URL=http://8.134.35.29/minio`
-- 备案完成后，`server/.env` 再切到：`MINIO_PUBLIC_BASE_URL=https://files.chilintec.com`
+- `server/.env` 已配置：`MINIO_PUBLIC_BASE_URL=https://files.chilintec.com`
 - 后端跑在宿主机 `PM2` 上时，`MINIO_ENDPOINT` 固定写 `127.0.0.1`
 
 如果 `server/.env` 里没有 `MINIO_*`，直接补：
@@ -788,8 +837,7 @@ pm2 logs ai-superweb-server --lines 100
 - 当前项目仍按 `prisma db push` 初始化空库，不是 `prisma migrate deploy`
 - `server/.env` 不能只写 `PORT=3001`
 - `server/.env` 也不能漏掉 `MINIO_*`，否则视频生成、图片上传、知识库上传会提示初始化 bucket 失败
-- 文件域名未备案前，图片和视频地址先统一走 `http://8.134.35.29/minio`
-- 文件域名备案成功后，再切回 `https://files.chilintec.com`
+- 图片和视频地址统一走 `https://files.chilintec.com`
 - `CORS_ORIGIN` 如果写成空字符串，会直接变成无效配置，建议先不写这一行
 - 服务器发布链路当前只保留 `Chrome`
 

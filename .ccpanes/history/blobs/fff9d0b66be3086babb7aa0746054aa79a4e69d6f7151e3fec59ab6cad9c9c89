@@ -1,0 +1,38 @@
+# 进度记录
+
+## 2026-04-23
+- 已确认仓库根目录为 `D:\zhilin_project\AI-SuperWeb\AI-SuperWeb`
+- 已梳理现有部署文档、前后端依赖与环境变量
+- 已记录现有风险：`README.md` 合并冲突、`worker` 仍为规划项
+- 已新增 `docs/ubuntu-deployment-environment.md`
+- 已新增 `docs/ubuntu-install-and-docker-commands.md`
+- 当前进行中：核对新文档落盘结果并准备汇报
+
+## 2026-04-30
+- 已将登录页从前端假登录切换为真实后端认证，接通 `/api/auth/login`、`/api/auth/me`、`/api/auth/logout`、个人改密与设备会话链路
+- 已完成视频模块拆分与统一草稿箱改造，视频结果聚合到 `视频生成 -> 草稿箱`
+- 已落地产品视频生成真实任务链路，支持任务轮询、音频/BGM 后处理与成片回写
+- 已落地真人口播视频生成真实任务链路，支持脚本分片、队列推进、失败片段重试、最终拼接
+- 已修复真人口播长时间无进度、分片卡住、背景锁定触发上游审核拒绝、Windows 下 ffmpeg 拼接失败等问题
+- 已为产品视频与真人口播成片补上默认中文字幕烧录能力
+- 已接通模型配置真实接口，支持查看、测试、保存和激活模型
+- 已补齐知识库相关 Prisma 表结构与依赖准备，前端检索测试台保留
+- 已补充根路径 `/` 与 `/health` 最小健康检查接口
+- 已同步更新 `docs` 下产品视频、真人口播、模型配置、知识库、接口能力、架构与功能清单文档
+
+## 2026-06-01
+- 已确认发布前登录页预检已落地，未登录页会被直接拦截，不再继续空跑
+- 已确认当前发布链路的关键缺口是：预检失败后没有自动回灌 Cookie 到专属 profile / runtime
+- 已确认登录同步成功时，账号表会保存最新 `authPayload` 与 `cookiePayload`
+- 已在 `background.js` 中为 BitBrowser runtime 发布派发前补上 `clear + applyPlatformCookiePayload/applyPlatformAuthPayload`
+- 已在扩展发布成功回传里补充 `cookiePayload`
+- 已在后端发布同步接口保存最新 `authPayload` 与 `cookiePayload`
+- 已在登录成功、发布成功、发布启动前把最新 Cookie 同步回专属 BitBrowser profile
+- 已完成相关文件诊断检查，当前无新增报错
+- 已新增 `PublishingProfileKeepaliveService`，服务启动后按天自动执行一轮 profile 保活
+- 已新增后端批量保活接口：`POST /api/publishing/platform-accounts/keepalive`
+- 已新增平台账号列表“活跃账号”按钮，点击后静默活跃当前用户全部已登录扩展账号并刷新列表
+- 已新增 BitBrowser 底层保活流程：打开专属 profile、进入平台主页、停留、采集最新 Cookie、关闭 profile
+- 已修复抖音账号命中登录页仍显示在线的问题：`validatePlatformAccount()` 现在会根据 BitBrowser 快照 `sourceUrl` 直接失效化账号并标记 `reauth_required`
+- 已新增对应单测，并修正两条因小红书改走扩展发布后失效的旧测试前提
+- 已执行 `npm test -- publishing.service.spec.ts`，结果 `20 passed`

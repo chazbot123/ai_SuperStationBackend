@@ -14,10 +14,12 @@ export interface BitBrowserGatewayEndpointConfig {
   health: string;
   updateBrowser: string;
   updateBrowserPartial: string;
+  checkAgent: string;
   openBrowser: string;
   closeBrowser: string;
   deleteBrowser: string;
   browserDetail: string;
+  setBrowserCookies: string;
   groupList: string;
   groupAdd: string;
 }
@@ -69,6 +71,33 @@ interface BitBrowserBrowserUpdateData {
   name?: string;
 }
 
+interface BitBrowserCheckAgentData {
+  success?: boolean;
+  data?: {
+    success?: boolean;
+    data?: {
+      status?: number;
+      ip?: string;
+    };
+  };
+}
+
+interface BitBrowserCookieSetData {
+  browserId?: string;
+  count?: number;
+}
+
+export interface BitBrowserCookieItem {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  sameSite?: string;
+  expirationDate?: number;
+}
+
 interface BitBrowserGroupData {
   id?: string;
   groupId?: string;
@@ -80,10 +109,12 @@ const DEFAULT_GATEWAY_ENDPOINTS: BitBrowserGatewayEndpointConfig = {
   health: '/health',
   updateBrowser: '/browser/update',
   updateBrowserPartial: '/browser/update/partial',
+  checkAgent: '/checkagent',
   openBrowser: '/browser/open',
   closeBrowser: '/browser/close',
   deleteBrowser: '/browser/delete',
   browserDetail: '/browser/detail',
+  setBrowserCookies: '/browser/cookies/set',
   groupList: '/group/list',
   groupAdd: '/group/add',
 };
@@ -145,10 +176,12 @@ export function createBitBrowserGatewayEndpoints(
     health: joinUrl(config.baseUrl, merged.health),
     updateBrowser: joinUrl(config.baseUrl, merged.updateBrowser),
     updateBrowserPartial: joinUrl(config.baseUrl, merged.updateBrowserPartial),
+    checkAgent: joinUrl(config.baseUrl, merged.checkAgent),
     openBrowser: joinUrl(config.baseUrl, merged.openBrowser),
     closeBrowser: joinUrl(config.baseUrl, merged.closeBrowser),
     deleteBrowser: joinUrl(config.baseUrl, merged.deleteBrowser),
     browserDetail: joinUrl(config.baseUrl, merged.browserDetail),
+    setBrowserCookies: joinUrl(config.baseUrl, merged.setBrowserCookies),
     groupList: joinUrl(config.baseUrl, merged.groupList),
     groupAdd: joinUrl(config.baseUrl, merged.groupAdd),
   };
@@ -210,7 +243,7 @@ export class BitBrowserGatewayClient implements BitBrowserRuntimeProvider {
       );
     }
 
-    await this.ensureProfileExtensionSync(binding.profileId, detail);
+    await this.ensureProfileExtensionPolicy(binding.profileId, detail);
 
     // #region debug-point B:gateway-open-profile
     await reportDouyinLoginDebug(
@@ -235,6 +268,7 @@ export class BitBrowserGatewayClient implements BitBrowserRuntimeProvider {
         body: {
           id: binding.profileId,
           args: this.config.openArgs ?? [],
+          loadExtensions: false,
           queue: this.config.queueOpen ?? true,
         },
       },
@@ -463,6 +497,31 @@ export class BitBrowserGatewayClient implements BitBrowserRuntimeProvider {
     return response.data ?? null;
   }
 
+  async checkAgent(proxy: {
+    host: string;
+    port: number;
+    proxyType: string;
+    proxyUserName?: string | null;
+    proxyPassword?: string | null;
+  }) {
+    const response = await this.requestEnvelope<BitBrowserCheckAgentData>(
+      this.endpoints.checkAgent,
+      {
+        method: 'POST',
+        body: {
+          host: proxy.host,
+          port: String(proxy.port),
+          proxyType: proxy.proxyType,
+          proxyUserName: proxy.proxyUserName ?? '',
+          proxyPassword: proxy.proxyPassword ?? '',
+          checkExists: 0,
+        },
+      },
+    );
+    const data = this.unwrapResponse(response, 'BitBrowser 代理检测失败');
+    return data?.data?.data?.status === 1;
+  }
+
   async updateBrowser(payload: BitBrowserBrowserCreatePayload | Record<string, unknown>) {
     const response = await this.requestEnvelope<BitBrowserBrowserUpdateData>(
       this.endpoints.updateBrowser,
@@ -491,6 +550,31 @@ export class BitBrowserGatewayClient implements BitBrowserRuntimeProvider {
     return response.data ?? {};
   }
 
+  async setBrowserCookies(browserId: string, cookies: BitBrowserCookieItem[]) {
+    const normalizedBrowserId = browserId.trim();
+    const normalizedCookies = cookies.filter(
+      (cookie) => cookie?.name?.trim() && typeof cookie.value === 'string',
+    );
+    if (!normalizedBrowserId || normalizedCookies.length === 0) {
+      return {};
+    }
+
+    const response = await this.requestEnvelope<BitBrowserCookieSetData>(
+      this.endpoints.setBrowserCookies,
+      {
+        method: 'POST',
+        body: {
+          browserId: normalizedBrowserId,
+          cookies: normalizedCookies,
+        },
+      },
+    );
+    if (!response.success) {
+      throw new Error(response.msg || '设置 BitBrowser 实时 Cookie 失败');
+    }
+    return response.data ?? {};
+  }
+
   async ensureProfileGroupedByPlatform(
     binding: BrowserProfileBinding,
     platform: PlatformType,
@@ -505,18 +589,18 @@ export class BitBrowserGatewayClient implements BitBrowserRuntimeProvider {
     await this.updateBrowserPartial([binding.profileId], { groupId });
   }
 
-  private async ensureProfileExtensionSync(
+  private async ensureProfileExtensionPolicy(
     profileId: string,
     detail: BitBrowserBrowserDetailData,
   ) {
-    if (detail.syncExtensions && detail.syncUserExtensions) {
+    if (!detail.syncExtensions && !detail.syncUserExtensions) {
       return;
     }
 
     await this.updateBrowser({
       ids: [profileId],
-      syncExtensions: true,
-      syncUserExtensions: true,
+      syncExtensions: false,
+      syncUserExtensions: false,
       browserFingerPrint: {},
     });
   }

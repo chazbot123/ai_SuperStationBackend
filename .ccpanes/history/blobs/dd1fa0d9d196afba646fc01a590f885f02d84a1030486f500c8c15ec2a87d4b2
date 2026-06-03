@@ -1,0 +1,14 @@
+declare const PUBLISH_JOB_STATUS_VALUES: readonly ["running", "success", "failed"];
+export declare class SyncExtensionPublishJobDto {
+    sessionToken: string;
+    status: (typeof PUBLISH_JOB_STATUS_VALUES)[number];
+    draftUrl?: string;
+    lastError?: string;
+    authPayload?: string;
+    cookiePayload?: string;
+    accountName?: string;
+    displayName?: string;
+    sourceUrl?: string;
+    runtimeSessionId?: string;
+}
+export {};

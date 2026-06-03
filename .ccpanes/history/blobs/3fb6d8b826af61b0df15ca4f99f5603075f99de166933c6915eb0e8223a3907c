@@ -1,0 +1,64 @@
+import type { RuntimeCommand, RuntimeCommandType, RuntimeSession } from './bitbrowser.types';
+export interface ExtensionReadyPayload {
+    runtimeSessionId: string;
+    extensionInstanceId: string;
+    tabId: number;
+    pageUrl: string;
+    extensionVersion?: string | null;
+}
+export interface ExtensionHeartbeatPayload {
+    runtimeSessionId: string;
+    pageUrl?: string | null;
+}
+export interface ExtensionPageReadyBindPayload {
+    platform: string;
+    tabId: number;
+    pageUrl: string;
+    extensionInstanceId?: string | null;
+    extensionVersion?: string | null;
+    accountName?: string | null;
+    displayName?: string | null;
+}
+export interface PullRuntimeCommandPayload {
+    runtimeSessionId: string;
+}
+export interface RuntimeCommandEnvelope {
+    runtimeSessionId: string;
+    command: RuntimeCommand;
+}
+export interface AckRuntimeCommandPayload {
+    runtimeSessionId: string;
+    runtimeCommandId: string;
+}
+export interface CompleteRuntimeCommandPayload {
+    runtimeSessionId: string;
+    runtimeCommandId: string;
+    resultPayload?: Record<string, unknown> | null;
+}
+export interface FailRuntimeCommandPayload {
+    runtimeSessionId: string;
+    runtimeCommandId: string;
+    errorMessage: string;
+}
+export interface QueueLoginCommandPayload {
+    runtimeSessionId: string;
+    payload?: Record<string, unknown>;
+}
+export interface QueuePublishCommandPayload {
+    runtimeSessionId: string;
+    payload: Record<string, unknown>;
+    type?: Extract<RuntimeCommandType, 'PUBLISH_PREPARE' | 'PUBLISH_EXECUTE'>;
+}
+export interface QueueKeepAliveCollectCommandPayload {
+    runtimeSessionId: string;
+    payload?: Record<string, unknown>;
+    type?: Extract<RuntimeCommandType, 'KEEPALIVE_COLLECT'>;
+}
+export interface ExtensionBridgeReadyState {
+    session: RuntimeSession;
+    hasActiveHandshake: boolean;
+}
+export interface ExtensionPageReadyBindResult extends ExtensionBridgeReadyState {
+    runtimeSessionId: string;
+    matchedBy: 'page_ready_latest';
+}

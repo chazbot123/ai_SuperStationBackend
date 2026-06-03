@@ -9,6 +9,7 @@ import type {
   ExtensionReadyPayload,
   FailRuntimeCommandPayload,
   PullRuntimeCommandPayload,
+  QueueKeepAliveCollectCommandPayload,
   QueueLoginCommandPayload,
   QueuePublishCommandPayload,
   RuntimeCommandEnvelope,
@@ -114,6 +115,18 @@ export class BitBrowserExtensionBridgeService {
       taskId: '',
       type: payload.type ?? 'PUBLISH_EXECUTE',
       payload: payload.payload,
+    });
+  }
+
+  async queueKeepAliveCollect(payload: QueueKeepAliveCollectCommandPayload) {
+    return this.runtimeSessionService.queueCommand({
+      runtimeSessionId: payload.runtimeSessionId,
+      creatorId: '',
+      ownerId: '',
+      platform: '',
+      taskId: '',
+      type: payload.type ?? 'KEEPALIVE_COLLECT',
+      payload: payload.payload ?? {},
     });
   }
 

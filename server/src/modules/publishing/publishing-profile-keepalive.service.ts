@@ -20,13 +20,11 @@ export class PublishingProfileKeepaliveService implements OnModuleInit, OnModule
     }
 
     const intervalMs = this.resolveIntervalMs();
-    const initialDelayMs = this.resolveInitialDelayMs();
     this.startupTimer = setTimeout(() => {
-      void this.executeScheduledKeepAlive();
       this.keepAliveTimer = setInterval(() => {
         void this.executeScheduledKeepAlive();
       }, intervalMs);
-    }, initialDelayMs);
+    }, intervalMs);
   }
 
   onModuleDestroy() {
@@ -65,7 +63,7 @@ export class PublishingProfileKeepaliveService implements OnModuleInit, OnModule
   }
 
   private isEnabled() {
-    return this.configService.get('PUBLISH_PROFILE_KEEPALIVE_ENABLED', 'true') !== 'false';
+    return this.publishingService.isAutomaticPlatformKeepAliveEnabled();
   }
 
   private resolveIntervalMs() {
@@ -74,9 +72,4 @@ export class PublishingProfileKeepaliveService implements OnModuleInit, OnModule
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 86400000;
   }
 
-  private resolveInitialDelayMs() {
-    const raw = this.configService.get('PUBLISH_PROFILE_KEEPALIVE_INITIAL_DELAY_MS', '60000');
-    const parsed = Number.parseInt(String(raw), 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 60000;
-  }
 }

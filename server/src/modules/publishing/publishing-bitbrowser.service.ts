@@ -13,7 +13,10 @@ import { LeadPublishPlatform } from '@prisma/client';
 import type { BitBrowserRuntimeFacade } from '../bitbrowser/bitbrowser.bootstrap';
 import { BitBrowserExtensionBridgeService } from '../bitbrowser/bitbrowser.extension-bridge.service';
 import { FileBitBrowserBindingRepository } from '../bitbrowser/bitbrowser.file-store';
-import { BitBrowserGatewayClient } from '../bitbrowser/bitbrowser.gateway';
+import {
+  BitBrowserGatewayClient,
+  type BitBrowserCookieItem,
+} from '../bitbrowser/bitbrowser.gateway';
 import { BitBrowserRuntimeSessionService } from '../bitbrowser/bitbrowser.runtime-session.service';
 import {
   BitBrowserProfileService,
@@ -22,6 +25,7 @@ import {
 import type {
   BitBrowserBrowserCreatePayload,
   BitBrowserOpenProfileResult,
+  BitBrowserProxyType,
   BrowserProfileBinding,
   BusinessOwner,
   PlatformType,
@@ -77,6 +81,17 @@ type StartPublishRuntimeInput = {
   };
 };
 
+type KeepAliveCollectCommandResult = {
+  authPayload: string;
+  cookiePayload: string | null;
+  sourceUrl: string | null;
+  accountName: string | null;
+  externalAccountId: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  followerCount: number | null;
+};
+
 type LoginFallbackResult = {
   authType: 'cookie';
   authPayload: string;
@@ -90,6 +105,9 @@ type LoginFallbackResult = {
 
 const DEFAULT_RUNTIME_READY_TIMEOUT_MS = 20000;
 const DEFAULT_RUNTIME_EXPIRES_MS = 15 * 60 * 1000;
+const DEFAULT_LOGIN_PROXY_MIN_TTL_MS = 2 * 60 * 1000;
+const DEFAULT_LOGIN_PROXY_DYNAMIC_IP_URL =
+  'http://api.91http.com/v1/get-ip?trade_no=B856759078152&secret=e0WPCU4eSn55oliH&num=1&protocol=1&format=text&sep=1&filter=1&time=1&pw=1';
 
 @Injectable()
 export class PublishingBitBrowserService implements OnModuleInit {
@@ -421,6 +439,13 @@ export class PublishingBitBrowserService implements OnModuleInit {
     // #endregion
 
     try {
+      await this.applyRealtimeCookieToProfile({
+        profileId: opened.context.profileBinding.profileId,
+        runtimeSessionId: opened.session.id,
+        authPayload: input.accountAuthPayload,
+        cookiePayload: input.accountCookiePayload ?? undefined,
+        source: 'start-publish-runtime',
+      }).catch(() => undefined);
       await this.persistDedicatedProfileCookie({
         profileId: opened.context.profileBinding.profileId,
         runtimeSessionId: opened.session.id,
@@ -463,6 +488,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
           sessionToken: input.sessionToken,
           apiBaseUrl: this.getBackendApiBaseUrl(),
           platform: input.platform,
+          shouldInjectCookies: false,
           accountAuthPayload: input.accountAuthPayload,
           accountCookiePayload: input.accountCookiePayload || undefined,
           job: input.job,
@@ -566,7 +592,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
     const profileId = String(input.profileId || '').trim();
     const authPayload = String(input.authPayload || '').trim();
     const cookiePayload = String(input.cookiePayload || '').trim();
-    const persistedCookie = this.buildCookieAuthPayload(cookiePayload) || authPayload;
+    const persistedCookie = this.buildPersistedProfileCookieValue(cookiePayload, authPayload);
     if (!profileId || !persistedCookie) {
       return;
     }
@@ -584,6 +610,56 @@ export class PublishingBitBrowserService implements OnModuleInit {
         authPayloadLength: authPayload.length,
         cookiePayloadLength: cookiePayload.length,
         persistedCookieLength: persistedCookie.length,
+      },
+    );
+  }
+
+  private buildPersistedProfileCookieValue(cookiePayload: string, authPayload: string) {
+    if (cookiePayload) {
+      try {
+        const parsed = JSON.parse(cookiePayload);
+        if (Array.isArray(parsed)) {
+          const normalized = parsed
+            .map((item) => this.normalizePersistedProfileCookieItem(item))
+            .filter(Boolean);
+          if (normalized.length > 0) {
+            return JSON.stringify(normalized);
+          }
+        }
+      } catch {}
+    }
+    return authPayload;
+  }
+
+  async applyRealtimeCookieToProfile(input: {
+    profileId?: string | null;
+    runtimeSessionId?: string | null;
+    authPayload?: string | null;
+    cookiePayload?: string | null;
+    source: string;
+  }) {
+    if (!this.enabled || !this.gatewayClient) {
+      return;
+    }
+    const profileId = String(input.profileId || '').trim();
+    const cookies = this.buildRealtimeCookieItems(
+      String(input.cookiePayload || '').trim(),
+      String(input.authPayload || '').trim(),
+    );
+    if (!profileId || cookies.length === 0) {
+      return;
+    }
+
+    await this.gatewayClient.setBrowserCookies(profileId, cookies);
+    this.reportDebugEvent(
+      'B',
+      'post-fix',
+      'publishing-bitbrowser.service:applyRealtimeCookieToProfile:updated',
+      {
+        runtimeSessionId: input.runtimeSessionId ?? null,
+        profileId,
+        source: input.source,
+        cookieCount: cookies.length,
       },
     );
   }
@@ -646,6 +722,17 @@ export class PublishingBitBrowserService implements OnModuleInit {
       accountId: input.accountId,
       accountName: input.accountName,
     });
+    const platform = this.toBitBrowserPlatform(input.platform);
+
+    await this.ensurePlatformAccountBinding({
+      creatorId: input.creatorId,
+      ownerId: owner.id,
+      profileBinding,
+      platform,
+      accountName: input.accountName,
+      accountId: input.accountId,
+    });
+    await this.closeStaleKeepAliveRuntimes(profileBinding.id);
 
     await this.persistDedicatedProfileCookie({
       profileId: profileBinding.profileId,
@@ -653,94 +740,139 @@ export class PublishingBitBrowserService implements OnModuleInit {
       cookiePayload: input.cookiePayload ?? null,
       source: 'keepalive-before-open',
     }).catch(() => undefined);
+    this.reportDebugEvent('A', 'pre-fix', 'publishing-bitbrowser.service:keepAliveDedicatedProfile:before-open-profile', {
+      platform: input.platform,
+      accountId: input.accountId,
+      accountName: input.accountName,
+      profileId: profileBinding.profileId,
+      externalGroupId: input.externalGroupId,
+      hasAuthPayload: Boolean(String(input.authPayload || '').trim()),
+      hasCookiePayload: Boolean(String(input.cookiePayload || '').trim()),
+    });
 
-    const runtime = await this.gatewayClient!.openProfile(profileBinding).catch((error) => {
+    const opened = await this.openRuntimeSession({
+      creatorId: input.creatorId,
+      ownerId: owner.id,
+      platform,
+      platformAccountId: input.accountId,
+      reason: 'keepalive',
+      taskId: `publishing-keepalive:${input.platform}:${input.accountId}:${Date.now()}`,
+    }).catch((error) => {
+      this.reportDebugEvent('D', 'pre-fix', 'publishing-bitbrowser.service:keepAliveDedicatedProfile:open-profile-error', {
+        platform: input.platform,
+        accountId: input.accountId,
+        profileId: profileBinding.profileId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw new ConflictException(
         `打开 BitBrowser 专属窗口失败: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
+    this.reportDebugEvent('A', 'pre-fix', 'publishing-bitbrowser.service:keepAliveDedicatedProfile:after-open-profile', {
+      platform: input.platform,
+      accountId: input.accountId,
+      profileId: profileBinding.profileId,
+      debugUrl: opened.runtime.debugUrl,
+      runtimeSessionId: opened.session.id,
+    });
 
+    let runtimeStatus: RuntimeStatus = 'failed';
     try {
+      await this.openRuntimePageWithBridgeState(
+        opened.context.profileBinding,
+        opened.session.id,
+        opened.runtime,
+        this.getPlatformLoginUrl(input.platform),
+      );
+      await this.waitForRuntimeBridgeReady(opened.session.id);
+      this.reportDebugEvent('A', 'pre-fix', 'publishing-bitbrowser.service:keepAliveDedicatedProfile:before-open-platform-home', {
+        platform: input.platform,
+        accountId: input.accountId,
+        profileId: profileBinding.profileId,
+        debugUrl: opened.runtime.debugUrl,
+      });
       await this.gatewayClient!.openPlatformHome(
         profileBinding,
-        this.toBitBrowserPlatform(input.platform),
-        runtime,
+        platform,
+        opened.runtime,
       );
+      this.reportDebugEvent('A', 'pre-fix', 'publishing-bitbrowser.service:keepAliveDedicatedProfile:after-open-platform-home', {
+        platform: input.platform,
+        accountId: input.accountId,
+        profileId: profileBinding.profileId,
+        debugUrl: opened.runtime.debugUrl,
+      });
       await this.sleep(1500);
-      await this.simulateKeepAliveInteraction(input.platform, runtime.debugUrl).catch(() => undefined);
-      await this.sleep(2500);
-
-      const authPayload = await this.collectLiveAuthPayloadFromDebugPort(
-        input.platform,
-        runtime.debugUrl,
-        profileBinding.profileId,
-      );
-      const cookiePayload = await this.collectLiveCookiePayloadFromDebugPort(
-        input.platform,
-        runtime.debugUrl,
-        profileBinding.profileId,
-      );
-      const inspected = await this.inspectProfileFromDebugPort(input.platform, runtime.debugUrl).catch(
+      this.reportDebugEvent('A', 'pre-fix', 'publishing-bitbrowser.service:keepAliveDedicatedProfile:before-simulate-interaction', {
+        platform: input.platform,
+        accountId: input.accountId,
+        profileId: profileBinding.profileId,
+        debugUrl: opened.runtime.debugUrl,
+      });
+      await this.simulateKeepAliveInteraction(input.platform, opened.runtime.debugUrl).catch((error) => {
+        this.reportDebugEvent('D', 'pre-fix', 'publishing-bitbrowser.service:keepAliveDedicatedProfile:simulate-interaction-error', {
+          platform: input.platform,
+          accountId: input.accountId,
+          profileId: profileBinding.profileId,
+          debugUrl: opened.runtime.debugUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return undefined;
+      });
+      this.reportDebugEvent('A', 'pre-fix', 'publishing-bitbrowser.service:keepAliveDedicatedProfile:after-simulate-interaction', {
+        platform: input.platform,
+        accountId: input.accountId,
+        profileId: profileBinding.profileId,
+        debugUrl: opened.runtime.debugUrl,
+      });
+      await this.sleep(250);
+      const keepAliveCollectResult = await this.collectKeepAliveCookieViaExtension({
+        runtimeSessionId: opened.session.id,
+        platform: input.platform,
+      });
+      const inspected = await this.inspectProfileFromDebugPort(input.platform, opened.runtime.debugUrl).catch(
         () => null,
       );
       const baseKeepAliveState = this.resolveKeepAliveState({
         platform: input.platform,
-        sourceUrl: inspected?.sourceUrl || this.getPlatformLoginUrl(input.platform),
+        sourceUrl:
+          keepAliveCollectResult.sourceUrl ||
+          inspected?.sourceUrl ||
+          this.getPlatformLoginUrl(input.platform),
         title: inspected?.title || '',
         pageTextPreview: inspected?.pageTextPreview || '',
-        authPayload,
-        cookiePayload,
+        authPayload: keepAliveCollectResult.authPayload,
+        cookiePayload: keepAliveCollectResult.cookiePayload,
       });
 
-      if (!authPayload) {
-        const detail = await this.gatewayClient!.detailBrowser(profileBinding.profileId).catch(() => null);
-        const fallbackAuthPayload = this.buildCookieAuthPayload(detail?.cookie);
-        const fallbackKeepAliveState = this.resolveKeepAliveState({
-          platform: input.platform,
-          sourceUrl:
-            inspected?.sourceUrl ||
-            (typeof detail?.url === 'string' ? detail.url.trim() || null : null) ||
-            this.getPlatformLoginUrl(input.platform),
-          title: inspected?.title || '',
-          pageTextPreview: inspected?.pageTextPreview || '',
-          authPayload: fallbackAuthPayload,
-          cookiePayload,
-        });
-        return {
-          authPayload: fallbackAuthPayload,
-          cookiePayload: cookiePayload || null,
+      if (baseKeepAliveState.keepAliveStatus === 'success') {
+        await this.syncKeepAliveCookieSuccess({
           profileId: profileBinding.profileId,
-          sourceUrl:
-            inspected?.sourceUrl ||
-            (typeof detail?.url === 'string' ? detail.url.trim() || null : null) ||
-            this.getPlatformLoginUrl(input.platform),
-          accountName: inspected?.accountName || null,
-          externalAccountId: inspected?.externalAccountId || null,
-          displayName: inspected?.displayName || null,
-          avatarUrl: inspected?.avatarUrl || null,
-          followerCount:
-            typeof inspected?.followerCount === 'number' && Number.isFinite(inspected.followerCount)
-              ? inspected.followerCount
-              : null,
-          keepAliveStatus: fallbackKeepAliveState.keepAliveStatus,
-          keepAliveMessage: fallbackKeepAliveState.keepAliveMessage,
-          reauthRequired: fallbackKeepAliveState.reauthRequired,
-        };
+          authPayload: keepAliveCollectResult.authPayload,
+          cookiePayload: keepAliveCollectResult.cookiePayload,
+        }).catch(() => undefined);
       }
 
+      runtimeStatus = 'completed';
       return {
-        authPayload,
-        cookiePayload: cookiePayload || null,
+        authPayload: keepAliveCollectResult.authPayload,
+        cookiePayload: keepAliveCollectResult.cookiePayload,
         profileId: profileBinding.profileId,
-        sourceUrl: inspected?.sourceUrl || this.getPlatformLoginUrl(input.platform),
-        accountName: inspected?.accountName || null,
-        externalAccountId: inspected?.externalAccountId || null,
-        displayName: inspected?.displayName || null,
-        avatarUrl: inspected?.avatarUrl || null,
+        sourceUrl:
+          keepAliveCollectResult.sourceUrl ||
+          inspected?.sourceUrl ||
+          this.getPlatformLoginUrl(input.platform),
+        accountName: keepAliveCollectResult.accountName || inspected?.accountName || null,
+        externalAccountId:
+          keepAliveCollectResult.externalAccountId || inspected?.externalAccountId || null,
+        displayName: keepAliveCollectResult.displayName || inspected?.displayName || null,
+        avatarUrl: keepAliveCollectResult.avatarUrl || inspected?.avatarUrl || null,
         followerCount:
-          typeof inspected?.followerCount === 'number' && Number.isFinite(inspected.followerCount)
-            ? inspected.followerCount
-            : null,
+          keepAliveCollectResult.followerCount !== null
+            ? keepAliveCollectResult.followerCount
+            : typeof inspected?.followerCount === 'number' && Number.isFinite(inspected.followerCount)
+              ? inspected.followerCount
+              : null,
         keepAliveStatus: baseKeepAliveState.keepAliveStatus,
         keepAliveMessage: baseKeepAliveState.keepAliveMessage,
         reauthRequired: baseKeepAliveState.reauthRequired,
@@ -753,7 +885,27 @@ export class PublishingBitBrowserService implements OnModuleInit {
           }`,
         );
       });
+      await this.closeRuntimeSession(opened.session.id, runtimeStatus);
     }
+  }
+
+  private async syncKeepAliveCookieSuccess(input: {
+    profileId: string;
+    authPayload: string;
+    cookiePayload?: string | null;
+  }) {
+    await this.applyRealtimeCookieToProfile({
+      profileId: input.profileId,
+      authPayload: input.authPayload,
+      cookiePayload: input.cookiePayload ?? null,
+      source: 'keepalive-success-live',
+    });
+    await this.persistDedicatedProfileCookie({
+      profileId: input.profileId,
+      authPayload: input.authPayload,
+      cookiePayload: input.cookiePayload ?? null,
+      source: 'keepalive-success-live',
+    });
   }
 
   async releaseDedicatedProfile(
@@ -1098,7 +1250,39 @@ export class PublishingBitBrowserService implements OnModuleInit {
       existingDedicatedBinding.bindingMode === PROFILE_BINDING_MODE_DEDICATED_BY_ACCOUNT &&
       existingDedicatedBinding.profileId
     ) {
-      return existingDedicatedBinding;
+      const browserConfig = this.buildDedicatedBrowserCreatePayload(
+        input.owner.name,
+        existingDedicatedBinding.profileName,
+        existingDedicatedBinding.browserConfig ?? undefined,
+      );
+      const alreadyDirectConnect =
+        existingDedicatedBinding.proxyConfig === null &&
+        this.isDirectConnectBrowserConfig(existingDedicatedBinding.browserConfig);
+      if (alreadyDirectConnect) {
+        return existingDedicatedBinding;
+      }
+      await this.gatewayClient.updateBrowserPartial([existingDedicatedBinding.profileId], {
+        proxyMethod: 1,
+        proxyType: 'noproxy',
+        host: '',
+        port: '',
+        proxyUserName: '',
+        proxyPassword: '',
+        dynamicIpUrl: '',
+        dynamicIpChannel: '',
+        isDynamicIpChangeIp: false,
+      });
+      return this.repository.bindProfile({
+        creatorId: input.creatorId,
+        ownerId: input.owner.id,
+        platform,
+        accountId: input.accountId,
+        accountName: input.accountName,
+        profileId: existingDedicatedBinding.profileId,
+        profileName: existingDedicatedBinding.profileName,
+        proxyConfig: null,
+        browserConfig,
+      });
     }
 
     const profileName = this.buildDedicatedProfileName(input.platform, input.accountName);
@@ -1112,7 +1296,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
         creatorId: input.creatorId,
         ownerId: input.owner.id,
         profileName,
-        proxyConfig: existingDedicatedBinding?.proxyConfig ?? null,
+        proxyConfig: null,
         browserConfig,
       },
       browserConfig,
@@ -1125,7 +1309,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
       accountName: input.accountName,
       profileId: createdProfile.profileId,
       profileName: createdProfile.profileName,
-      proxyConfig: existingDedicatedBinding?.proxyConfig ?? null,
+      proxyConfig: null,
       browserConfig: createdProfile.browserConfig,
     });
 
@@ -1170,7 +1354,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
     ownerId: string;
     platform: PlatformType;
     platformAccountId?: string | null;
-    reason: 'login' | 'publish';
+    reason: 'login' | 'publish' | 'keepalive';
     taskId: string;
   }) {
     return this.runtimeSessionService!.openRuntimeSession({
@@ -1182,6 +1366,112 @@ export class PublishingBitBrowserService implements OnModuleInit {
       reason: input.reason,
       expiresAt: new Date(Date.now() + DEFAULT_RUNTIME_EXPIRES_MS).toISOString(),
     });
+  }
+
+  private async collectKeepAliveCookieViaExtension(input: {
+    runtimeSessionId: string;
+    platform: LeadPublishPlatform;
+  }): Promise<KeepAliveCollectCommandResult> {
+    const command = await this.extensionBridgeService!.queueKeepAliveCollect({
+      runtimeSessionId: input.runtimeSessionId,
+      payload: {
+        platform: input.platform,
+      },
+    });
+    // #region debug-point K1:keepalive-command-queued
+    this.reportDebugEvent('K1', 'pre-fix', 'publishing-bitbrowser.service:collectKeepAliveCookieViaExtension:command-queued', {
+      runtimeSessionId: input.runtimeSessionId,
+      runtimeCommandId: command.id,
+      platform: input.platform,
+    });
+    // #endregion
+    const resultPayload = await this.waitForRuntimeCommandResult(
+      input.runtimeSessionId,
+      command.id,
+      DEFAULT_RUNTIME_READY_TIMEOUT_MS,
+    );
+    const authPayload = String(resultPayload?.authPayload || '').trim();
+    const cookiePayload = String(resultPayload?.cookiePayload || '').trim() || null;
+    return {
+      authPayload,
+      cookiePayload,
+      sourceUrl: String(resultPayload?.sourceUrl || '').trim() || null,
+      accountName: String(resultPayload?.accountName || '').trim() || null,
+      externalAccountId: String(resultPayload?.externalAccountId || '').trim() || null,
+      displayName: String(resultPayload?.displayName || '').trim() || null,
+      avatarUrl: String(resultPayload?.avatarUrl || '').trim() || null,
+      followerCount:
+        typeof resultPayload?.followerCount === 'number' &&
+        Number.isFinite(resultPayload.followerCount)
+          ? resultPayload.followerCount
+          : null,
+    };
+  }
+
+  private async waitForRuntimeCommandResult(
+    runtimeSessionId: string,
+    runtimeCommandId: string,
+    timeoutMs: number,
+  ) {
+    const startedAt = Date.now();
+    let lastStatus = '';
+    while (Date.now() - startedAt < timeoutMs) {
+      const commands = await this.runtimeSessionService!.listSessionCommands(runtimeSessionId);
+      const current = commands.find((item) => item.id === runtimeCommandId);
+      if (!current) {
+        if (!lastStatus) {
+          lastStatus = 'missing';
+          // #region debug-point K2:keepalive-command-missing
+          this.reportDebugEvent('K2', 'pre-fix', 'publishing-bitbrowser.service:waitForRuntimeCommandResult:command-missing', {
+            runtimeSessionId,
+            runtimeCommandId,
+          });
+          // #endregion
+        }
+        await this.sleep(200);
+        continue;
+      }
+      if (current.status !== lastStatus) {
+        lastStatus = current.status;
+        // #region debug-point K3:keepalive-command-status
+        this.reportDebugEvent('K3', 'pre-fix', 'publishing-bitbrowser.service:waitForRuntimeCommandResult:command-status', {
+          runtimeSessionId,
+          runtimeCommandId,
+          status: current.status,
+          errorMessage: current.errorMessage || null,
+          hasResultPayload: Boolean(current.resultPayload),
+        });
+        // #endregion
+      }
+      if (current.status === 'completed') {
+        return current.resultPayload ?? {};
+      }
+      if (current.status === 'failed') {
+        throw new Error(current.errorMessage || '扩展保活采集 Cookie 失败');
+      }
+      await this.sleep(200);
+    }
+    // #region debug-point K4:keepalive-command-timeout
+    this.reportDebugEvent('K4', 'pre-fix', 'publishing-bitbrowser.service:waitForRuntimeCommandResult:timeout', {
+      runtimeSessionId,
+      runtimeCommandId,
+      lastStatus: lastStatus || 'unknown',
+      timeoutMs,
+    });
+    // #endregion
+    throw new Error('扩展保活采集 Cookie 超时');
+  }
+
+  private async waitForRuntimeBridgeReady(runtimeSessionId: string) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < DEFAULT_RUNTIME_READY_TIMEOUT_MS) {
+      const session = await this.runtimeSessionService!.getRuntimeSession(runtimeSessionId);
+      if (session?.extensionInstanceId && session.tabId !== null) {
+        return;
+      }
+      await this.sleep(200);
+    }
+    throw new ConflictException('BitBrowser 扩展未就绪，请确认 BitBrowser 已加载登录发布扩展');
   }
 
   private async waitForRuntimeReady(
@@ -1341,6 +1631,88 @@ export class PublishingBitBrowserService implements OnModuleInit {
       .filter(Boolean);
 
     return cookies.length ? JSON.stringify(cookies) : '';
+  }
+
+  private buildRealtimeCookieItems(cookiePayload: string, authPayload: string) {
+    const normalizedPayload = cookiePayload || this.buildCookiePayloadFromRawCookie(authPayload);
+    if (!normalizedPayload) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(normalizedPayload);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .map((item) => this.normalizeRealtimeCookieItem(item))
+        .filter((item): item is BitBrowserCookieItem => Boolean(item));
+    } catch {
+      return [];
+    }
+  }
+
+  private normalizeRealtimeCookieItem(rawCookie: unknown): BitBrowserCookieItem | null {
+    if (!rawCookie || typeof rawCookie !== 'object') {
+      return null;
+    }
+    const cookie = rawCookie as Record<string, unknown>;
+    const name = String(cookie.name || '').trim();
+    const value = String(cookie.value || '').trim();
+    if (!name || !value) {
+      return null;
+    }
+
+    const normalized: BitBrowserCookieItem = {
+      name,
+      value,
+      path: String(cookie.path || '/').trim() || '/',
+    };
+    const domain = String(cookie.domain || '').trim();
+    const sameSite = String(cookie.sameSite || '').trim();
+    if (domain && domain !== './') {
+      normalized.domain = domain;
+    }
+    if (typeof cookie.secure === 'boolean') {
+      normalized.secure = cookie.secure;
+    }
+    if (typeof cookie.httpOnly === 'boolean') {
+      normalized.httpOnly = cookie.httpOnly;
+    }
+    if (sameSite) {
+      normalized.sameSite = sameSite;
+    }
+    if (
+      typeof cookie.expirationDate === 'number' &&
+      Number.isFinite(cookie.expirationDate)
+    ) {
+      normalized.expirationDate = cookie.expirationDate;
+    } else if (typeof cookie.expires === 'number' && Number.isFinite(cookie.expires)) {
+      normalized.expirationDate = cookie.expires;
+    }
+    return normalized;
+  }
+
+  private normalizePersistedProfileCookieItem(rawCookie: unknown) {
+    if (!rawCookie || typeof rawCookie !== 'object') {
+      return null;
+    }
+    const cookie = rawCookie as Record<string, unknown>;
+    const name = String(cookie.name || '').trim();
+    const value = String(cookie.value || '').trim();
+    if (!name || !value) {
+      return null;
+    }
+    return {
+      name,
+      value,
+      domain: './',
+      path: String(cookie.path || '/').trim() || '/',
+      hostOnly: Boolean(cookie.hostOnly),
+      httpOnly: Boolean(cookie.httpOnly),
+      session: Boolean(cookie.session),
+      secure: Boolean(cookie.secure),
+    };
   }
 
   private async collectCookieSnapshotFromLiveProfile(input: {
@@ -1638,6 +2010,30 @@ export class PublishingBitBrowserService implements OnModuleInit {
         const findDivByText = (keyword) =>
           Array.from(document.querySelectorAll('div, span, p, h2, h3'))
             .find((node) => normalize(node.innerText || node.textContent).includes(keyword));
+        const findMetricCountByLabel = (label) => {
+          const labelNodes = Array.from(document.querySelectorAll('span, div, p'));
+          for (const node of labelNodes) {
+            const text = normalize(node.textContent || '');
+            if (!text || !text.includes(label) || text.length > 40) continue;
+            const containers = [
+              node.parentElement,
+              node.parentElement?.parentElement,
+              node.closest?.('li, div, section, article'),
+            ].filter(Boolean);
+            for (const container of containers) {
+              const scopedMetric = normalize(
+                container?.querySelector?.(
+                  '.number-No6ev9, [class*="number-"], .numerical, [class*="numerical"]',
+                )?.textContent || '',
+              );
+              const parsedScopedMetric = parseCountText(scopedMetric);
+              if (parsedScopedMetric !== null) {
+                return parsedScopedMetric;
+              }
+            }
+          }
+          return null;
+        };
         const pageText = normalize(document.body && (document.body.innerText || document.body.textContent || ''));
         const title = normalize(document.title || '');
 
@@ -1662,6 +2058,7 @@ export class PublishingBitBrowserService implements OnModuleInit {
             ])) ||
             normalize(displayMatch && displayMatch[1]);
           const followerCount =
+            findMetricCountByLabel('粉丝') ??
             parseCountText(
               findFirstText([
                 'span.number-No6ev9',
@@ -1809,6 +2206,24 @@ export class PublishingBitBrowserService implements OnModuleInit {
     authPayload: string | null | undefined;
     cookiePayload?: string | null | undefined;
   }) {
+    const hasCredential =
+      Boolean(String(input.authPayload || '').trim()) || Boolean(String(input.cookiePayload || '').trim());
+    if (
+      hasCredential &&
+      this.isPlatformAuthenticatedInspection({
+        platform: input.platform,
+        sourceUrl: input.sourceUrl,
+        title: input.title,
+        pageTextPreview: input.pageTextPreview,
+      })
+    ) {
+      return {
+        keepAliveStatus: 'success' as const,
+        keepAliveMessage: '保活成功',
+        reauthRequired: false,
+      };
+    }
+
     if (
       this.isPlatformReauthInspection({
         platform: input.platform,
@@ -1910,6 +2325,27 @@ export class PublishingBitBrowserService implements OnModuleInit {
     return false;
   }
 
+  private isPlatformAuthenticatedInspection(input: {
+    platform: LeadPublishPlatform;
+    sourceUrl: string | null | undefined;
+    title: string | null | undefined;
+    pageTextPreview: string | null | undefined;
+  }) {
+    const sourceUrl = String(input.sourceUrl || '').toLowerCase();
+    const combinedText = `${String(input.title || '')} ${String(input.pageTextPreview || '')}`.toLowerCase();
+    if (input.platform === LeadPublishPlatform.xiaohongshu) {
+      return (
+        sourceUrl.includes('creator.xiaohongshu.com/new/home') ||
+        sourceUrl.includes('creator.xiaohongshu.com/publish/') ||
+        combinedText.includes('创作服务') ||
+        combinedText.includes('内容管理') ||
+        combinedText.includes('数据中心') ||
+        combinedText.includes('发布笔记')
+      );
+    }
+    return false;
+  }
+
   private scoreDebugInspection(
     platform: LeadPublishPlatform,
     inspected: {
@@ -1972,6 +2408,24 @@ export class PublishingBitBrowserService implements OnModuleInit {
         'C1',
         'pre-fix',
         'publishing-bitbrowser.service:openRuntimePageWithBridgeState:runtime-ready-short-circuit',
+        {
+          runtimeSessionId,
+          bootstrapUrl,
+          targetUrl,
+        },
+      );
+      return;
+    }
+
+    const runtimeReadyAfterGraceWait = await this.waitForRuntimeBridgeReadySignal(
+      runtimeSessionId,
+      2600,
+    );
+    if (runtimeReadyAfterGraceWait) {
+      this.reportDebugEvent(
+        'C1',
+        'post-fix',
+        'publishing-bitbrowser.service:openRuntimePageWithBridgeState:runtime-ready-grace-short-circuit',
         {
           runtimeSessionId,
           bootstrapUrl,
@@ -2061,6 +2515,34 @@ export class PublishingBitBrowserService implements OnModuleInit {
           'B',
           'pre-fix',
           'publishing-bitbrowser.service:closeStaleLoginRuntimes:error',
+          {
+            runtimeSessionId: session.id,
+            profileBindingId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
+  }
+
+  private async closeStaleKeepAliveRuntimes(profileBindingId: string) {
+    if (!this.repository || !this.runtimeSessionService) {
+      return;
+    }
+    const sessions = await this.repository.listRuntimeSessionsByProfileBindingId(profileBindingId);
+    const staleSessions = sessions.filter(
+      (item) =>
+        item.reason === 'keepalive' &&
+        !['completed', 'failed', 'closed'].includes(String(item.status || '').trim()),
+    );
+    for (const session of staleSessions) {
+      try {
+        await this.runtimeSessionService.closeRuntimeSession(session.id, 'failed');
+      } catch (error) {
+        this.reportDebugEvent(
+          'B',
+          'pre-fix',
+          'publishing-bitbrowser.service:closeStaleKeepAliveRuntimes:error',
           {
             runtimeSessionId: session.id,
             profileBindingId,
@@ -2205,6 +2687,17 @@ export class PublishingBitBrowserService implements OnModuleInit {
         (typeof session.tabId === 'number' && session.tabId > 0) ||
         ['ready', 'running'].includes(String(session.status || '').trim()),
     );
+  }
+
+  private async waitForRuntimeBridgeReadySignal(runtimeSessionId: string, timeoutMs: number) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      if (await this.hasRuntimeBridgeReadySignal(runtimeSessionId)) {
+        return true;
+      }
+      await this.sleep(200);
+    }
+    return false;
   }
 
   private async addInitScriptAndNavigateInDebugTarget(
@@ -2805,13 +3298,32 @@ export class PublishingBitBrowserService implements OnModuleInit {
   ) {
     const debugBaseUrl = this.normalizeDebugBaseUrl(debugUrl);
     if (!debugBaseUrl) {
+      this.reportDebugEvent('D', 'pre-fix', 'publishing-bitbrowser.service:simulateKeepAliveInteraction:no-debug-base-url', {
+        platform,
+        debugUrl,
+      });
       return null;
     }
     const pageTarget = await this.findDebugPageTarget(debugBaseUrl, this.getPlatformLoginUrl(platform));
     if (!pageTarget?.webSocketDebuggerUrl) {
+      this.reportDebugEvent('B', 'pre-fix', 'publishing-bitbrowser.service:simulateKeepAliveInteraction:no-page-target', {
+        platform,
+        debugBaseUrl,
+      });
       return null;
     }
+    this.reportDebugEvent('B', 'pre-fix', 'publishing-bitbrowser.service:simulateKeepAliveInteraction:target-selected', {
+      platform,
+      debugBaseUrl,
+      targetUrl: pageTarget.url || null,
+      hasWebSocketDebuggerUrl: Boolean(pageTarget.webSocketDebuggerUrl),
+    });
     await this.bringDebugTargetToFront(pageTarget.webSocketDebuggerUrl).catch(() => undefined);
+    this.reportDebugEvent('C', 'pre-fix', 'publishing-bitbrowser.service:simulateKeepAliveInteraction:after-bring-to-front', {
+      platform,
+      debugBaseUrl,
+      targetUrl: pageTarget.url || null,
+    });
     await this.sleep(350);
 
     const keywords =
@@ -2826,37 +3338,40 @@ export class PublishingBitBrowserService implements OnModuleInit {
               : ['首页', '内容'];
 
     const blockedKeywords = ['发布', '提交', '保存', '删除', '退出', '登录', '重新登录'];
-
-    return this.evaluateInDebugTarget<{
+    const firstScroll = await this.evaluateInDebugTarget<{
       sourceUrl: string | null;
-      clickedText: string | null;
-      scrollTop: number;
+      scrollTop: number | null;
     }>(
       pageTarget.webSocketDebuggerUrl,
-      `(() => new Promise(async (resolve) => {
-        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
-        const keywords = ${JSON.stringify(keywords)};
-        const blockedKeywords = ${JSON.stringify(blockedKeywords)};
+      `(() => {
         const viewportHeight = Math.max(window.innerHeight || 0, 720);
         const root = document.scrollingElement || document.documentElement || document.body;
         const maxScrollTop = Math.max(0, (root?.scrollHeight || document.body?.scrollHeight || 0) - viewportHeight);
-        const scrollTargets = [0.18, 0.42, 0.68, 0.33]
-          .map((rate) => Math.max(0, Math.min(maxScrollTop, Math.round(maxScrollTop * rate))));
-
+        const targetTop = Math.max(0, Math.min(maxScrollTop, Math.round(maxScrollTop * 0.38)));
         try { window.focus(); } catch {}
-
-        for (const nextTop of scrollTargets) {
-          try {
-            window.scrollTo({ top: nextTop, behavior: 'auto' });
-          } catch {
-            try {
-              window.scrollTo(0, nextTop);
-            } catch {}
-          }
-          await wait(400);
+        try {
+          window.scrollTo({ top: targetTop, behavior: 'auto' });
+        } catch {
+          try { window.scrollTo(0, targetTop); } catch {}
         }
+        return {
+          sourceUrl: String(location.href || '') || null,
+          scrollTop: Number(window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0),
+        };
+      })()`,
+    );
+    await this.sleep(450);
 
+    const clickResult = await this.evaluateInDebugTarget<{
+      sourceUrl: string | null;
+      clickedText: string | null;
+      scrollTop: number | null;
+    }>(
+      pageTarget.webSocketDebuggerUrl,
+      `(() => {
+        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+        const keywords = ${JSON.stringify(keywords)};
+        const blockedKeywords = ${JSON.stringify(blockedKeywords)};
         const isVisible = (element) => {
           if (!(element instanceof HTMLElement)) return false;
           const style = window.getComputedStyle(element);
@@ -2866,59 +3381,79 @@ export class PublishingBitBrowserService implements OnModuleInit {
           const rect = element.getBoundingClientRect();
           return rect.width > 8 && rect.height > 8 && rect.bottom > 0 && rect.right > 0;
         };
-
-        const textFor = (element) => normalize(element?.innerText || element?.textContent || '');
         const isBlocked = (text) => blockedKeywords.some((keyword) => text.includes(keyword));
-        const candidates = Array.from(document.querySelectorAll('a, button, [role="button"], [class*="nav"], [class*="menu"], [class*="tab"]'))
+        const elements = Array.from(document.querySelectorAll('a, button, [role="button"]')).slice(0, 120);
+        const candidates = elements
           .filter((element) => isVisible(element))
-          .map((element) => ({ element, text: textFor(element) }))
+          .map((element) => {
+            const text = normalize(element?.innerText || element?.textContent || '');
+            return { element, text };
+          })
           .filter((item) => item.text && !isBlocked(item.text));
-
         const matched =
           candidates.find((item) => keywords.some((keyword) => item.text.includes(keyword))) ||
           candidates[0] ||
           null;
-
         if (matched?.element instanceof HTMLElement) {
-          try {
-            matched.element.scrollIntoView({ block: 'center', inline: 'center' });
-            await wait(250);
-          } catch {}
-          const rect = matched.element.getBoundingClientRect();
-          const clickEventInit = {
-            bubbles: true,
-            cancelable: true,
-            clientX: Math.max(0, Math.round(rect.left + Math.min(rect.width / 2, 80))),
-            clientY: Math.max(0, Math.round(rect.top + Math.min(rect.height / 2, 24))),
-          };
-          try { matched.element.dispatchEvent(new MouseEvent('mousemove', clickEventInit)); } catch {}
-          try { matched.element.dispatchEvent(new MouseEvent('mousedown', clickEventInit)); } catch {}
-          try { matched.element.dispatchEvent(new MouseEvent('mouseup', clickEventInit)); } catch {}
+          try { matched.element.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
           try { matched.element.click(); } catch {}
-          await wait(500);
         } else {
           try {
-            document.body?.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: 120, clientY: 120 }));
-          } catch {}
-          await wait(300);
-        }
-
-        try {
-          window.scrollTo({ top: Math.max(0, Math.round(maxScrollTop * 0.12)), behavior: 'auto' });
-        } catch {
-          try {
-            window.scrollTo(0, Math.max(0, Math.round(maxScrollTop * 0.12)));
+            document.body?.dispatchEvent(new MouseEvent('mousemove', {
+              bubbles: true,
+              cancelable: true,
+              clientX: 140,
+              clientY: 140,
+            }));
           } catch {}
         }
-        await wait(600);
-
-        resolve({
+        return {
           sourceUrl: String(location.href || '') || null,
           clickedText: matched?.text || null,
           scrollTop: Number(window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0),
-        });
-      }))()`,
+        };
+      })()`,
     );
+    await this.sleep(400);
+
+    const finalScroll = await this.evaluateInDebugTarget<{
+      sourceUrl: string | null;
+      scrollTop: number | null;
+    }>(
+      pageTarget.webSocketDebuggerUrl,
+      `(() => {
+        const viewportHeight = Math.max(window.innerHeight || 0, 720);
+        const root = document.scrollingElement || document.documentElement || document.body;
+        const maxScrollTop = Math.max(0, (root?.scrollHeight || document.body?.scrollHeight || 0) - viewportHeight);
+        const targetTop = Math.max(0, Math.min(maxScrollTop, Math.round(maxScrollTop * 0.14)));
+        try {
+          window.scrollTo({ top: targetTop, behavior: 'auto' });
+        } catch {
+          try { window.scrollTo(0, targetTop); } catch {}
+        }
+        return {
+          sourceUrl: String(location.href || '') || null,
+          scrollTop: Number(window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0),
+        };
+      })()`,
+    );
+
+    const result = {
+      sourceUrl:
+        finalScroll?.sourceUrl || clickResult?.sourceUrl || firstScroll?.sourceUrl || pageTarget.url || null,
+      clickedText: clickResult?.clickedText || null,
+      scrollTop:
+        finalScroll?.scrollTop ?? clickResult?.scrollTop ?? firstScroll?.scrollTop ?? 0,
+    };
+    this.reportDebugEvent('A', 'pre-fix', 'publishing-bitbrowser.service:simulateKeepAliveInteraction:interaction-result', {
+      platform,
+      debugBaseUrl,
+      targetUrl: pageTarget.url || null,
+      sourceUrl: result?.sourceUrl || null,
+      clickedText: result?.clickedText || null,
+      scrollTop: result?.scrollTop ?? null,
+    });
+    return result;
   }
 
   private async getCookiesInDebugTarget(
@@ -3090,13 +3625,39 @@ export class PublishingBitBrowserService implements OnModuleInit {
     ownerName: string,
     profileName: string,
     basePayload?: Partial<BitBrowserBrowserCreatePayload>,
+    proxyConfig?: Record<string, unknown> | null,
   ): BitBrowserBrowserCreatePayload {
     const nextBasePayload = basePayload ?? {};
+    const normalizedProxyConfig = this.extractProxyConfigFromBrowserConfig(proxyConfig ?? null);
     return {
-      proxyMethod: 2,
-      proxyType: 'noproxy',
-      syncExtensions: true,
-      syncUserExtensions: true,
+      ...nextBasePayload,
+      proxyMethod:
+        typeof normalizedProxyConfig?.proxyMethod === 'number' ? normalizedProxyConfig.proxyMethod : 1,
+      proxyType:
+        typeof normalizedProxyConfig?.proxyType === 'string'
+          ? (String(normalizedProxyConfig.proxyType) as BitBrowserProxyType)
+          : 'noproxy',
+      ...(typeof normalizedProxyConfig?.host === 'string' &&
+      normalizedProxyConfig.host.trim()
+        ? {
+            host: normalizedProxyConfig.host.trim(),
+            port:
+              typeof normalizedProxyConfig.port === 'number' && Number.isFinite(normalizedProxyConfig.port)
+                ? normalizedProxyConfig.port
+                : undefined,
+            proxyUserName:
+              typeof normalizedProxyConfig.proxyUserName === 'string'
+                ? normalizedProxyConfig.proxyUserName
+                : undefined,
+            proxyPassword:
+              typeof normalizedProxyConfig.proxyPassword === 'string'
+                ? normalizedProxyConfig.proxyPassword
+                : undefined,
+          }
+        : {}),
+      syncExtensions: false,
+      syncUserExtensions: false,
+      webRTC: 2,
       browserFingerPrint: {
         coreProduct: 'chrome',
         coreVersion: '130',
@@ -3105,9 +3666,170 @@ export class PublishingBitBrowserService implements OnModuleInit {
         osVersion: '11,10',
         ...(nextBasePayload.browserFingerPrint ?? {}),
       },
-      ...nextBasePayload,
       name: profileName || nextBasePayload.name || `${ownerName} 专属环境`,
     };
+  }
+
+  private async resolveLoginWindowProxyConfig(existingProxyConfig: unknown) {
+    const normalizedExistingProxyConfig = this.extractProxyConfigFromBrowserConfig(existingProxyConfig);
+    if (
+      normalizedExistingProxyConfig &&
+      normalizedExistingProxyConfig.proxyMethod === 2 &&
+      typeof normalizedExistingProxyConfig.host === 'string' &&
+      normalizedExistingProxyConfig.host.trim() &&
+      typeof normalizedExistingProxyConfig.port === 'number' &&
+      Number.isFinite(normalizedExistingProxyConfig.port)
+    ) {
+      if (this.isLoginProxyExpiringSoon(normalizedExistingProxyConfig)) {
+        this.logger.warn(
+          `登录代理即将过期，重新提取新 IP: ${normalizedExistingProxyConfig.host}:${normalizedExistingProxyConfig.port}`,
+        );
+      } else {
+        try {
+          const alive = await this.gatewayClient?.checkAgent({
+            host: normalizedExistingProxyConfig.host.trim(),
+            port: normalizedExistingProxyConfig.port,
+            proxyType:
+              typeof normalizedExistingProxyConfig.proxyType === 'string'
+                ? normalizedExistingProxyConfig.proxyType
+                : 'http',
+            proxyUserName:
+              typeof normalizedExistingProxyConfig.proxyUserName === 'string'
+                ? normalizedExistingProxyConfig.proxyUserName
+                : null,
+            proxyPassword:
+              typeof normalizedExistingProxyConfig.proxyPassword === 'string'
+                ? normalizedExistingProxyConfig.proxyPassword
+                : null,
+          });
+          if (alive) {
+            return normalizedExistingProxyConfig;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `登录代理检测失败，改为重新提取新 IP: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+    }
+    return this.fetchLoginWindowProxyConfig();
+  }
+
+  private async fetchLoginWindowProxyConfig() {
+    const dynamicIpUrl =
+      this.configService.get<string>('BITBROWSER_LOGIN_PROXY_DYNAMIC_IP_URL')?.trim() ||
+      DEFAULT_LOGIN_PROXY_DYNAMIC_IP_URL;
+    if (!dynamicIpUrl) {
+      return null;
+    }
+    let responseText = '';
+    try {
+      new URL(dynamicIpUrl);
+      const response = await fetch(dynamicIpUrl);
+      responseText = (await response.text()).trim();
+    } catch (error) {
+      throw new ConflictException(
+        `登录代理提取失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const normalizedLine = responseText
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .find((item) => item.length > 0);
+    if (!normalizedLine) {
+      throw new ConflictException('登录代理提取失败：代理平台未返回可用 IP');
+    }
+    const segments = normalizedLine.split(':');
+    if (segments.length < 4) {
+      throw new ConflictException(`登录代理提取失败：代理返回格式不支持，原始内容：${normalizedLine}`);
+    }
+    const [host, portText, proxyUserName, proxyPassword, expiresAtText] = segments;
+    const port = Number(portText);
+    if (!host?.trim() || !Number.isFinite(port) || port <= 0) {
+      throw new ConflictException(`登录代理提取失败：代理返回格式不支持，原始内容：${normalizedLine}`);
+    }
+    const expiresAt = this.parseLoginProxyExpiresAt(expiresAtText);
+    return {
+      proxyMethod: 2,
+      proxyType: 'http',
+      host: host.trim(),
+      port,
+      proxyUserName: String(proxyUserName || '').trim(),
+      proxyPassword: String(proxyPassword || '').trim(),
+      expiresAt,
+      sourceUrl: dynamicIpUrl,
+    } as Record<string, unknown>;
+  }
+
+  private parseLoginProxyExpiresAt(value: unknown) {
+    const text = String(value || '').trim();
+    if (!text) {
+      return null;
+    }
+    const candidate = new Date(text.replace(' ', 'T'));
+    if (Number.isNaN(candidate.getTime())) {
+      return null;
+    }
+    return candidate.toISOString();
+  }
+
+  private isLoginProxyExpiringSoon(proxyConfig: Record<string, unknown>) {
+    const expiresAtText = String(proxyConfig.expiresAt || '').trim();
+    if (!expiresAtText) {
+      return false;
+    }
+    const expiresAt = new Date(expiresAtText);
+    if (Number.isNaN(expiresAt.getTime())) {
+      return false;
+    }
+    return expiresAt.getTime() - Date.now() <= DEFAULT_LOGIN_PROXY_MIN_TTL_MS;
+  }
+
+  private extractProxyConfigFromBrowserConfig(value: unknown) {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    const record = value as Record<string, unknown>;
+    return {
+      proxyMethod: typeof record.proxyMethod === 'number' ? record.proxyMethod : 2,
+      proxyType:
+        typeof record.proxyType === 'string' && record.proxyType.trim()
+          ? record.proxyType.trim()
+          : 'noproxy',
+      host:
+        typeof record.host === 'string' && record.host.trim() ? record.host.trim() : null,
+      port:
+        typeof record.port === 'number' && Number.isFinite(record.port) ? record.port : null,
+      proxyUserName:
+        typeof record.proxyUserName === 'string' ? record.proxyUserName : null,
+      proxyPassword:
+        typeof record.proxyPassword === 'string' ? record.proxyPassword : null,
+      expiresAt:
+        typeof record.expiresAt === 'string' && record.expiresAt.trim() ? record.expiresAt.trim() : null,
+      sourceUrl:
+        typeof record.sourceUrl === 'string' && record.sourceUrl.trim() ? record.sourceUrl.trim() : null,
+    } as Record<string, unknown>;
+  }
+
+  private isDirectConnectBrowserConfig(value: unknown) {
+    const normalized = this.extractProxyConfigFromBrowserConfig(value);
+    if (!normalized) {
+      return false;
+    }
+    const proxyMethod = typeof normalized.proxyMethod === 'number' ? normalized.proxyMethod : null;
+    const proxyType =
+      typeof normalized.proxyType === 'string' ? normalized.proxyType.trim().toLowerCase() : '';
+    const host = typeof normalized.host === 'string' ? normalized.host.trim() : '';
+    const port = typeof normalized.port === 'number' && Number.isFinite(normalized.port) ? normalized.port : null;
+    return proxyMethod === 1 && proxyType === 'noproxy' && !host && (port === null || port <= 0);
+  }
+
+  private isSameProxyConfig(left: unknown, right: unknown) {
+    const normalizedLeft = this.extractProxyConfigFromBrowserConfig(left);
+    const normalizedRight = this.extractProxyConfigFromBrowserConfig(right);
+    return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
   }
 
   private getPlatformLabel(platform: LeadPublishPlatform) {

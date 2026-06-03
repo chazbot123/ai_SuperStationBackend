@@ -1,0 +1,279 @@
+# 进度记录
+
+## 2026-04-30
+- 已恢复规划文件并确认本轮新任务：将“前台配置中心”改名为“超级站配置中心”，并开始开发“运营指标”
+- 已确认现状：`/personalization/*` 即当前配置中心；`运营指标` 仅存在于 `Personalization.tsx` 内部 `useState`，尚未进入统一配置
+- 规划辅助脚本在当前环境路径缺失，已跳过该步骤，改为直接基于仓库现状继续推进
+- 已完成前端改名与运营指标配置首轮开发，前端构建通过
+- 已新增后端 `super-site-settings` 模块，提供 `GET /api/super-site-settings/me` 与 `PUT /api/super-site-settings/me`
+- 已新增 Prisma `SuperSiteSetting` 模型并完成 `prisma generate`
+- 已执行 `npm exec prisma db push`，数据库已同步
+- 已补后端单测 `super-site-settings.service.spec.ts`，2 项通过
+- 已执行后端 `npm run build`，构建通过
+- 已删除 AI企业名片前后端代码、Prisma 表、RBAC 页面键、前端菜单路由与配置字段
+- 已执行 `prisma generate`、清理旧 `business_card` 权限数据并再次 `db push`，数据库删除已同步
+- 已执行前端 `npm run build` 与后端 `npm run build`，均通过
+
+## 2026-05-01
+- 已执行 `git fetch`，确认本地 `main` 落后 `origin/main` 1 个提交
+- 已按要求先提交当前工作区本地快照，再开始合并远端
+- 已进入 `git merge origin/main` 的冲突处理阶段
+- 已完成 9 个冲突文件的冲突块定位，准备开始逐个合并
+- 已解决 `docs / Prisma / ai 模块 / 前端 UI` 冲突并清空全部冲突标记
+- 已执行前端 `npm run build`，构建通过
+- 已执行后端 `npm run prisma:generate` 与 `npm install`
+- 已执行后端 `npm run build`，构建通过
+
+## 2026-05-02
+- 已恢复规划文件并确认新任务：将“视频草稿箱”改成正式后端落库，同时承接 `产品视频生成` 与 `真人口播视频生成`
+- 已确认当前视频草稿箱主数据仍在前端 `videoDraftStore` 本地持久化，后端仅有真人口播任务表 `VideoMainTask / VideoSubTask`
+- 已确认可直接复用图文草稿实现模式：`Prisma 模型 + ai.controller 路由 + ai.service CRUD + src/lib/ai.ts 封装`
+- 已新增 Prisma `VideoDraft` 模型、`VideoDraftSource / VideoDraftStatus` 枚举和增量脚本 `scripts/add-video-drafts-module.sql`
+- 已补 `GET/POST/PATCH /api/ai/video-drafts`、`POST /api/ai/video-drafts/:id/submit`、`POST /api/ai/video-drafts/:id/mark-synced`
+- 已将 `VideoGenerationWorkspace.tsx` 与 `VideoDrafts.tsx` 改为后端草稿为主，本地 store 为缓存，并把轮询状态回写到后端
+- 已执行相关文件诊断，结果为空
+- 已执行 `npm run prisma:generate`、前端 `npm run build`、后端 `npm run build`，全部通过
+- 已执行 `npm exec prisma db execute -- --file ..\scripts\add-video-drafts-module.sql`，本地开发数据库视频草稿表已落地
+
+## 2026-05-03
+- 已恢复规划文件并确认新任务：行业信息来源统一切 RSS，补更多 RSS 源，并给列表增加来源与日期筛选
+- 已确认当前后端只有 `量子位 HTML / 雷峰网 HTML` 两个非 RSS 源，列表查询还缺 `sourceKey / 日期范围` 条件
+- 已验证可直接使用的 RSS 包括 `量子位 / 雷峰网 / InfoQ / 爱范儿 / 少数派 / 极客公园`
+- 已验证 `小宇宙` 暂未找到可直接复用的标准 feed 地址，本轮先不接，避免引入不稳定抓取
+- 规划辅助脚本在当前环境路径缺失，已继续沿用仓库内 `task_plan.md / findings.md / progress.md` 维护当前任务
+- 已完成后端来源定义切换、来源配置合并兼容、列表 `sourceKey / startDate / endDate` 筛选
+- 已完成前端默认源同步与行业信息列表筛选 UI
+- 已执行前端构建、后端 `nest build`，均通过
+- 已重启后端并实测 `industry-sync` 抓取 `量子位 RSS / 雷峰网 RSS / InfoQ RSS` 成功，返回 `createdCount: 35, updatedCount: 15`
+- 已实测 `GET /api/super-site-settings/me/industry-items?sourceKey=infoq_rss&startDate=2026-05-01&endDate=2026-05-03` 正常返回 5 条记录
+
+## 2026-05-05
+- 已恢复规划文件并确认新任务：将仪表盘的静态说明块替换为已有功能的数据化看板与统计图
+- 已确认当前 `Dashboard.tsx` 仍包含“功能总览 / 审核概览 / 商品运营概览”三块静态内容
+- 已确认项目内暂未接入现成图表库，本轮优先考虑轻量自绘统计图或现有 UI 组合实现
+- 已完成 `Dashboard.tsx` 重构，原 3 个静态区块已替换为 `获客与发布 / 客户与客服 / 商品与知识库` 三组数据看板
+- 已接入真实统计来源：`商品 / 获客发布 / 客户线索 / AI 客服 / 知识库`
+- 已补轻量柱状图与近 7 天趋势图，无新增图表依赖
+- 已执行 `GetDiagnostics`，页面诊断为 0
+- 已执行前端 `npm run check`，类型检查通过
+- 已恢复规划文件并确认新任务：将图文文案系统提示词统一调整为“小红书软种草”风格
+- 已确认 `generateCopy()` 被 `社媒图文生成` 与 `商品图与详情图生成` 共用，本轮修改会同步影响两条图文链路
+- 已将图文文案系统提示词拆成独立 helper，并补充热门文案节奏、情绪词/口语化、爆点结构、反差/痛点/场景切入、典型句式示例等明确规则
+- 已执行 `GetDiagnostics`，`ai.service.ts / ai.service.spec.ts` 诊断为 0
+- 已执行后端定向测试 `npm test -- ai/ai.service.spec.ts --runInBand`，6 项全部通过
+- 已恢复规划文件并确认新任务：给 1级代理 开放仪表盘与模型配置功能
+- 已确认控制点分两层：后端 `DEFAULT_PERMISSION_MATRIX` 控制默认 pageKey 可见；前端 `Rules.tsx` 还额外写死了“仅主公司可维护”
+- 已放开 `level1_agent` 的 `dashboard / rules` 默认权限，并同步更新前端模型配置页的可维护判断
+- 已执行 `GetDiagnostics`，`Rules.tsx / permissions.ts / rbac.constants.ts` 诊断为 0
+- 已执行前端 `npm run check` 与后端 `npm run build`，均通过
+- 已恢复规划文件并确认新任务：模型配置改为按账号独立，图文生成草稿图片补下载按钮
+- 已确认模型配置原实现为 Redis 全局 key，共享给所有账号；图文草稿图片无来源字段，但可用 MinIO 托管 URL 识别“手动上传图片”
+- 已将后端模型配置缓存改为按 `userId` 维度读写，并同步更新模型配置接口、图文生成、图片生成、视频生成、平台元数据、BGM 推荐、视频任务查询及真人口播后台续跑链路的配置读取逻辑
+- 已将前端模型配置 store 绑定当前登录账号，切换账号时重置为该账号独立配置视图
+- 已为 `StudioDrafts` 图片卡片增加右下角下载按钮，仅在后端标记为可下载的生成图片上显示，手动上传图片不显示
+- 已执行 `GetDiagnostics`，本轮改动文件诊断为 0
+- 已执行前端 `npm run check` 与后端 `npm run build`，均通过
+- 已恢复规划文件并确认新任务：修复一级代理图文提审后主公司审核中心不显示的问题
+- 已确认根因：一级代理提审接口会正确把后端草稿 `reviewStage` 改为 `submitted`，但主公司审核中心素材页仍只读取前端本地 `appStore.contents`，没有接后端 `SocialGeneratedPost / ProductImageDraft / VideoDraft`
+- 已新增主公司专用素材审核接口：后端聚合 `social / product / video` 三类已提审记录，并提供通过/驳回处理
+- 已将 `MaterialReviewsPanel` 切到后端审核数据源，主公司现在可直接查看一级代理提审的图文/商品图/视频草稿
+- 已执行 `GetDiagnostics`，本轮审核中心相关改动文件诊断为 0
+- 已执行前端 `npm run check` 与后端 `npm run build`，均通过
+- 已确认当前仓库实际 Git 根目录为 `D:\zhilin_project\AI-SuperWeb\AI-SuperWeb`，外层仍套了一层 `AI-SuperWeb`
+- 已盘点环境文件现状：原先只有根目录 `.env.docker.example` 与 `server/.env.example`
+- 用户已确认目标是把项目最终整理到 `D:\zhilin_project`，并按“标准化”方式整理环境文件
+- 已确认当前工作区规则不允许直接写入仓库根目录外，因此暂不能直接执行跨目录迁移，需先由用户确认放开路径限制或改为输出迁移方案
+- 已完成仓库内整理：新增根目录 `.env.example`、新增 `docs/environment-files.md`、扩充 `docs/project-rules.md`、补 `scripts/migrate-project-root.ps1`
+- 已删除重复的 `.env.docker.example`，根目录环境标准入口改为 `.env.example`
+
+## 2026-05-07
+- 已恢复规划文件并确认新任务：给知识库管理补更明确的删除入口，并排查“为什么有的文档只切到 1 个切片、是否调用大模型”
+- 已确认前端 `Assets.tsx` 列表页原本已接通删除接口，但删除逻辑以内联方式散在列表按钮中，详情抽屉还缺同入口
+- 已完成前端知识库删除动作收口：新增统一 `handleDeleteDocument()`、补 `deletingId` 状态、列表按钮与详情抽屉均可删除
+- 已执行 `GetDiagnostics`，`Assets.tsx` 诊断为 0
+- 已确认知识库切片链路为“先调 `AiService.generateTextReply()` 做智能切片，失败回退固定规则切片”，不是纯固定切片
+- 已确认知识库 embedding 当前仍是本地哈希向量 `local_hash_v1`，不是调用大模型 embedding
+- 已确认某些文档只切到 1 个切片通常是因为解析后的有效文本较短，或当前语义切片结果本身只需要 1 个片段
+- 已将知识库智能切片提示词升级为“先识别真实文字结构，再决定切片边界”
+- 已新增行级结构标注输入，向文字模型显式提示 `HEADING / LIST / QA / TABLE / TEXT / NOISE`
+- 已执行 `GetDiagnostics` 与后端 `npm run build`，本轮切片策略改动通过
+- 已恢复规划文件并确认新任务：把知识库切片顺序明确改为“先文字模型智能切片，再固定切片回退”，并将固定切片改成更适配“手册 / 文档 / 公司简章”等长文结构
+- 已确认当前代码真实状态为 `buildChunks()` 只走固定切片，之前升级过的智能切片提示词实际上没有进入主链路
+- 已确认前端知识库页暂无切片策略配置入口，本轮主要改动将集中在 `KnowledgeService` 与知识库页面说明
+- 已完成知识库切片主链路修正：`buildChunks()` 现已先尝试文字模型智能切片，失败或无结果时再回退固定切片
+- 已将固定切片改为更适配手册、文档、公司简章、FAQ、制度流程等长文资料的结构化分段策略
+- 已执行 `GetDiagnostics`、后端 `npm run build`、前端 `npm run check`，本轮切片改动验证通过
+- 已恢复规划文件并确认新任务：开始对接前台产品模块与后台/后端产品模块
+- 下一步先盘点 `ZL_Supersite` 前台商品模块、后台 `Products` 页面和后端 `products` 模块接口的现状与差异
+- 已确认前台产品模块当前仍是 `legacy-home.html` 内的静态商品卡片，后台/后端产品模块已是正式数据链路
+- 已新增后端公开商品接口 `GET /api/products/public/:userId`，返回指定账号下 `live` 状态商品的前台展示字段
+- 已将前台 `主营产品` 区改为优先读取公开商品接口，接口失败或无数据时继续回退静态卡片
+- 已同步保留前台现有样式、商品详情弹层与“立即抢购 -> 打开客服咨询”交互
+- 已执行后端 `npm run build`、前台 `ZL_Supersite npm run check`，并实测 `GET /api/products/public/cmotrwinc0000n4u9e265uccn` 成功返回真实商品列表
+- 已恢复规划文件并确认新任务：继续排查“图文草稿箱图片加载不出来”
+- 已确认前端主问题有两处：图片 URL 过滤过严、编辑弹窗图片删除/下载使用过滤后索引导致错位
+- 已在 `src/pages/StudioDrafts.tsx` 放宽图片 URL 识别，兼容协议相对 URL、协议缺失 URL 与普通相对路径
+- 已修复编辑弹窗图片渲染为携带原始索引，删除/下载操作现按原始图片索引执行
+- 已执行 `GetDiagnostics`，`StudioDrafts.tsx` 诊断为 0
+- 已继续确认后端主问题：图文生成草稿之前直接存图片模型返回的 `urls`，未先固化到自有 MinIO，旧草稿也没有自动补修逻辑
+- 已在 `server/src/modules/ai/ai.service.ts` 增加图片固化与旧草稿补修：新生成图片先转自有稳定地址，`listSocialPosts / listProductImageDrafts` 读取时会尽力补修非托管图片
+- 已发现并修复 `server/src/modules/products/products.service.ts` 中上一轮英文名改造遗留的语法错误
+- 已执行 `GetDiagnostics`，`ai.service.ts / products.service.ts` 诊断为 0
+- 已执行后端 `npm run build`，构建通过
+
+## 2026-05-08
+- 已恢复规划文件并确认新任务：不再使用 `.env` 配置超级站前台地址，改为在后台现有“超级站配置中心”中维护，且主公司与一级代理都可用
+- 已确认现状：`Publishing.tsx` 当前仍读取 `VITE_SUPERSITE_URL`；`Personalization.tsx` 页面内仍写死仅主公司可见；后端 `super-site-settings` 已具备承接该字段的现成 `GET/PUT me` 链路
+- 已在 Prisma `SuperSiteSetting` 模型、`UpdateSuperSiteSettingDto`、`SuperSiteSettingsService`、前端 `Settings` 类型中新增 `superSiteBaseUrl`
+- 已在 `Personalization.tsx` 新增“超级站前台地址”输入与保存按钮，并将页面内可访问角色放开到 `main_company / level1_agent`
+- 已将 `Publishing.tsx` 的“上传超级站”改为读取后台设置里的 `superSiteBaseUrl`，缺失时提示到超级站配置中心填写
+- 已同步修改前后端默认权限定义：`level1_agent` 的 `personalization` 默认值改为 `true`
+- 已执行 `npm exec prisma generate`、`npm exec prisma db push`、后端 `npm run build`、前端 `npm run check`，命令退出码均为 `0`
+- 已执行本轮改动文件 `GetDiagnostics`，诊断结果均为 `0`
+- 已恢复规划文件并确认新任务：删除登录页“快捷进入预设账号”，改为登录前必须勾选“同意并阅读用户协议”，并补一份贴合当前功能的用户协议
+- 已确认登录页预设账号入口仅存在于 `src/pages/Login.tsx` 前端界面，不影响真实后端登录接口
+- 已删除登录页“快捷进入预设账号”按钮和预置账号说明，并将用户名/密码输入默认值改为空
+- 已在登录页增加“我已阅读并同意《用户协议》”勾选项，未勾选时禁止登录并提示
+- 已新增匿名可访问的用户协议页面 `/user-agreement`
+- 已新增协议文档 `docs/user-agreement.md`，内容覆盖账号登录、AI生成、知识库、商品、视频、获客发布、客服、超级站配置等当前实际功能
+- 已执行 `GetDiagnostics` 与前端 `npm run check`，本轮改动通过
+- 已确认一键发布“页面卡住”的直接原因是后端 `publishContent` 在请求内同步串行执行浏览器发布
+- 已将后端发布改为：创建任务后立即返回，由后台异步触发 `executeDraftSave`
+- 已同步修改重试任务逻辑，重试时不再同步阻塞请求
+- 已为 `Publishing.tsx` 增加发布记录自动轮询：存在 `queued/running` 任务时每 3 秒刷新一次
+- 已专项增强抖音自动发布稳定性：补充图文上传入口重试、图文/视频模式回退跳转、抖音上传完成识别、抖音发布完成识别
+- 已执行本轮核心文件诊断，`publishing.service.ts`、`platform-login-browser.service.ts`、`Publishing.tsx` 均为 `0` 错误
+- 已执行前端 `npm run check` 与后端 `npm run build`，均通过
+- 已恢复规划文件并确认新任务：基于当前真实项目架构，输出一份 Ubuntu 服务器从安装环境到部署上线的完整手册，并明确沿用当前测试环境数据的迁移步骤
+- 已核对现有部署相关文档：当前只有环境说明和生产建议，缺少“测试库数据恢复 + 双前端 + Nginx + PM2 + MinIO/Redis 同步”的完整落地手册
+- 已核对当前真实部署要点：`docker-compose.yml` 仅包含 `PostgreSQL / Redis / MinIO` 三个基础服务；后台前端默认端口 `5173`，超级站前台默认端口 `5180`，后端默认端口 `3000`
+- 已确认 Redis 中保存当前 AI 模型配置，MinIO 中保存业务文件与图片；若要沿用测试环境业务状态，上线时除 PostgreSQL 外应同步 Redis 和 MinIO
+- 已新增部署文档 `docs/ubuntu-install-and-deploy-with-test-data.md`，覆盖 Ubuntu 装机、Docker/Node/Nginx/PM2、数据库恢复、MinIO/Redis 恢复、双前端上线、Nginx 配置、上线检查与回滚
+- 已恢复规划文件并确认新任务：在 D 盘备份当前项目的 SQL、Redis、MinIO 数据
+- 已确认当前容器状态正常：`ai-superweb-postgres / ai-superweb-redis / ai-superweb-minio` 均在运行
+- 已创建备份目录 `D:\zhilin_project\backups\20260508_231808`
+- 已执行 `pg_dump` 导出 `ai_superweb.sql`
+- 已执行 Redis `SAVE` 并复制 `data\redis` 到备份目录
+- 已复制 `data\minio` 到备份目录
+- 已核对 SQL、Redis、MinIO 备份目录和文件均真实存在
+
+## 2026-05-09
+- 已恢复规划文件并确认新任务：本机先把 `2 个前端 + 1 个后端` 打成同一套运行包，再把部署文档改为“上传运行包部署”，并沿用当前 `backups` 数据
+- 已确认当前本地备份真实结构为 `D:\zhilin_project\backups\sql\ai_superweb.sql`、`D:\zhilin_project\backups\redis\data`、`D:\zhilin_project\backups\minio\data`
+- 已完成前端 `npm run build`、超级站前端 `npm run build`、后端 `npm run build`
+- 已新建运行包目录 `D:\zhilin_project\backups\deploy_bundle_20260509_143128\project-root`
+- 已将后台前端 `dist`、超级站前端 `ZL_Supersite/dist`、后端 `server/dist`、`server/node_modules`、`server/package.json`、`server/package-lock.json`、`server/.env.example`、`server/prisma/schema.prisma`、根目录 `docker-compose.yml` 与 `.env.example` 整理进运行包
+- 已按用户最新要求把部署根目录统一改为 `/data/ai-superweb`
+- 已将 `docs/ubuntu-install-and-deploy-with-test-data.md` 重写为“运行包部署”版本：改为上传运行包、上传现有 `backups`、恢复 SQL/Redis/MinIO、配置 `.env`、PM2 启后端、Nginx 挂双前端
+- 已执行文档 `GetDiagnostics`，结果为 `0`
+- 已恢复规划文件并确认新任务：继续排查“更新包后服务器前台卡在 CHILINTECH 加载层”
+- 已确认超级站前台启动链路此前依赖外部 CDN 脚本，具备明显的服务器网络敏感性
+- 已下载本地脚本到 `D:\zhilin_project\ZL_Supersite\public\vendor\{gsap.min.js,ScrollTrigger.min.js,lenis.min.js,p5.min.js}`
+- 已修改 `LegacyHomePage.tsx`：脚本引用改为本地 `/vendor/*`，并增加 8 秒超时与失败时强制隐藏 `.page-loader` 兜底
+- 已修改 `ZL_Supersite/public/legacy-home.html`，同步改为本地 `vendor` 脚本，避免静态入口继续依赖外部 CDN
+- 已执行 `GetDiagnostics`，`LegacyHomePage.tsx / public/legacy-home.html` 诊断为 `0`
+- 已执行 `ZL_Supersite npm run build`，新产物为 `dist/assets/index-BECH69d4.js`
+
+## 2026-05-11
+- 已继续收口当前阶段，重新核对 `task_plan.md / progress.md / findings.md` 与工作区未提交差异
+- 已确认本轮关键改动文件编辑器诊断均为 `0`，覆盖后台前端、后端发布链路、超级站前台脚本与资源落地相关文件
+- 已重新执行最小验证：根仓库前端 `npm run check`、后端 `server npm run build`、超级站前端 `ZL_Supersite npm run check`，命令退出码均为 `0`
+- 已修正 `task_plan.md` 中阶段 `129` 状态残留为 `in_progress` 的记录错误，并补记当前阶段复核完成
+- 已恢复规划文件并确认新任务：为服务器补 `Xvfb + PM2` 正式部署方案，解决平台登录依赖可视浏览器的问题
+- 已确认现有 Ubuntu 运行包部署文档只覆盖 `pm2 start dist/main.js`，尚未包含 `Xvfb`、Chrome 安装和虚拟显示启动
+- 已新增 `scripts/install-ubuntu-xvfb-browser.sh`，用于在 Ubuntu 服务器安装 `Xvfb` 与 `google-chrome`
+- 已新增 `scripts/start-server-with-xvfb.sh`，用于先拉起 `Xvfb :99`、导出 `DISPLAY`，再启动 `server/dist/main.js`
+- 已将 `docs/ubuntu-install-and-deploy-with-test-data.md` 改为 `Xvfb + PM2` 部署方式，并补 `server/.env` 中的浏览器相关变量
+- 已将最新 `server/dist`、`server/.env.example`、`scripts/*.sh` 与部署文档同步到 `backups/deploy_bundle_20260509_143128/project-root`
+- 已核对运行包内编译产物，确认已包含系统 `ffmpeg/ffprobe` 优先与托管浏览器无显示环境处理逻辑
+- [2026-05-11 21:01:54] 已确认平台登录线上问题根因不只是服务器环境，而是现有实现把登录动作绑定在服务端浏览器。
+- [2026-05-11 21:01:54] 已将 src/pages/PublishingPlatformLogin.tsx 改为“本机浏览器登录 + 当前页粘贴 Cookie/Token + 复用现有 create/update/validate 接口保存”。
+- [2026-05-11 21:01:54] 已执行 GetDiagnostics 与前端 
+pm run check，结果均通过。
+- [2026-05-11 21:13:07] 已确认仓库内暂无现成浏览器扩展实现；当前后端可复用平台账号保存接口，但缺扩展专用上传入口与扩展鉴权。
+- [2026-05-11 21:34:07] 已完成浏览器扩展自动回传方案首版：新增后端扩展登录会话接口、扩展同步接口、MV3 扩展目录和平台登录页扩展桥接。
+- [2026-05-11 21:34:07] 已保留原有平台登录页面 UI，点击哪个平台就打开哪个平台官网登录页；登录完成后扩展会自动回传 Cookie 并更新页面账号状态。
+- [2026-05-11 21:34:07] 已执行前端诊断、后端诊断、前端构建、后端构建，结果均通过。
+- [2026-05-11 22:04:29] 已把 4 平台账号识别规则接入扩展 content script，并在 background 回传时连同 Cookie 一并提交后端保存。
+- [2026-05-11 22:04:29] 已执行前端构建与后端构建，结果均通过。
+- [2026-05-12 00:15:08] 已核对 4 平台自动发布主链路，确认发布任务创建后会真实调用 `PlatformLoginBrowserService.publish()` 并进入各平台脚本。
+- [2026-05-12 00:15:08] 已定位当前抖音一键发布的核心断点：扩展登录账号只有 Cookie，没有 `browserSessionPath`；而自动发布此前未把 Cookie 注入 Playwright 浏览器上下文。
+- [2026-05-12 00:15:08] 已将自动发布改为发布前优先把平台账号 Cookie 注入浏览器上下文，并补查询字段 `authType / authPayloadEncrypted`。
+- [2026-05-12 00:15:08] 已执行 `GetDiagnostics` 与后端 `npm run build`，结果通过。
+- [2026-05-12 00:15:08] 已手动重启本地后端并确认 `http://127.0.0.1:3001/api/health` 返回 `{\"status\":\"ok\"}`。
+- [2026-05-12 12:19:00] 已恢复规划文件并确认需求变更：一键发布应改为“前端发起 + 浏览器扩展在用户自己桌面已登录浏览器执行”，且发布步骤尽量沿用以前 4 平台既有逻辑。
+- [2026-05-12 12:19:00] 已确认现状：前端一键发布入口仍只调用后端 `publishLeadContent()`；扩展只有登录回传能力；旧发布步骤仍集中在后端 `platform-login-browser.service.ts`。
+- [2026-05-12 12:19:00] 规划辅助脚本在当前环境路径缺失，已继续沿用仓库内 `task_plan.md / findings.md / progress.md` 手工维护本轮任务。
+- [2026-05-12 13:08:00] 已完成后端本地扩展发布接口骨架：新增 `extension/publish-jobs/start` 与 `extension/publish-jobs/sync`，并为内容发布接口增加 `executionMode=extension`。
+- [2026-05-12 13:08:00] 已完成前端一键发布默认切到扩展执行：发布前先检测扩展，创建任务后逐个启动本地发布会话。
+- [2026-05-12 13:08:00] 已完成扩展首版本地发布链路：新增 `publish-automation.js`，`background.js` 可打开平台发布页并向 `content.js` 下发执行命令，执行结果会回传后端发布记录。
+- [2026-05-12 13:08:00] 已执行前端 `npm run check` 与后端 `server npm run build`，结果通过。
+- [2026-05-12 13:32:00] 已恢复规划文件并确认新任务：按用户提供的真实页面步骤重写快手发布链路，统一从 `https://cp.kuaishou.com/profile` 进入。
+- [2026-05-12 13:32:00] 已确认扩展本地发布和后端备用 Playwright 快手链路此前都仍指向旧的 `/article/publish/video` 页面，且未按“标题 -> 回车 -> 文案 -> 回车 -> 逐个标签候选点击”的顺序执行。
+- [2026-05-12 13:32:00] 已完成快手链路改造：扩展 `background.js / publish-automation.js` 与后端 `platform-login-browser.service.ts` 均改为进入 `/profile`，再按“发布图文/发布视频卡片 -> 上传按钮 -> 描述区 -> 标签候选 -> 发布”执行。
+- [2026-05-12 13:32:00] 已按用户补充要求把快手关键点击改为慢速模拟鼠标点击，不再使用过快的直接点击节奏。
+- [2026-05-12 13:32:00] 已执行 `GetDiagnostics`，扩展脚本与后端发布相关文件诊断均为 0。
+- [2026-05-12 13:32:00] 已执行后端定向测试 `npm test -- modules/publishing/platform-login-browser.service.spec.ts modules/publishing/publishing.service.spec.ts --runInBand`，30 项全部通过。
+- [2026-05-15 00:00:00] 已恢复规划文件并确认新任务：盘点 `origin/main` 相对当前本地 `master` 的文件级差异，并评估如何安全合入当前工作区。
+- [2026-05-15 00:00:00] 已确认当前本地 `git pull` 仅同步 `origin/master`，结果为 `Already up to date`；远端最近持续更新的是 `origin/main`。
+- [2026-05-15 00:00:00] 已完成差异盘点：`origin/main` 更新主要集中在部署脚本、AI 视频流程、超级站前台、文档，以及部分发布与登录页面。
+- [2026-05-15 00:00:00] 已完成重叠文件识别：当前本地未提交改动与 `origin/main` 重叠文件主要集中在 `server/src/modules/publishing/*`、`src/lib/publishing.ts`、`src/pages/Publishing*.tsx`、`src/pages/StudioDrafts.tsx`。
+- [2026-05-15 00:00:00] 当前正在整理按模块的安全合并建议，优先区分“可直接拿 main”与“必须人工合并”的文件。
+- [2026-05-18 00:00:00] 已恢复规划文件并确认新任务：将“社媒图文生成”和“商品图与详情图生成”的编辑模块改成参考图那种顶部编辑、底部结果的工作台结构。
+- [2026-05-18 00:00:00] 已完成现状确认：`Studio.tsx` 和 `StudioImages.tsx` 当前都是左编辑右结果，且都内置重复的 `SectionBlock / ModelStatusCard / GeneratingPreviewState`。
+- [2026-05-18 00:00:00] 已确认本轮边界：不改用户明确排除的平台参数、图文/视频生成类型参数，只重做编辑模块 UI、交互层次和结果区布局。
+- [2026-05-18 00:00:00] 下一步开始抽公共编辑壳层并分别落到两个页面。
+- [2026-05-22 00:00:00] 已恢复规划文件并确认新任务：将“图文视频设置”改为“图片视频设置”，并把超级站首页图片/视频配置从前台弹出替换模式改为后台页面内直接设置。
+- [2026-05-22 00:00:00] 已完成现状排查：后台 layout 页目前只维护 `superSiteBaseUrl`；首页图片部分已接 `siteImageSlots`，视频尚无独立配置字段，滚动图片区仍是静态 HTML 图片。
+- [2026-05-22 00:00:00] 下一步将补超级站配置字段、后台设置表单，以及前台首页读取新配置的运行时替换逻辑。
+- [2026-05-28 18:00:00] 已恢复规划文件并确认本轮新任务：只处理 `background -> tab/document` 生命周期和发消息时机，不改发布业务步骤。
+- [2026-05-28 18:00:00] 已定位 `Receiving end does not exist` 的高概率根因：tab 导航后上下文重建窗口里 `dispatchRuntimeCommandToTab()` 过早发消息。
+- [2026-05-28 18:00:00] 已在 `scripts/browser-extension/platform-login-helper/background.js` 增加 tab 生命周期跟踪、导航时 runtime ready 重置、以及 `page-ready + 短暂稳定窗口` 后再允许发布命令下发。
+- [2026-05-28 18:00:00] 已执行 `GetDiagnostics`，`background.js` 诊断为 0。
+- [2026-05-29 00:00:00] 已恢复规划文件并确认新任务：输出一版“后台每个模块的用户操作手册”。
+- [2026-05-29 00:00:00] 已确认后台主模块应以 `src/App.tsx` 路由和导航文案为准，而不是按后端 controller 直接组织。
+- [2026-05-29 00:00:00] 已完成首轮页面梳理：`仪表盘 / 图片文案生成 / AI获客 / 产品管理 / 知识库管理 / 客户管理 / 视频生成 / AI客服 / 超级站配置中心 / 模型配置 / 审核中心 / 用户角色权限`。
+- [2026-05-29 00:00:00] 已完成文档 `docs/backend-module-user-manual.md`，覆盖角色说明、模块入口、典型操作步骤、常见使用顺序与常见问题。
+- [2026-05-29 00:00:00] 已执行文档诊断，结果为 `0`，并核对文件真实存在于 `docs/` 目录。
+- [2026-05-29 00:00:00] 已恢复规划文件并确认新任务：把发布链路彻底切到“一个平台账号独享一个 BitBrowser 窗口/profile”。
+- [2026-05-29 00:00:00] 已确认主 bug：`startPublishRuntime()` 虽传入 `platformAccountId`，但底层 `prepareOwnerRuntime()` 查专属 binding 时错误使用本地 `platformAccounts.id(account_*)`，导致发布 runtime 回落到 owner 共享 profile。
+- [2026-05-29 00:00:00] 已确认当前专属 binding 还可能与共享 binding 共用同一个底层 `profileId`，这会让“专属绑定”名义成立但窗口仍不独立。
+- [2026-05-29 00:00:00] 已在 `server/src/modules/publishing/publishing-bitbrowser.service.ts` 增加发布前专属 profile 保障：若当前平台账号尚无真实独立 profile，或专属 binding 仍指向共享 `profileId`，则发布前自动新建独立 profile 并重绑平台账号。
+- [2026-05-29 00:00:00] 已在 `server/src/modules/bitbrowser/bitbrowser.service.ts` 修正 runtime 选 binding 口径：改为按平台账号真实 `accountId(cmp*)` 查专属 binding，并禁止 `publish` 场景静默回退到 owner 共享 profile。
+- [2026-05-29 00:00:00] 已执行 `GetDiagnostics`，`publishing-bitbrowser.service.ts / bitbrowser.service.ts` 诊断均为 `0`。
+- [2026-05-29 00:00:00] 已执行后端 `npm run build`，构建通过。
+- [2026-05-29 00:00:00] 已继续按用户要求清理“共享窗口”残留：`publishing-bitbrowser.service.ts` 中专属 profile 创建不再依赖 owner 共享 binding，账号绑定时也不再尝试回落共享 binding。
+- [2026-05-29 00:00:00] 已在 `server/src/modules/bitbrowser/bitbrowser.service.ts` 收紧 runtime 解析：凡是带 `platformAccountId` 的登录/发布 runtime，都只允许使用账号专属 binding，不再因 `login` 场景回退 owner 共享 binding。
+- [2026-05-29 00:00:00] 已在 `scripts/browser-extension/platform-login-helper/content.js` 修正抖音头像提取：新增资料块作用域取图逻辑，只从当前抖音号/昵称附近容器查头像，不再全页拿第一个头像图。
+- [2026-05-29 00:00:00] 已执行 `GetDiagnostics`，`publishing-bitbrowser.service.ts / bitbrowser.service.ts / content.js` 诊断均为 `0`。
+- [2026-05-29 00:00:00] 已再次执行后端 `npm run build`，构建通过。
+- [2026-05-29 00:00:00] 已继续修正专属窗口命名：登录成功后的 `renameDedicatedProfile()` 现优先使用 `displayName`，不再优先用平台账号 ID 类 `accountName` 命名。
+- [2026-05-29 00:00:00] 已修正重命名目标定位：带 `platformAccountId` 时优先按专属 binding 查目标 profile，不再先按 owner 绑定查找。
+- [2026-05-29 00:00:00] 已对 `publishing.service.ts / publishing-bitbrowser.service.ts` 执行 `GetDiagnostics` 与后端 `npm run build`，结果通过。
+- [2026-05-29 00:00:00] 已恢复规划文件并确认新任务：彻底清理共享窗口功能，统一收口到“1个平台账号 = 1个独立 BitBrowser profile/window”。
+- [2026-05-29 00:00:00] 已移除共享 profile 对外入口：删除 `/api/bitbrowser/profiles` 桥接路由和对应 controller/http-api 暴露，不再保留共享窗口创建接口。
+- [2026-05-29 00:00:00] 已将 `bitbrowser` 主链路收口为账号专属 profile：runtime 现在强制要求 `platformAccountId`，不再允许 owner 级共享 binding 参与登录/发布。
+- [2026-05-29 00:00:00] 已将 `publishing-bitbrowser.service.ts` 删除账号的清理逻辑改为仅清当前 `profileId` 对应资源，不再按 owner 整组清理，避免误伤同组其他平台账号。
+- [2026-05-29 00:00:00] 已同步清理平台登录页共享环境文案，统一改成“账号专属 profile”表述。
+- [2026-05-29 00:00:00] 已执行 `GetDiagnostics`，`bitbrowser.service.ts / publishing-bitbrowser.service.ts / bitbrowser.bootstrap.ts / PublishingPlatformLogin.tsx` 诊断均为 `0`。
+- [2026-05-29 00:00:00] 已执行后端 `npm run build` 与前端 `npm run check`，结果均通过。
+- [2026-05-29 00:00:00] 已继续按用户要求彻底删除底层 shared 兼容结构：移除 `shared_by_owner` 类型定义、`getProfileBindingByOwnerId()` 仓储接口与实现、owner 级锁回退逻辑。
+- [2026-05-29 00:00:00] 已同步收窄 `bitbrowser.memory-store.ts / bitbrowser.file-store.ts` 的 bindingMode 生成逻辑，现统一只保留 `dedicated_by_account`。
+- [2026-05-29 00:00:00] 已再次执行共享残留搜索，`server/src` 中已搜不到 `shared_by_owner / getProfileBindingByOwnerId / PROFILE_BINDING_MODE_SHARED_BY_OWNER`。
+- [2026-05-29 00:00:00] 已再次执行后端 `npm run build` 与前端 `npm run check`，结果均通过。
+- [2026-05-29 00:00:00] 已定位“视频号未进入平台列表”问题：根因不在前端筛选，而在后端与扩展侧对 `wechat_mp` 身份文本的清洗过严。
+- [2026-05-29 00:00:00] 已修改 `server/src/modules/publishing/publishing.service.ts`，视频号账号文本会先剥离 `视频号ID / 视频号名称 / 微信视频号` 前缀，再进行关键字过滤。
+- [2026-05-29 00:00:00] 已修改 `scripts/browser-extension/platform-login-helper/content.js`，视频号资料提取与平台标签判定共享同一套前缀剥离逻辑。
+- [2026-05-29 00:00:00] 已新增 `publishing.service.spec.ts` 中的视频号回归测试，定向 `Wechat Channels` 测试通过。
+- [2026-05-29 00:00:00] 已执行后端 `npm run build`，结果通过；全量 `publishing.service.spec.ts` 仍有 2 条历史失败用例，与本次修复无关。
+- [2026-05-30 00:00:00] 已恢复规划文件并确认新任务：按抖音修复思路处理视频号发布，先补链路埋点，再修复编辑页恢复与自打断问题。
+- [2026-05-30 00:00:00] 已确认关键根因：视频号真实编辑页是 `https://channels.weixin.qq.com/platform/post/finderNewLifeCreate`，旧恢复逻辑仅识别 `platform/post/create`。
+- [2026-05-30 00:00:00] 已修改 `scripts/browser-extension/platform-login-helper/content.js`，允许 `finderNewLifeCreate` 作为视频号待发布恢复页继续执行。
+- [2026-05-30 00:00:00] 已修改 `scripts/browser-extension/platform-login-helper/publish-automation.js`，视频号当前若已在编辑页则直接续跑，不再强制跳回 `platform` 重走首页入口。
+- [2026-05-30 00:00:00] 已给视频号链路补埋点：覆盖入口点击、编辑页识别、上传后、提交前后等关键步骤。
+- [2026-05-30 00:00:00] 已执行 `GetDiagnostics`，`content.js / publish-automation.js` 诊断均为 `0`；并已核对两个目标文件真实存在于仓库内。
+- [2026-05-30 00:00:00] 已恢复规划文件并确认新任务：按用户指定步骤把视频号图文入口改为 `platform -> 最近图文 -> 发表图文 -> 编辑页`，再执行上传与填写。
+- [2026-05-30 00:00:00] 已确认 `publish-automation.js` 现状：`publishWechatMp()` 仍直达 `platform/post/create`，但文件内已存在 `openWechatMpRecentEntry()` 与 `ensureWechatMpPublishReady()` 可复用。
+- [2026-05-30 00:00:00] 已完成入口改造：`publishWechatMp()` 改为先进入 `https://channels.weixin.qq.com/platform`，再调用 `ensureWechatMpPublishReady(isVideo)` 进入编辑页。
+- [2026-05-30 00:00:00] 已同步收紧步骤顺序：`openWechatMpRecentEntry()` 现优先点击“最近图文/最近视频”，之后再点“发表图文/发表视频”。
+- [2026-05-30 00:00:00] 已执行 `GetDiagnostics`，`publish-automation.js` 诊断为 `0`；并已核对目标文件真实存在于仓库内。

@@ -54,12 +54,11 @@ html.light {
   --topbar-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.03);
   --panel-muted-bg: rgba(15, 23, 42, 0.03);
   
-  /* All buttons in light mode must look bold with white text */
-  --button-secondary-bg: #1e293b;
-  --button-secondary-border: #0f172a;
-  --button-secondary-text: #ffffff;
-  --button-ghost-bg: rgba(15, 23, 42, 0.75);
-  --button-ghost-text: #ffffff;
+  --button-secondary-bg: rgba(255, 255, 255, 0.92);
+  --button-secondary-border: rgba(15, 23, 42, 0.12);
+  --button-secondary-text: #0f172a;
+  --button-ghost-bg: rgba(15, 23, 42, 0.06);
+  --button-ghost-text: #0f172a;
 }
 
 html,
@@ -157,6 +156,7 @@ html.light .hover\:text-zinc-200:hover {
 html.light .bg-\[\#0b1220\]\/90,
 html.light .bg-\[\#091224\],
 html.light .bg-\[\#08111f\],
+html.light .bg-\[\#111d31\],
 html.light .bg-\[\#1a2235\],
 html.light .bg-\[\#1f1f22\],
 html.light .bg-\[\#121826\] {
@@ -189,12 +189,6 @@ html.light .bg-red-800 {
 }
 html.light .bg-orange-600 {
   background-color: #f97316 !important;
-  color: #ffffff !important;
-}
-
-/* Universal Button Overrides in Light Mode */
-/* If a button contains dark text natively but should be white because of our theme rule */
-html.light button.bg-cyan-500 {
   color: #ffffff !important;
 }
 

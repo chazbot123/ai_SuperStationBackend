@@ -70,6 +70,25 @@ function normalizePlatform(platform) {
   return normalized;
 }
 
+function getTokenFingerprint(token) {
+  const rawToken = String(token || "");
+  const trimmedToken = rawToken.trim();
+  if (!trimmedToken) {
+    return {
+      rawLength: rawToken.length,
+      trimmedLength: 0,
+      hasOuterWhitespace: rawToken.length > 0,
+      preview: "",
+    };
+  }
+  return {
+    rawLength: rawToken.length,
+    trimmedLength: trimmedToken.length,
+    hasOuterWhitespace: rawToken.length !== trimmedToken.length,
+    preview: `${trimmedToken.slice(0, 6)}...${trimmedToken.slice(-6)}`,
+  };
+}
+
 function normalizeRuntimeAwareUrl(url) {
   const rawValue = String(url || "").trim();
   if (!rawValue) {
@@ -172,10 +191,12 @@ function resetRuntimeSessionReadyState(session, nextUrl = "") {
     session.pageUrl = nextUrl;
   }
   const pendingCommandType = String(session.pendingCommand?.type || "").trim();
-  const publishCommandActive = ["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(pendingCommandType);
+  const commandNeedsReadyState = ["PUBLISH_PREPARE", "PUBLISH_EXECUTE", "KEEPALIVE_COLLECT"].includes(
+    pendingCommandType,
+  );
   if (
     session.pendingCommand &&
-    publishCommandActive &&
+    commandNeedsReadyState &&
     !session.commandAcked
   ) {
     session.pendingCommand.dispatched = false;
@@ -316,6 +337,82 @@ function buildRuntimePublishDispatchSession(runtimeSessionId, runtimeCommand, pl
   };
 }
 
+function shouldInjectPublishCookies(payload) {
+  return Boolean(payload && typeof payload === "object" && payload.shouldInjectCookies === true);
+}
+
+async function prepareRuntimePublishCookies(runtimeSession, pendingCommand) {
+  const payload =
+    pendingCommand?.payload && typeof pendingCommand.payload === "object"
+      ? pendingCommand.payload
+      : {};
+  const platform = normalizePlatform(payload.platform || runtimeSession?.platform);
+  const job = payload.job && typeof payload.job === "object" ? payload.job : null;
+  const apiBaseUrl =
+    String(payload.apiBaseUrl || runtimeSession?.apiBaseUrl || defaultBitBrowserApiBaseUrl).trim() ||
+    defaultBitBrowserApiBaseUrl;
+  const sessionToken = String(payload.sessionToken || "").trim();
+  const accountCookiePayload = String(payload.accountCookiePayload || "").trim();
+  let accountAuthPayload = String(payload.accountAuthPayload || "").trim();
+  const shouldInjectCookies = shouldInjectPublishCookies(payload);
+
+  reportPublishRuntimeDebug(
+    "H4",
+    "scripts/browser-extension/platform-login-helper/background.js:prepareRuntimePublishCookies:start",
+    {
+      runtimeSessionId: String(runtimeSession?.runtimeSessionId || ""),
+      runtimeCommandId: String(pendingCommand?.id || ""),
+      platform,
+      pageUrl: String(runtimeSession?.pageUrl || ""),
+      hasAccountCookiePayload: Boolean(accountCookiePayload),
+      hasAccountAuthPayload: Boolean(accountAuthPayload),
+      shouldInjectCookies,
+      sessionTokenLength: sessionToken.length,
+    },
+  );
+
+  if (!shouldInjectCookies) {
+    reportPublishRuntimeDebug(
+      "H4",
+      "scripts/browser-extension/platform-login-helper/background.js:prepareRuntimePublishCookies:skipped",
+      {
+        runtimeSessionId: String(runtimeSession?.runtimeSessionId || ""),
+        runtimeCommandId: String(pendingCommand?.id || ""),
+        platform,
+        pageUrl: String(runtimeSession?.pageUrl || ""),
+      },
+    );
+    return;
+  }
+
+  if (!accountAuthPayload) {
+    accountAuthPayload = await resolveExtensionPublishAuthPayload(apiBaseUrl, {
+      sessionToken,
+      accountAuthPayload,
+    });
+  }
+
+  await clearPlatformCookies(platform);
+  if (accountCookiePayload) {
+    await applyPlatformCookiePayload(platform, accountCookiePayload, job);
+  } else {
+    await applyPlatformAuthPayload(platform, accountAuthPayload, job);
+  }
+
+  reportPublishRuntimeDebug(
+    "H4",
+    "scripts/browser-extension/platform-login-helper/background.js:prepareRuntimePublishCookies:done",
+    {
+      runtimeSessionId: String(runtimeSession?.runtimeSessionId || ""),
+      runtimeCommandId: String(pendingCommand?.id || ""),
+      platform,
+      usedCookiePayload: Boolean(accountCookiePayload),
+      usedAuthPayload: Boolean(accountAuthPayload),
+      pageUrl: String(runtimeSession?.pageUrl || ""),
+    },
+  );
+}
+
 function buildRuntimeLoginDispatchSession(
   runtimeSessionId,
   runtimeCommand,
@@ -355,6 +452,20 @@ async function ackRuntimeCommand(session) {
   if (!session?.pendingCommandId || session.commandAcked) {
     return;
   }
+  if (String(session?.pendingCommand?.type || "") === "KEEPALIVE_COLLECT") {
+    // #region debug-point K5:keepalive-command-ack
+    reportRuntimeDebug(
+      "K5",
+      "scripts/browser-extension/platform-login-helper/background.js:ackRuntimeCommand:KEEPALIVE_COLLECT",
+      {
+        runtimeSessionId: String(session.runtimeSessionId || ""),
+        runtimeCommandId: String(session.pendingCommandId || ""),
+        tabId: session.tabId,
+        pageUrl: String(session.pageUrl || ""),
+      },
+    );
+    // #endregion
+  }
   await postBitBrowserApi(session.apiBaseUrl, "/api/bitbrowser/extension/ack-command", {
     runtimeSessionId: session.runtimeSessionId,
     runtimeCommandId: session.pendingCommandId,
@@ -365,6 +476,21 @@ async function ackRuntimeCommand(session) {
 async function completeRuntimeCommand(session, resultPayload) {
   if (!session?.pendingCommandId) {
     return;
+  }
+  if (String(session?.pendingCommand?.type || "") === "KEEPALIVE_COLLECT") {
+    // #region debug-point K6:keepalive-command-complete
+    reportRuntimeDebug(
+      "K6",
+      "scripts/browser-extension/platform-login-helper/background.js:completeRuntimeCommand:KEEPALIVE_COLLECT",
+      {
+        runtimeSessionId: String(session.runtimeSessionId || ""),
+        runtimeCommandId: String(session.pendingCommandId || ""),
+        hasAuthPayload: Boolean(String(resultPayload?.authPayload || "").trim()),
+        hasCookiePayload: Boolean(String(resultPayload?.cookiePayload || "").trim()),
+        sourceUrl: String(resultPayload?.sourceUrl || ""),
+      },
+    );
+    // #endregion
   }
   await postBitBrowserApi(session.apiBaseUrl, "/api/bitbrowser/extension/complete-command", {
     runtimeSessionId: session.runtimeSessionId,
@@ -380,6 +506,20 @@ async function failRuntimeCommand(session, errorMessage) {
   if (!session?.pendingCommandId) {
     return;
   }
+  if (String(session?.pendingCommand?.type || "") === "KEEPALIVE_COLLECT") {
+    // #region debug-point K7:keepalive-command-fail
+    reportRuntimeDebug(
+      "K7",
+      "scripts/browser-extension/platform-login-helper/background.js:failRuntimeCommand:KEEPALIVE_COLLECT",
+      {
+        runtimeSessionId: String(session.runtimeSessionId || ""),
+        runtimeCommandId: String(session.pendingCommandId || ""),
+        errorMessage: String(errorMessage || ""),
+        pageUrl: String(session.pageUrl || ""),
+      },
+    );
+    // #endregion
+  }
   await postBitBrowserApi(session.apiBaseUrl, "/api/bitbrowser/extension/fail-command", {
     runtimeSessionId: session.runtimeSessionId,
     runtimeCommandId: session.pendingCommandId,
@@ -388,6 +528,38 @@ async function failRuntimeCommand(session, errorMessage) {
   session.pendingCommand = null;
   session.pendingCommandId = "";
   session.commandAcked = false;
+}
+
+async function collectRuntimeKeepAliveCookies(session, pendingCommand) {
+  const payload =
+    pendingCommand?.payload && typeof pendingCommand.payload === "object"
+      ? pendingCommand.payload
+      : {};
+  const platform = normalizePlatform(payload.platform || session?.platform);
+  if (!platform) {
+    throw new Error("保活采集缺少平台信息");
+  }
+  const currentTab = await getAliveTab(session.tabId);
+  // #region debug-point K8:keepalive-collect-start
+  reportRuntimeDebug(
+    "K8",
+    "scripts/browser-extension/platform-login-helper/background.js:collectRuntimeKeepAliveCookies:start",
+    {
+      runtimeSessionId: String(session.runtimeSessionId || ""),
+      runtimeCommandId: String(session.pendingCommandId || ""),
+      platform,
+      tabId: session.tabId,
+      pageUrl: String(currentTab?.url || session?.pageUrl || ""),
+    },
+  );
+  // #endregion
+  const authPayload = await collectPlatformCookies(platform);
+  const cookiePayload = await collectPlatformCookiePayload(platform);
+  await completeRuntimeCommand(session, {
+    authPayload,
+    cookiePayload,
+    sourceUrl: String(currentTab?.url || session?.pageUrl || "").trim() || "",
+  });
 }
 
 async function dispatchRuntimeCommandToTab(session, tabId) {
@@ -411,10 +583,55 @@ async function dispatchRuntimeCommandToTab(session, tabId) {
       session.apiBaseUrl,
       tabId,
     );
+    completeOtherLoginSessions(loginSession.platform, loginSession.sessionId);
     activeLoginSessions.set(loginSession.sessionId, loginSession);
+    if (loginSession.platform === "xiaohongshu") {
+      const tokenFingerprint = getTokenFingerprint(loginSession.sessionToken);
+      fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: "xiaohongshu-login-recognition",
+          runId: "pre-fix",
+          hypothesisId: "H2",
+          location: "scripts/browser-extension/platform-login-helper/background.js:dispatchRuntimeCommandToTab:login-session-created",
+          msg: "[DEBUG] xiaohongshu login session created from runtime command",
+          data: {
+            sessionId: loginSession.sessionId,
+            runtimeSessionId: loginSession.runtimeSessionId || "",
+            loginTabId: Number(loginSession.loginTabId || 0),
+            appTabId: Number(loginSession.appTabId || 0),
+            tokenRawLength: tokenFingerprint.rawLength,
+            tokenTrimmedLength: tokenFingerprint.trimmedLength,
+            tokenHasOuterWhitespace: tokenFingerprint.hasOuterWhitespace,
+            tokenPreview: tokenFingerprint.preview,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => {});
+    }
     pendingCommand.dispatched = true;
     // Keep LOGIN_EXECUTE unacked until syncLoginResult completes successfully.
     // If the extension reloads mid-login, the runtime can still pull the command again.
+    return;
+  }
+
+  if (pendingCommandType === "KEEPALIVE_COLLECT") {
+    // #region debug-point K9:keepalive-command-dispatch
+    reportRuntimeDebug(
+      "K9",
+      "scripts/browser-extension/platform-login-helper/background.js:dispatchRuntimeCommandToTab:KEEPALIVE_COLLECT",
+      {
+        runtimeSessionId: String(session.runtimeSessionId || ""),
+        runtimeCommandId: String(pendingCommand.id || ""),
+        tabId,
+        pageUrl: String(session.pageUrl || ""),
+        commandAcked: Boolean(session.commandAcked),
+      },
+    );
+    // #endregion
+    pendingCommand.dispatched = true;
+    await ackRuntimeCommand(session);
+    await collectRuntimeKeepAliveCookies(session, pendingCommand);
     return;
   }
 
@@ -431,6 +648,8 @@ async function dispatchRuntimeCommandToTab(session, tabId) {
     pendingCommand,
     session.platform,
   );
+
+  await prepareRuntimePublishCookies(session, pendingCommand);
 
   chrome.tabs.sendMessage(
     tabId,
@@ -507,7 +726,7 @@ async function ensureRuntimeCommandDispatched(session) {
     return;
   }
 
-  if (["PUBLISH_PREPARE", "PUBLISH_EXECUTE"].includes(pendingCommandType)) {
+  if (["PUBLISH_PREPARE", "PUBLISH_EXECUTE", "KEEPALIVE_COLLECT"].includes(pendingCommandType)) {
     const readyForDispatch = await isRuntimeSessionReadyForDispatch(session);
     if (!readyForDispatch) {
       return;
@@ -524,10 +743,23 @@ async function applyRuntimeCommand(session, runtimeCommand) {
       : {};
   const targetUrl = resolveRuntimeTargetUrl(session.platform, payload);
   const runtimeCommandType = String(runtimeCommand?.type || "").trim();
+  const shouldInjectCookies = shouldInjectPublishCookies(payload);
 
-  if (payload.accountAuthPayload) {
+  if (shouldInjectCookies && (payload.accountCookiePayload || payload.accountAuthPayload)) {
     await clearPlatformCookies(session.platform);
-    await applyPlatformAuthPayload(session.platform, payload.accountAuthPayload, payload.job || null);
+    if (payload.accountCookiePayload) {
+      await applyPlatformCookiePayload(
+        session.platform,
+        payload.accountCookiePayload,
+        payload.job || null,
+      );
+    } else {
+      await applyPlatformAuthPayload(
+        session.platform,
+        payload.accountAuthPayload,
+        payload.job || null,
+      );
+    }
   }
 
   session.pendingCommand = {
@@ -868,18 +1100,16 @@ async function collectPlatformCookiePayload(platform) {
     for (const cookie of cookies) {
       const key = `${cookie.storeId || ""}|${cookie.domain}|${cookie.path}|${cookie.name}`;
       if (!cookieMap.has(key)) {
+        const normalizedDomain = String(cookie.domain || "").trim();
         cookieMap.set(key, {
           name: cookie.name,
           value: cookie.value,
-          domain: cookie.domain,
+          domain: normalizedDomain ? "./" : "./",
           path: cookie.path || "/",
+          hostOnly: Boolean(cookie.hostOnly),
+          session: Boolean(cookie.session),
           secure: Boolean(cookie.secure),
           httpOnly: Boolean(cookie.httpOnly),
-          sameSite: cookie.sameSite || undefined,
-          expirationDate:
-            typeof cookie.expirationDate === "number" && Number.isFinite(cookie.expirationDate)
-              ? cookie.expirationDate
-              : undefined,
         });
       }
     }
@@ -1271,9 +1501,54 @@ async function syncLoginResult(session, context) {
       }),
     }).catch(() => {});
     // #endregion
+    if (session.platform === "xiaohongshu") {
+      // #region debug-point X2:xiaohongshu-sync-context
+      fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: "xiaohongshu-login-recognition",
+          runId: "pre-fix",
+          hypothesisId: "H2",
+          location: "scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:context",
+          msg: "[DEBUG] xiaohongshu syncLoginResult context",
+          data: {
+            sessionId: session.sessionId,
+            runtimeSessionId: session.runtimeSessionId || "",
+            sourceUrl,
+            accountName,
+            externalAccountId,
+            displayName,
+            avatarUrl,
+            followerCount,
+            hasResolvedProfile,
+            loginTabId: Number(session.loginTabId || 0),
+            appTabId: Number(session.appTabId || 0),
+            retryCount: Number(session.xiaohongshuIdentityRetryCount || 0),
+            apiBaseUrl: String(session.apiBaseUrl || ""),
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
     // #region debug-point H4:sync-login-start
     fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"multi-platform-login",runId:"pre-fix",hypothesisId:"H4",location:"scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:start",msg:"[DEBUG] syncLoginResult start",data:{platform:session.platform,sessionId:session.sessionId,runtimeSessionId:session.runtimeSessionId||"",accountName,externalAccountId,displayName,hasAvatar:Boolean(avatarUrl),followerCount,hasResolvedProfile,authPayloadLength:authPayload.length,sourceUrl},ts:Date.now()})}).catch(()=>{});
     // #endregion
+
+    if (
+      session.platform === "xiaohongshu" &&
+      !hasResolvedProfile &&
+      /creator\.xiaohongshu\.com\/login/i.test(sourceUrl)
+    ) {
+      const redirected = await retargetXiaohongshuLoginHome(
+        session,
+        "login-page-without-identity",
+        sourceUrl,
+      );
+      if (redirected) {
+        return;
+      }
+    }
 
     const shouldDeferWechatLoginSync =
       session.platform === "wechat_mp" &&
@@ -1281,6 +1556,30 @@ async function syncLoginResult(session, context) {
         /channels\.weixin\.qq\.com\/login(?:\.html)?/i.test(sourceUrl));
     if (shouldDeferWechatLoginSync) {
       return;
+    }
+
+    if (session.platform === "xiaohongshu") {
+      const tokenFingerprint = getTokenFingerprint(session.sessionToken);
+      fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: "xiaohongshu-login-recognition",
+          runId: "pre-fix",
+          hypothesisId: "H2",
+          location: "scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:request-token",
+          msg: "[DEBUG] xiaohongshu syncLoginResult request token",
+          data: {
+            sessionId: session.sessionId,
+            runtimeSessionId: session.runtimeSessionId || "",
+            sourceUrl,
+            tokenRawLength: tokenFingerprint.rawLength,
+            tokenTrimmedLength: tokenFingerprint.trimmedLength,
+            tokenHasOuterWhitespace: tokenFingerprint.hasOuterWhitespace,
+            tokenPreview: tokenFingerprint.preview,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => {});
     }
 
     const response = await fetch(`${session.apiBaseUrl}/api/publishing/platform-accounts/extension-login/sync`, {
@@ -1304,11 +1603,69 @@ async function syncLoginResult(session, context) {
     });
 
     const payload = await response.json().catch(() => null);
+    const responseMessage = String(payload?.message || "");
+    if (session.platform === "xiaohongshu") {
+      // #region debug-point X3:xiaohongshu-sync-response
+      fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: "xiaohongshu-login-recognition",
+          runId: "pre-fix",
+          hypothesisId: "H3",
+          location: "scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:response",
+          msg: "[DEBUG] xiaohongshu syncLoginResult response",
+          data: {
+            sessionId: session.sessionId,
+            runtimeSessionId: session.runtimeSessionId || "",
+            sourceUrl,
+            status: response.status,
+            ok: response.ok,
+            responseMessage,
+            responseAccountId: String(payload?.account?.id || ""),
+            responseAccountName: String(payload?.account?.accountName || ""),
+            responseDisplayName: String(payload?.account?.displayName || ""),
+            responseExternalAccountId: String(payload?.account?.externalAccountId || ""),
+            responseAvatarUrl: String(payload?.account?.avatarUrl || ""),
+            responseFollowerCount:
+              typeof payload?.account?.followerCount === "number" &&
+              Number.isFinite(payload.account.followerCount)
+                ? payload.account.followerCount
+                : null,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
     // #region debug-point H2:sync-login-response
-    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"multi-platform-login",runId:"pre-fix",hypothesisId:"H2",location:"scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:response",msg:"[DEBUG] syncLoginResult response",data:{platform:session.platform,sessionId:session.sessionId,status:response.status,ok:response.ok,accountId:String(payload?.account?.id||""),accountName:String(payload?.account?.accountName||""),message:String(payload?.message||"")},ts:Date.now()})}).catch(()=>{});
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"multi-platform-login",runId:"pre-fix",hypothesisId:"H2",location:"scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:response",msg:"[DEBUG] syncLoginResult response",data:{platform:session.platform,sessionId:session.sessionId,status:response.status,ok:response.ok,accountId:String(payload?.account?.id||""),accountName:String(payload?.account?.accountName||""),message:responseMessage},ts:Date.now()})}).catch(()=>{});
     // #endregion
     if (!response.ok) {
-      throw new Error(payload?.message || "扩展回传登录信息失败");
+      if (
+        /(扩展登录令牌无效或已过期|jwt expired|令牌无效|令牌已过期)/i.test(responseMessage)
+      ) {
+        session.status = "completed";
+        if (session.runtimeSessionId) {
+          activeRuntimeSessions.delete(session.runtimeSessionId);
+          session.runtimeSessionId = null;
+          session.runtimeCommandId = "";
+        }
+      }
+      if (
+        session.platform === "xiaohongshu" &&
+        !hasResolvedProfile &&
+        /(账号主页|后台首页|真实账号信息|真实小红书账号)/.test(responseMessage)
+      ) {
+        const redirected = await retargetXiaohongshuLoginHome(
+          session,
+          "server-rejected-identity",
+          sourceUrl,
+        );
+        if (redirected) {
+          return;
+        }
+      }
+      throw new Error(responseMessage || "扩展回传登录信息失败");
     }
 
     if (!session.accountId && String(payload?.account?.id || "").trim()) {
@@ -1318,7 +1675,39 @@ async function syncLoginResult(session, context) {
       payload?.account || null,
       session.platform,
     );
-    if (!hasResolvedProfile && !hasServerResolvedProfile) {
+    const allowWeakIdentityCompletion = false;
+    if (session.platform === "xiaohongshu") {
+      // #region debug-point X4:xiaohongshu-completion-gate
+      fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: "xiaohongshu-login-recognition",
+          runId: "pre-fix",
+          hypothesisId: "H4",
+          location: "scripts/browser-extension/platform-login-helper/background.js:syncLoginResult:completion-gate",
+          msg: "[DEBUG] xiaohongshu completion gate",
+          data: {
+            sessionId: session.sessionId,
+            runtimeSessionId: session.runtimeSessionId || "",
+            hasResolvedProfile,
+            hasServerResolvedProfile,
+            allowWeakIdentityCompletion,
+            responseAccountId: String(payload?.account?.id || ""),
+            responseAccountName: String(payload?.account?.accountName || ""),
+            responseDisplayName: String(payload?.account?.displayName || ""),
+            responseAvatarUrl: String(payload?.account?.avatarUrl || ""),
+            responseFollowerCount:
+              typeof payload?.account?.followerCount === "number" &&
+              Number.isFinite(payload.account.followerCount)
+                ? payload.account.followerCount
+                : null,
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
+    if (!hasResolvedProfile && !hasServerResolvedProfile && !allowWeakIdentityCompletion) {
       return;
     }
 
@@ -1391,13 +1780,59 @@ async function syncLoginResult(session, context) {
   }
 }
 
-function getActiveSessionByPlatform(platform) {
+function getActiveSessionByPlatform(platform, options = null) {
+  const normalizedPlatform = normalizePlatform(platform);
+  const expectedRuntimeSessionId = String(options?.runtimeSessionId || "").trim();
+  const expectedTabId =
+    Number.isInteger(options?.tabId) && options.tabId > 0 ? options.tabId : null;
+  let matchedByTab = null;
+  let latestMatchedSession = null;
   for (const session of activeLoginSessions.values()) {
-    if (session.platform === platform && session.status !== "completed") {
+    if (normalizePlatform(session.platform) !== normalizedPlatform || session.status === "completed") {
+      continue;
+    }
+    if (
+      expectedRuntimeSessionId &&
+      String(session.runtimeSessionId || "").trim() === expectedRuntimeSessionId
+    ) {
       return session;
     }
+    if (
+      expectedTabId &&
+      (Number(session.loginTabId || 0) === expectedTabId ||
+        Number(session.appTabId || 0) === expectedTabId)
+    ) {
+      matchedByTab = session;
+    }
+    latestMatchedSession = session;
   }
-  return null;
+  if (expectedRuntimeSessionId || expectedTabId) {
+    return matchedByTab || null;
+  }
+  return latestMatchedSession || null;
+}
+
+function completeOtherLoginSessions(platform, keepSessionId = "") {
+  const normalizedPlatform = normalizePlatform(platform);
+  const normalizedKeepSessionId = String(keepSessionId || "").trim();
+  for (const session of activeLoginSessions.values()) {
+    if (normalizePlatform(session.platform) !== normalizedPlatform) {
+      continue;
+    }
+    if (session.status === "completed") {
+      continue;
+    }
+    if (normalizedKeepSessionId && session.sessionId === normalizedKeepSessionId) {
+      continue;
+    }
+    session.status = "completed";
+    session.pendingSyncContext = null;
+    if (session.runtimeSessionId) {
+      activeRuntimeSessions.delete(session.runtimeSessionId);
+      session.runtimeSessionId = null;
+      session.runtimeCommandId = "";
+    }
+  }
 }
 
 function hasMeaningfulResolvedIdentity(account, platform) {
@@ -1422,6 +1857,50 @@ function hasMeaningfulResolvedIdentity(account, platform) {
       avatarUrl ||
       followerCount !== null,
   );
+}
+
+async function retargetXiaohongshuLoginHome(session, reason, sourceUrl = "") {
+  if (normalizePlatform(session?.platform) !== "xiaohongshu") {
+    return false;
+  }
+  const retryCount = Number(session?.xiaohongshuIdentityRetryCount || 0);
+  if (!Number.isFinite(retryCount) || retryCount >= 2) {
+    return false;
+  }
+  const targetTabId =
+    Number.isInteger(session?.loginTabId) && session.loginTabId > 0
+      ? session.loginTabId
+      : Number.isInteger(session?.appTabId) && session.appTabId > 0
+        ? session.appTabId
+        : null;
+  if (!targetTabId) {
+    return false;
+  }
+  session.xiaohongshuIdentityRetryCount = retryCount + 1;
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: "multi-platform-login",
+      runId: "pre-fix",
+      hypothesisId: "H4",
+      location: "scripts/browser-extension/platform-login-helper/background.js:retargetXiaohongshuLoginHome",
+      msg: "[DEBUG] retarget xiaohongshu login home",
+      data: {
+        sessionId: session?.sessionId || "",
+        runtimeSessionId: session?.runtimeSessionId || "",
+        retryCount: session.xiaohongshuIdentityRetryCount,
+        reason,
+        sourceUrl: String(sourceUrl || ""),
+        targetTabId,
+      },
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+  await chrome.tabs.update(targetTabId, {
+    url: "https://creator.xiaohongshu.com/",
+    active: true,
+  });
+  return true;
 }
 
 function getResolvedIdentityScore(account, platform) {
@@ -1462,8 +1941,8 @@ function pickBetterLoginContext(currentContext, nextContext, platform) {
   return currentContext;
 }
 
-function scheduleSync(platform, context) {
-  const session = getActiveSessionByPlatform(platform);
+function scheduleSync(platform, context, options = null) {
+  const session = getActiveSessionByPlatform(platform, options);
   if (!session) {
     return;
   }
@@ -1490,7 +1969,10 @@ function scheduleSync(platform, context) {
 }
 
 function scheduleSyncFromRuntimeTick(runtimeSession, payload) {
-  const session = getActiveSessionByPlatform(runtimeSession?.platform);
+  const session = getActiveSessionByPlatform(runtimeSession?.platform, {
+    runtimeSessionId: runtimeSession?.runtimeSessionId || "",
+    tabId: runtimeSession?.tabId || null,
+  });
   if (!session) {
     return;
   }
@@ -1710,8 +2192,10 @@ async function syncPublishResult(session, payload) {
 
   try {
     let authPayload = undefined;
+    let cookiePayload = undefined;
     if (payload.status === "success") {
       authPayload = await collectPlatformCookies(session.platform);
+      cookiePayload = await collectPlatformCookiePayload(session.platform);
     }
 
     const response = await fetch(`${session.apiBaseUrl}/api/publishing/extension/publish-jobs/sync`, {
@@ -1725,6 +2209,7 @@ async function syncPublishResult(session, payload) {
         draftUrl: payload.draftUrl || "",
         lastError: payload.lastError || "",
         authPayload,
+        cookiePayload,
         accountName: payload.accountName || "",
         displayName: payload.displayName || "",
         sourceUrl: payload.sourceUrl || "",
@@ -1779,7 +2264,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             status: "pending",
             syncing: false,
           };
+          completeOtherLoginSessions(session.platform, session.sessionId);
           activeLoginSessions.set(session.sessionId, session);
+          if (normalizePlatform(session.platform) === "xiaohongshu") {
+            const tokenFingerprint = getTokenFingerprint(session.sessionToken);
+            fetch("http://127.0.0.1:7777/event", {
+              method: "POST",
+              body: JSON.stringify({
+                sessionId: "xiaohongshu-login-recognition",
+                runId: "pre-fix",
+                hypothesisId: "H2",
+                location: "scripts/browser-extension/platform-login-helper/background.js:onMessage:START_LOGIN",
+                msg: "[DEBUG] xiaohongshu start login received by extension",
+                data: {
+                  sessionId: session.sessionId,
+                  runtimeSessionId: "",
+                  loginTabId: 0,
+                  appTabId: Number(session.appTabId || 0),
+                  tokenRawLength: tokenFingerprint.rawLength,
+                  tokenTrimmedLength: tokenFingerprint.trimmedLength,
+                  tokenHasOuterWhitespace: tokenFingerprint.hasOuterWhitespace,
+                  tokenPreview: tokenFingerprint.preview,
+                },
+                ts: Date.now(),
+              }),
+            }).catch(() => {});
+          }
           sendResponseSafe(sendResponse, { ok: true });
         } catch (error) {
           sendResponseSafe(sendResponse, {
@@ -1794,10 +2304,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (payload?.action === "START_PUBLISH") {
       void (async () => {
         try {
+          const shouldInjectCookies = shouldInjectPublishCookies(payload.session);
           debugLog("publish", "start-publish-received", {
             platform: payload.platform,
             jobId: payload.session?.job?.id || "",
             hasVideo: Boolean(payload.session?.job?.draftVideoUrl),
+            shouldInjectCookies,
           });
           // #region debug-point B8:start-publish-payload
           fetch("http://127.0.0.1:7777/event", {
@@ -1814,31 +2326,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 sessionTokenLength: String(payload.session?.sessionToken || "").length,
                 accountCookiePayloadLength: String(payload.session?.accountCookiePayload || "").length,
                 accountAuthPayloadLength: String(payload.session?.accountAuthPayload || "").length,
+                shouldInjectCookies,
                 targetUrl: getPlatformPublishUrl(payload.platform, payload.session?.job),
               },
               ts: Date.now(),
             }),
           }).catch(() => {});
           // #endregion
-          const accountAuthPayload = await resolveExtensionPublishAuthPayload(
-            payload.apiBaseUrl,
-            payload.session,
-          );
+          if (shouldInjectCookies) {
+            const accountAuthPayload = await resolveExtensionPublishAuthPayload(
+              payload.apiBaseUrl,
+              payload.session,
+            );
 
-          await clearPlatformCookies(payload.platform);
-          const accountCookiePayload = String(payload.session?.accountCookiePayload || "").trim();
-          if (accountCookiePayload) {
-            await applyPlatformCookiePayload(
-              payload.platform,
-              accountCookiePayload,
-              payload.session.job,
-            );
-          } else {
-            await applyPlatformAuthPayload(
-              payload.platform,
-              accountAuthPayload,
-              payload.session.job,
-            );
+            await clearPlatformCookies(payload.platform);
+            const accountCookiePayload = String(payload.session?.accountCookiePayload || "").trim();
+            if (accountCookiePayload) {
+              await applyPlatformCookiePayload(
+                payload.platform,
+                accountCookiePayload,
+                payload.session.job,
+              );
+            } else {
+              await applyPlatformAuthPayload(
+                payload.platform,
+                accountAuthPayload,
+                payload.session.job,
+              );
+            }
           }
 
           const targetUrl = getPlatformPublishUrl(payload.platform, payload.session.job);
@@ -1990,11 +2505,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             displayName: String(message.payload.displayName || ""),
           },
         );
-        const loginSession = getActiveSessionByPlatform(message.payload.platform);
+        const loginSession = getActiveSessionByPlatform(message.payload.platform, {
+          runtimeSessionId: String(message.payload.runtimeSessionId || "").trim(),
+          tabId: sender.tab?.id ?? null,
+        });
         if (loginSession && sender.tab?.id) {
           loginSession.loginTabId = sender.tab.id;
         }
-        scheduleSync(message.payload.platform, message.payload);
+        scheduleSync(message.payload.platform, message.payload, {
+          runtimeSessionId: String(message.payload.runtimeSessionId || "").trim(),
+          tabId: sender.tab?.id ?? null,
+        });
 
         try {
           const boundRuntimeSessionId = await ensureRuntimeBoundFromPageReady(

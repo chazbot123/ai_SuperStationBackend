@@ -1,0 +1,23 @@
+# Debug Session: douyin-editor-bounce [OPEN]
+
+## Symptom
+- Douyin image publish enters `content/post/image` and quickly returns to `home`.
+
+## Scope
+- Platform: `douyin`
+- Focus: editor-page stabilization after upload
+
+## Hypotheses
+1. Editor page is still loading and not actually ready before redirecting.
+2. Page shows risk/auth/validation error and then redirects to `home`.
+3. Editor page network request fails and platform script navigates back.
+4. Our automation touches page too early and indirectly triggers redirect.
+
+## Plan
+1. Add runtime instrumentation only.
+2. Reproduce once.
+3. Compare pre-fix logs.
+
+## Status
+- Instrumentation added in `scripts/browser-extension/platform-login-helper/publish-automation.js`
+- Waiting for reproduction logs.

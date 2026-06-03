@@ -1,0 +1,4558 @@
+(function () {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const debugPrefix = "[ai-superweb-publish]";
+  //#region debug-point douyin-home-network-session
+  const publishDebugSessionId = "douyin-upload-route";
+  const publishDebugRunId = "post-fix";
+  //#endregion
+  const fetchFileTimeoutMs = 15000;
+  const randomBetween = (min, max) => {
+    const lower = Math.min(min, max);
+    const upper = Math.max(min, max);
+    return Math.floor(lower + Math.random() * (upper - lower + 1));
+  };
+
+  function normalize(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function debugLog(scope, detail, extra) {
+    if (typeof extra === "undefined") {
+      console.log(`${debugPrefix}[${scope}] ${detail}`);
+      return;
+    }
+    console.log(`${debugPrefix}[${scope}] ${detail}`, extra);
+  }
+
+  function getPublishDebugApiBaseUrl() {
+    try {
+      const url = new URL(window.location.href);
+      const directValue =
+        url.searchParams.get("ai_superweb_bridge_base_url")
+        || url.searchParams.get("ai_superweb_api_base_url")
+        || url.searchParams.get("apiBaseUrl");
+      if (directValue) {
+        return String(directValue).trim();
+      }
+      const hash = String(url.hash || "").replace(/^#/, "").trim();
+      if (!hash) {
+        return "http://127.0.0.1:3001";
+      }
+      const hashParams = new URLSearchParams(hash);
+      return (
+        String(
+          hashParams.get("ai_superweb_bridge_base_url")
+          || hashParams.get("ai_superweb_api_base_url")
+          || hashParams.get("apiBaseUrl")
+          || "http://127.0.0.1:3001",
+        ).trim()
+      );
+    } catch (_error) {
+      return "http://127.0.0.1:3001";
+    }
+  }
+
+  function reportPublishAutomationDebug(hypothesisId, location, data) {
+    const apiBaseUrl = getPublishDebugApiBaseUrl();
+    fetch(`${apiBaseUrl}/api/bitbrowser/debug/event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: publishDebugSessionId,
+        runId: publishDebugRunId,
+        hypothesisId,
+        location,
+        msg: `[DEBUG] ${location}`,
+        data,
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+
+  //#region debug-point H3:global-error-listeners
+  window.addEventListener("error", (event) => {
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:window:error",
+      {
+        message: event?.message || "",
+        filename: event?.filename || "",
+        lineno: Number(event?.lineno || 0),
+        colno: Number(event?.colno || 0),
+        currentUrl: window.location.href,
+      },
+    );
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:window:unhandledrejection",
+      {
+        message: reason instanceof Error ? reason.message : String(reason || ""),
+        stack: reason instanceof Error ? String(reason.stack || "") : "",
+        currentUrl: window.location.href,
+      },
+    );
+  });
+  //#endregion
+
+  function isDouyinEditorBouncePage(url = window.location.href) {
+    return String(url || "").includes("/creator-micro/content/post/image");
+  }
+
+  function buildDouyinEditorBounceSnapshot(extra = {}) {
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    const toastTexts = Array.from(
+      document.querySelectorAll(
+        [
+          '[role="alert"]',
+          '[aria-live="assertive"]',
+          '[aria-live="polite"]',
+          '.semi-toast',
+          '.semi-notification',
+          '.semi-banner',
+          '.semi-modal',
+          '.semi-portal',
+        ].join(", "),
+      ),
+    )
+      .map((node) => normalize(node.textContent || ""))
+      .filter(Boolean)
+      .slice(0, 8);
+    return {
+      currentUrl: window.location.href,
+      state: detectDouyinPublishState({ draftVideoUrl: null }),
+      readyState: document.readyState || "",
+      visibilityState: document.visibilityState || "",
+      title: document.title || "",
+      hasTitleInput: Boolean(
+        queryFirst(
+          [
+            'input[placeholder="添加作品标题"]',
+            'input.semi-input[placeholder*="添加作品标题"]',
+            'input[placeholder*="作品标题"]',
+            'input[placeholder*="添加标题"]',
+            'textarea[placeholder*="标题"]',
+          ],
+          document,
+          true,
+        ),
+      ),
+      hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+      hasUploadInput: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+      visibleButtonTexts: getDouyinVisibleButtonTexts(12),
+      errorHints: [
+        "请求过于频繁",
+        "登录已失效",
+        "登录失效",
+        "请重新登录",
+        "操作过于频繁",
+        "发布失败",
+        "保存失败",
+        "网络异常",
+        "加载中，请稍候",
+        "作品标题",
+      ].filter((hint) => pageText.includes(hint)),
+      toastTexts,
+      pageTextPreview: pageText.slice(0, 260),
+      ...extra,
+    };
+  }
+
+  function reportDouyinEditorBounceDebug(location, data = {}) {
+    reportPublishAutomationDebug(
+      "H5",
+      location,
+      buildDouyinEditorBounceSnapshot(data),
+    );
+  }
+
+  function scheduleDouyinEditorBounceSnapshots(reason, delays = [0, 150, 400, 900, 1800, 3200]) {
+    if (!isDouyinEditorBouncePage()) {
+      return;
+    }
+    const startedAt = Date.now();
+    delays.forEach((delayMs) => {
+      window.setTimeout(() => {
+        if (!isDouyinEditorBouncePage()) {
+          reportDouyinEditorBounceDebug(
+            "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:snapshot",
+            {
+              reason,
+              delayMs,
+              elapsedMs: Date.now() - startedAt,
+              editorStillPresent: false,
+            },
+          );
+          return;
+        }
+        reportDouyinEditorBounceDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:snapshot",
+          {
+            reason,
+            delayMs,
+            elapsedMs: Date.now() - startedAt,
+            editorStillPresent: true,
+          },
+        );
+      }, delayMs);
+    });
+  }
+
+  function installDouyinEditorBounceInstrumentation() {
+    if (window.__aiSuperwebDouyinEditorBounceInstrumentationInstalled) {
+      return;
+    }
+    window.__aiSuperwebDouyinEditorBounceInstrumentationInstalled = true;
+    const navigationEvents = ["visibilitychange", "pagehide", "beforeunload", "popstate", "hashchange"];
+    navigationEvents.forEach((eventName) => {
+      window.addEventListener(eventName, (event) => {
+        reportDouyinEditorBounceDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:event",
+          {
+            eventName,
+            persisted: typeof event?.persisted === "boolean" ? event.persisted : null,
+          },
+        );
+      });
+    });
+    if (!window.__aiSuperwebDouyinEditorBounceHistoryPatched) {
+      window.__aiSuperwebDouyinEditorBounceHistoryPatched = true;
+      const rawPushState = history.pushState.bind(history);
+      const rawReplaceState = history.replaceState.bind(history);
+      history.pushState = function (...args) {
+        const result = rawPushState(...args);
+        reportDouyinEditorBounceDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:history-pushState",
+          {
+            targetUrl: args.length >= 3 ? String(args[2] || "") : "",
+          },
+        );
+        return result;
+      };
+      history.replaceState = function (...args) {
+        const result = rawReplaceState(...args);
+        reportDouyinEditorBounceDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:history-replaceState",
+          {
+            targetUrl: args.length >= 3 ? String(args[2] || "") : "",
+          },
+        );
+        return result;
+      };
+    }
+    if (!window.__aiSuperwebDouyinEditorBounceFetchPatched) {
+      window.__aiSuperwebDouyinEditorBounceFetchPatched = true;
+      const rawFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const requestUrl =
+          typeof args[0] === "string"
+            ? args[0]
+            : args[0] && typeof args[0].url === "string"
+              ? args[0].url
+              : "";
+        try {
+          const response = await rawFetch(...args);
+          const responseUrl = String(response?.url || requestUrl || "");
+          if (
+            isDouyinEditorBouncePage()
+            && (response.status >= 400 || response.redirected)
+          ) {
+            reportDouyinEditorBounceDebug(
+              "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:fetch-response",
+              {
+                requestUrl: String(requestUrl || ""),
+                responseUrl,
+                status: Number(response.status || 0),
+                redirected: Boolean(response.redirected),
+                ok: Boolean(response.ok),
+              },
+            );
+          }
+          return response;
+        } catch (error) {
+          if (isDouyinEditorBouncePage()) {
+            reportDouyinEditorBounceDebug(
+              "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:fetch-error",
+              {
+                requestUrl: String(requestUrl || ""),
+                message: error instanceof Error ? error.message : String(error || ""),
+              },
+            );
+          }
+          throw error;
+        }
+      };
+    }
+    if (!window.__aiSuperwebDouyinEditorBounceXHRPatched) {
+      window.__aiSuperwebDouyinEditorBounceXHRPatched = true;
+      const rawOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+        this.__aiSuperwebDouyinEditorBounceRequestMeta = {
+          method: String(method || ""),
+          url: String(url || ""),
+        };
+        this.addEventListener("loadend", () => {
+          if (!isDouyinEditorBouncePage()) {
+            return;
+          }
+          const meta = this.__aiSuperwebDouyinEditorBounceRequestMeta || {};
+          if (this.status >= 400 || this.status === 0) {
+            reportDouyinEditorBounceDebug(
+              "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:xhr-loadend",
+              {
+                method: String(meta.method || ""),
+                requestUrl: String(meta.url || ""),
+                status: Number(this.status || 0),
+                responseUrl: String(this.responseURL || ""),
+              },
+            );
+          }
+        });
+        return rawOpen.call(this, method, url, ...rest);
+      };
+    }
+    reportDouyinEditorBounceDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinEditorBounce:installed",
+      {},
+    );
+  }
+
+  function maybeInstallDouyinEditorBounceProbe(reason) {
+    if (!isDouyinEditorBouncePage()) {
+      return;
+    }
+    installDouyinEditorBounceInstrumentation();
+    scheduleDouyinEditorBounceSnapshots(reason);
+  }
+
+  window.addEventListener("pageshow", () => {
+    maybeInstallDouyinEditorBounceProbe("pageshow");
+  });
+
+  window.setTimeout(() => {
+    maybeInstallDouyinEditorBounceProbe("script-load");
+  }, 0);
+
+  function inferFileName(url, fallbackName) {
+    try {
+      const pathname = new URL(url).pathname;
+      const raw = pathname.split("/").pop() || fallbackName;
+      return raw.includes(".") ? raw : fallbackName;
+    } catch (_) {
+      return fallbackName;
+    }
+  }
+
+  function getElementDebugSnapshot(node) {
+    return {
+      tagName: node?.tagName || "",
+      text: normalize(node?.textContent || ""),
+      className: node?.className || "",
+      disabled:
+        node instanceof HTMLButtonElement
+          ? node.disabled
+          : node?.hasAttribute("disabled") || node?.getAttribute("aria-disabled") === "true",
+      ariaDisabled: node?.getAttribute("aria-disabled") || "",
+    };
+  }
+
+  function roundDebugNumber(value) {
+    return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+  }
+
+  function getViewportDebugSnapshot() {
+    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+    const documentHeight = Math.max(
+      Number(document.body?.scrollHeight || 0),
+      Number(document.documentElement?.scrollHeight || 0),
+      Number(scrollingElement?.scrollHeight || 0),
+    );
+    return {
+      scrollX: roundDebugNumber(window.scrollX || window.pageXOffset || 0),
+      scrollY: roundDebugNumber(window.scrollY || window.pageYOffset || 0),
+      innerWidth: roundDebugNumber(window.innerWidth || 0),
+      innerHeight: roundDebugNumber(window.innerHeight || 0),
+      documentHeight: roundDebugNumber(documentHeight),
+      scrollBottomGap: roundDebugNumber(
+        documentHeight - ((window.scrollY || window.pageYOffset || 0) + (window.innerHeight || 0)),
+      ),
+    };
+  }
+
+  function getElementRectDebugSnapshot(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+    const rect = node.getBoundingClientRect();
+    return {
+      top: roundDebugNumber(rect.top),
+      right: roundDebugNumber(rect.right),
+      bottom: roundDebugNumber(rect.bottom),
+      left: roundDebugNumber(rect.left),
+      width: roundDebugNumber(rect.width),
+      height: roundDebugNumber(rect.height),
+      centerX: roundDebugNumber(rect.left + rect.width / 2),
+      centerY: roundDebugNumber(rect.top + rect.height / 2),
+    };
+  }
+
+  function clampViewportPoint(value, maxValue) {
+    if (!Number.isFinite(value) || !Number.isFinite(maxValue) || maxValue < 0) {
+      return null;
+    }
+    return Math.min(Math.max(value, 0), maxValue);
+  }
+
+  function getElementFromPointDebugSnapshot(x, y, expectedNode = null) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return {
+        point: { x: roundDebugNumber(x), y: roundDebugNumber(y) },
+        outOfViewport: true,
+        hitNode: null,
+        hitInsideExpected: false,
+      };
+    }
+    const maxX = Math.max((window.innerWidth || 0) - 1, 0);
+    const maxY = Math.max((window.innerHeight || 0) - 1, 0);
+    const probeX = clampViewportPoint(x, maxX);
+    const probeY = clampViewportPoint(y, maxY);
+    const outOfViewport = x < 0 || y < 0 || x > maxX || y > maxY;
+    const hitNode =
+      Number.isFinite(probeX) && Number.isFinite(probeY)
+        ? document.elementFromPoint(probeX, probeY)
+        : null;
+    return {
+      point: { x: roundDebugNumber(probeX), y: roundDebugNumber(probeY) },
+      outOfViewport,
+      hitNode: getElementDebugSnapshot(hitNode),
+      hitInsideExpected: Boolean(
+        expectedNode instanceof HTMLElement
+          && hitNode instanceof HTMLElement
+          && (hitNode === expectedNode || expectedNode.contains(hitNode)),
+      ),
+    };
+  }
+
+  function getXiaohongshuPublishViewportSnapshot(button) {
+    const viewport = getViewportDebugSnapshot();
+    const rect = getElementRectDebugSnapshot(button);
+    if (!rect) {
+      return {
+        ...viewport,
+        buttonRect: null,
+        buttonInViewport: false,
+        buttonCenterInViewport: false,
+        buttonBelowViewport: false,
+        buttonAboveViewport: false,
+        buttonPartiallyBelowViewport: false,
+        buttonPartiallyAboveViewport: false,
+        buttonDistanceToViewportBottom: null,
+        centerHit: null,
+        bottomEdgeHit: null,
+      };
+    }
+    const centerHit = getElementFromPointDebugSnapshot(rect.centerX, rect.centerY, button);
+    const bottomProbeY =
+      Number.isFinite(rect.bottom)
+        ? clampViewportPoint(rect.bottom - 4, Math.max((window.innerHeight || 0) - 1, 0))
+        : null;
+    const bottomEdgeHit = getElementFromPointDebugSnapshot(rect.centerX, bottomProbeY, button);
+    return {
+      ...viewport,
+      buttonRect: rect,
+      buttonInViewport:
+        Number(rect.bottom) > 0
+        && Number(rect.top) < (window.innerHeight || 0)
+        && Number(rect.right) > 0
+        && Number(rect.left) < (window.innerWidth || 0),
+      buttonCenterInViewport:
+        Number(rect.centerX) >= 0
+        && Number(rect.centerX) <= (window.innerWidth || 0)
+        && Number(rect.centerY) >= 0
+        && Number(rect.centerY) <= (window.innerHeight || 0),
+      buttonBelowViewport: Number(rect.top) >= (window.innerHeight || 0),
+      buttonAboveViewport: Number(rect.bottom) <= 0,
+      buttonPartiallyBelowViewport: Number(rect.bottom) > (window.innerHeight || 0),
+      buttonPartiallyAboveViewport: Number(rect.top) < 0,
+      buttonDistanceToViewportBottom: roundDebugNumber((window.innerHeight || 0) - Number(rect.bottom || 0)),
+      centerHit,
+      bottomEdgeHit,
+    };
+  }
+
+  function isXiaohongshuPublishPage(url = window.location.href) {
+    const currentUrl = String(url || "").toLowerCase();
+    return currentUrl.includes("creator.xiaohongshu.com/publish/publish");
+  }
+
+  function isXiaohongshuLoginPage(url = window.location.href) {
+    const currentUrl = String(url || "").toLowerCase();
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "").toLowerCase();
+    return (
+      currentUrl.includes("creator.xiaohongshu.com/login")
+      || currentUrl.includes("redirectreason=401")
+      || pageText.includes("登录后继续")
+      || pageText.includes("请登录")
+      || pageText.includes("手机号登录")
+      || pageText.includes("验证码登录")
+    );
+  }
+
+  function getXiaohongshuPageStateSnapshot() {
+    const currentUrl = window.location.href;
+    let redirectReason = "";
+    let lastUrl = "";
+    try {
+      const url = new URL(currentUrl);
+      redirectReason = String(url.searchParams.get("redirectReason") || "");
+      lastUrl = String(url.searchParams.get("lastUrl") || "");
+    } catch (_error) {
+      redirectReason = "";
+      lastUrl = "";
+    }
+    return {
+      currentUrl,
+      pageState: isXiaohongshuLoginPage(currentUrl)
+        ? "login"
+        : isXiaohongshuPublishPage(currentUrl)
+          ? "publish"
+          : "other",
+      isLoginPage: isXiaohongshuLoginPage(currentUrl),
+      isPublishPage: isXiaohongshuPublishPage(currentUrl),
+      redirectReason,
+      lastUrl: lastUrl.slice(0, 260),
+      title: document.title || "",
+      readyState: document.readyState || "",
+    };
+  }
+
+  function getXiaohongshuPublishSubmitSnapshot(selectors = []) {
+    const normalizedSelectors = Array.isArray(selectors) ? selectors : [selectors];
+    const button = queryFirst(normalizedSelectors, document, true);
+    const titleInput = queryFirst(
+      ['input[placeholder*="标题"]', 'textarea[placeholder*="标题"]', 'input[type="text"]'],
+      document,
+      true,
+    );
+    const bodyEditor = queryFirst(
+      ['div.tiptap.ProseMirror', 'div[role="textbox"]', 'div[contenteditable="true"]'],
+      document,
+      true,
+    );
+    const pageText = String(document.body?.innerText || document.body?.textContent || "");
+    const snapshot = {
+      ...getXiaohongshuPageStateSnapshot(),
+      buttonFound: Boolean(button),
+      buttonTagName: getElementDebugSnapshot(button).tagName,
+      buttonText: getElementDebugSnapshot(button).text,
+      buttonClassName: getElementDebugSnapshot(button).className,
+      buttonDisabled: getElementDebugSnapshot(button).disabled,
+      buttonAriaDisabled: getElementDebugSnapshot(button).ariaDisabled,
+      viewport: getXiaohongshuPublishViewportSnapshot(button),
+      titleValue:
+        titleInput instanceof HTMLInputElement || titleInput instanceof HTMLTextAreaElement
+          ? String(titleInput.value || "").slice(0, 120)
+          : "",
+      bodyPreview:
+        bodyEditor instanceof HTMLElement ? normalize(bodyEditor.innerText || bodyEditor.textContent || "").slice(0, 180) : "",
+      pageTextPreview: pageText.slice(0, 240),
+      pageErrorHints: [
+        "请完善",
+        "请填写标题",
+        "请先上传",
+        "发布失败",
+        "保存失败",
+        "校验失败",
+      ].filter((hint) => pageText.includes(hint)),
+    };
+    return {
+      ...snapshot,
+      publishBlockReason: inferXiaohongshuPublishBlockReason(snapshot),
+    };
+  }
+
+  function inferXiaohongshuPublishBlockReason(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return "unknown";
+    }
+    if (snapshot.isLoginPage || String(snapshot.redirectReason || "") === "401") {
+      return "redirected-to-login";
+    }
+    if (snapshot.pageState === "other") {
+      return "left-publish-page";
+    }
+    if (!snapshot.buttonFound) {
+      return "publish-button-missing";
+    }
+    if (snapshot.buttonDisabled || snapshot.buttonAriaDisabled === "true") {
+      return "publish-button-disabled";
+    }
+    if (Array.isArray(snapshot.pageErrorHints) && snapshot.pageErrorHints.includes("请先上传")) {
+      return "upload-incomplete";
+    }
+    if (Array.isArray(snapshot.pageErrorHints) && snapshot.pageErrorHints.includes("请填写标题")) {
+      return "title-missing";
+    }
+    if (Array.isArray(snapshot.pageErrorHints) && snapshot.pageErrorHints.includes("请完善")) {
+      return "validation-required";
+    }
+    if (snapshot.viewport?.buttonBelowViewport) {
+      return "publish-button-below-viewport";
+    }
+    if (
+      snapshot.viewport?.buttonCenterInViewport
+      && snapshot.viewport?.centerHit
+      && !snapshot.viewport.centerHit.hitInsideExpected
+    ) {
+      return "publish-button-covered";
+    }
+    if (
+      snapshot.viewport?.buttonInViewport
+      && snapshot.viewport?.bottomEdgeHit
+      && !snapshot.viewport.bottomEdgeHit.hitInsideExpected
+    ) {
+      return "publish-button-bottom-covered";
+    }
+    return "publish-click-no-success-hint";
+  }
+
+  function reportXiaohongshuPublishPhaseDebug(location, selectors = [], data = {}) {
+    reportPublishAutomationDebug(
+      "X1",
+      location,
+      {
+        ...getXiaohongshuPublishSubmitSnapshot(selectors),
+        ...data,
+      },
+    );
+  }
+
+  function scheduleXiaohongshuPublishPhaseSnapshots(reason, selectors = [], delays = [0, 500, 1400]) {
+    const startedAt = Date.now();
+    delays.forEach((delayMs) => {
+      window.setTimeout(() => {
+        reportXiaohongshuPublishPhaseDebug(
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuPublishPhase:snapshot",
+          selectors,
+          {
+            reason,
+            delayMs,
+            elapsedMs: Date.now() - startedAt,
+          },
+        );
+      }, delayMs);
+    });
+  }
+
+  function getDouyinPublishSubmitSnapshot(selectors = [], draftVideoUrl = null) {
+    const normalizedSelectors = Array.isArray(selectors) ? selectors : [selectors];
+    const button = queryFirst(normalizedSelectors, document, true);
+    const titleInput = queryFirst(
+      [
+        'input[placeholder="添加作品标题"]',
+        'input.semi-input[placeholder*="添加作品标题"]',
+        'input[placeholder*="作品标题"]',
+        'input[placeholder*="添加标题"]',
+        'input[placeholder="填写作品标题，为作品获得更多流量"]',
+        'input[placeholder*="填写作品标题"]',
+        'textarea[placeholder*="标题"]',
+      ],
+      document,
+      true,
+    );
+    const bodyEditor = queryFirst(
+      [...douyinImageDescriptionSelectors, ...douyinVideoDescriptionSelectors],
+      document,
+      true,
+    );
+    return {
+      currentUrl: window.location.href,
+      state: detectDouyinPublishState({ draftVideoUrl }),
+      buttonFound: Boolean(button),
+      buttonTagName: getElementDebugSnapshot(button).tagName,
+      buttonText: getElementDebugSnapshot(button).text,
+      buttonClassName: getElementDebugSnapshot(button).className,
+      buttonDisabled: getElementDebugSnapshot(button).disabled,
+      buttonAriaDisabled: getElementDebugSnapshot(button).ariaDisabled,
+      titleValue:
+        titleInput instanceof HTMLInputElement || titleInput instanceof HTMLTextAreaElement
+          ? String(titleInput.value || "").slice(0, 120)
+          : "",
+      bodyPreview:
+        bodyEditor instanceof HTMLElement
+          ? normalize(bodyEditor.innerText || bodyEditor.textContent || "").slice(0, 180)
+          : "",
+      pageTextPreview: normalize(document.body?.innerText || "").slice(0, 240),
+    };
+  }
+
+  async function fetchFile(url, index, kind) {
+    //#region debug-point douyin-home-network-fetch-start
+    reportPublishAutomationDebug(
+      "H1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:fetchFile:start",
+      {
+        url,
+        index,
+        kind,
+        currentUrl: window.location.href,
+        pageProtocol: window.location.protocol,
+        pageOrigin: window.location.origin,
+        online: typeof navigator?.onLine === "boolean" ? navigator.onLine : null,
+        mixedContentCandidate:
+          window.location.protocol === "https:" && String(url || "").startsWith("http://"),
+      },
+    );
+    //#endregion
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutHandle = controller
+      ? window.setTimeout(() => controller.abort(), fetchFileTimeoutMs)
+      : null;
+    let response;
+    try {
+      response = await fetch(url, controller ? { signal: controller.signal } : undefined);
+    } catch (error) {
+      const message =
+        controller && error?.name === "AbortError"
+          ? `素材下载超时（${fetchFileTimeoutMs}ms）`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      //#region debug-point douyin-home-network-fetch-error
+      reportPublishAutomationDebug(
+        "H1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fetchFile:request-error",
+        {
+          url,
+          index,
+          kind,
+          message,
+          errorName: error?.name || "",
+          currentUrl: window.location.href,
+          pageProtocol: window.location.protocol,
+          pageOrigin: window.location.origin,
+          online: typeof navigator?.onLine === "boolean" ? navigator.onLine : null,
+          mixedContentCandidate:
+            window.location.protocol === "https:" && String(url || "").startsWith("http://"),
+        },
+      );
+      //#endregion
+      throw new Error(message);
+    } finally {
+      if (timeoutHandle !== null) {
+        window.clearTimeout(timeoutHandle);
+      }
+    }
+    if (!response.ok) {
+      //#region debug-point douyin-home-network-fetch-response-error
+      reportPublishAutomationDebug(
+        "H1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fetchFile:response-error",
+        {
+          url,
+          index,
+          kind,
+          status: response.status,
+          currentUrl: window.location.href,
+          pageProtocol: window.location.protocol,
+          mixedContentCandidate:
+            window.location.protocol === "https:" && String(url || "").startsWith("http://"),
+        },
+      );
+      //#endregion
+      throw new Error(`素材下载失败：${response.status}`);
+    }
+    const blob = await response.blob();
+    const extension = kind === "video" ? "mp4" : "png";
+    const fileName = inferFileName(url, `${kind}-${index + 1}.${extension}`);
+    //#region debug-point douyin-home-network-fetch-done
+    reportPublishAutomationDebug(
+      "H1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:fetchFile:done",
+      {
+        url,
+        index,
+        kind,
+        size: blob.size,
+        type: blob.type || "",
+        fileName,
+        currentUrl: window.location.href,
+      },
+    );
+    //#endregion
+    return new File([blob], fileName, {
+      type: blob.type || (kind === "video" ? "video/mp4" : "image/png"),
+    });
+  }
+
+  function matchesVisibility(node) {
+    if (!(node instanceof HTMLElement)) return false;
+    const style = window.getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function findByText(text, root = document, baseSelector = "*") {
+    const nodes = Array.from(root.querySelectorAll(baseSelector));
+    return nodes.find((node) => normalize(node.textContent || "").includes(text)) || null;
+  }
+
+  function collectSearchRoots(root = document, results = [], visited = new Set()) {
+    if (!root || visited.has(root)) {
+      return results;
+    }
+    visited.add(root);
+    results.push(root);
+
+    const hostElements =
+      "querySelectorAll" in root ? Array.from(root.querySelectorAll("*")) : [];
+    for (const element of hostElements) {
+      const shadowRoot = element && "shadowRoot" in element ? element.shadowRoot : null;
+      if (shadowRoot) {
+        collectSearchRoots(shadowRoot, results, visited);
+      }
+    }
+
+    const frameElements = Array.from(root.querySelectorAll("iframe"));
+    for (const frame of frameElements) {
+      try {
+        const frameDocument = frame.contentDocument;
+        if (frameDocument) {
+          collectSearchRoots(frameDocument, results, visited);
+        }
+      } catch (_) {
+        // ignore cross-origin iframe
+      }
+    }
+
+    return results;
+  }
+
+  function queryFirst(selectors, root = document, visibleOnly = true) {
+    const searchRoots = collectSearchRoots(root);
+    for (const selector of selectors) {
+      for (const currentRoot of searchRoots) {
+        try {
+          let matched = null;
+          if (selector.startsWith("text=")) {
+            matched = findByText(normalize(selector.slice(5)), currentRoot);
+          } else {
+            const hasTextMatch = selector.match(/^(.*):has-text\("(.+)"\)$/);
+            if (hasTextMatch) {
+              const baseSelector = hasTextMatch[1]?.trim() || "*";
+              const text = normalize(hasTextMatch[2]);
+              matched = findByText(text, currentRoot, baseSelector);
+            } else {
+              const nodes = Array.from(currentRoot.querySelectorAll(selector));
+              matched = nodes.find((node) => (visibleOnly ? matchesVisibility(node) : true)) || null;
+            }
+          }
+
+          if (matched && (!visibleOnly || matchesVisibility(matched))) {
+            return matched;
+          }
+        } catch (_) {
+          // ignore invalid selector
+        }
+      }
+    }
+    return null;
+  }
+
+  async function waitForVisible(selectors, timeoutMs = 30000, root = document, visibleOnly = true) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const node = queryFirst(selectors, root, visibleOnly);
+      if (node) {
+        return node;
+      }
+      await sleep(400);
+    }
+    throw new Error(`未找到目标元素：${selectors[0] || "unknown"}`);
+  }
+
+  async function humanClickElement(node, options = {}) {
+    if (!(node instanceof HTMLElement)) {
+      throw new Error("目标元素不可点击");
+    }
+
+    const debugScope = String(options.debugScope || "").trim();
+    const debugLabel = String(options.debugLabel || "").trim();
+    const clickStartedAt = Date.now();
+    const clickStartUrl = String(window.location.href || "");
+
+    const beforeMoveMin = options.beforeMoveMin ?? 120;
+    const beforeMoveMax = options.beforeMoveMax ?? 260;
+    const movePauseMin = options.movePauseMin ?? 80;
+    const movePauseMax = options.movePauseMax ?? 180;
+    const holdPauseMin = options.holdPauseMin ?? 90;
+    const holdPauseMax = options.holdPauseMax ?? 160;
+    const afterClickMin = options.afterClickMin ?? 220;
+    const afterClickMax = options.afterClickMax ?? 420;
+
+    node.scrollIntoView({ block: "center", inline: "center" });
+    await sleep(randomBetween(beforeMoveMin, beforeMoveMax));
+
+    const rect = node.getBoundingClientRect();
+    const clientX = rect.left + Math.max(6, Math.min(rect.width - 6, rect.width * 0.45));
+    const clientY = rect.top + Math.max(6, Math.min(rect.height - 6, rect.height * 0.5));
+
+    const dispatchPointer = (type, overrides = {}) => {
+      if (typeof PointerEvent === "undefined") {
+        return;
+      }
+      node.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+          clientX,
+          clientY,
+          button: 0,
+          buttons: 1,
+          ...overrides,
+        }),
+      );
+    };
+
+    const dispatchMouse = (type, overrides = {}) => {
+      node.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          view: window,
+          clientX,
+          clientY,
+          button: 0,
+          buttons: 1,
+          ...overrides,
+        }),
+      );
+    };
+
+    node.focus();
+    dispatchPointer("pointerover");
+    dispatchMouse("mouseover");
+    dispatchPointer("pointerenter");
+    dispatchMouse("mouseenter");
+    await sleep(randomBetween(movePauseMin, movePauseMax));
+    dispatchPointer("pointermove");
+    dispatchMouse("mousemove");
+    await sleep(randomBetween(movePauseMin, movePauseMax));
+    dispatchPointer("pointerdown");
+    dispatchMouse("mousedown");
+    await sleep(randomBetween(holdPauseMin, holdPauseMax));
+    dispatchPointer("pointerup", { buttons: 0 });
+    dispatchMouse("mouseup", { buttons: 0 });
+    node.click();
+    await sleep(randomBetween(afterClickMin, afterClickMax));
+
+    if (debugScope) {
+      //#region debug-point douyin-home-click-cause-human-click
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:humanClickElement",
+        {
+          scope: debugScope,
+          label: debugLabel,
+          startUrl: clickStartUrl,
+          endUrl: String(window.location.href || ""),
+          elapsedMs: Date.now() - clickStartedAt,
+          beforeMoveMin,
+          beforeMoveMax,
+          movePauseMin,
+          movePauseMax,
+          holdPauseMin,
+          holdPauseMax,
+          afterClickMin,
+          afterClickMax,
+          tagName: String(node.tagName || "").toLowerCase(),
+          className: String(node.className || "").slice(0, 200),
+          text: normalize(node.textContent || "").slice(0, 120),
+        },
+      );
+      //#endregion
+    }
+  }
+
+  async function clickFirst(selectors, timeoutMs = 30000, root = document, options = {}) {
+    const node = await waitForVisible(selectors, timeoutMs, root, true);
+    if (node instanceof HTMLElement) {
+      await humanClickElement(node, options);
+      return node;
+    }
+    throw new Error("目标元素不可点击");
+  }
+
+  function queryCandidates(selectors, root = document, visibleOnly = true) {
+    const searchRoots = collectSearchRoots(root);
+    const results = [];
+    const visited = new Set();
+
+    const pushCandidate = (node) => {
+      if (!(node instanceof Element)) {
+        return;
+      }
+      if (visibleOnly && !matchesVisibility(node)) {
+        return;
+      }
+      if (visited.has(node)) {
+        return;
+      }
+      visited.add(node);
+      results.push(node);
+    };
+
+    for (const selector of selectors) {
+      for (const currentRoot of searchRoots) {
+        try {
+          if (selector.startsWith("text=")) {
+            const text = normalize(selector.slice(5));
+            Array.from(currentRoot.querySelectorAll("*"))
+              .filter((node) => normalize(node.textContent || "").includes(text))
+              .forEach(pushCandidate);
+            continue;
+          }
+
+          const hasTextMatch = selector.match(/^(.*):has-text\("(.+)"\)$/);
+          if (hasTextMatch) {
+            const baseSelector = hasTextMatch[1]?.trim() || "*";
+            const text = normalize(hasTextMatch[2]);
+            Array.from(currentRoot.querySelectorAll(baseSelector))
+              .filter((node) => normalize(node.textContent || "").includes(text))
+              .forEach(pushCandidate);
+            continue;
+          }
+
+          Array.from(currentRoot.querySelectorAll(selector)).forEach(pushCandidate);
+        } catch (_) {
+          // ignore invalid selector
+        }
+      }
+    }
+
+    return results;
+  }
+
+  function resolveClickableCandidate(node) {
+    if (!(node instanceof HTMLElement)) {
+      return null;
+    }
+    const semanticTarget = node.closest('button,[role="button"],[role="tab"],a');
+    if (semanticTarget instanceof HTMLElement && matchesVisibility(semanticTarget)) {
+      return semanticTarget;
+    }
+    return matchesVisibility(node) ? node : null;
+  }
+
+  async function clickCandidatesUntil(
+    selectors,
+    {
+      successCheck,
+      timeoutMs = 12000,
+      root = document,
+      options = {},
+      scope = "publish",
+      afterEachWaitMs = 1200,
+      postClickObserveMs = 0,
+      postClickPollMs = 250,
+    } = {},
+  ) {
+    const startedAt = Date.now();
+    const attempted = new Set();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const candidates = queryCandidates(selectors, root, true)
+        .map(resolveClickableCandidate)
+        .filter((node) => node instanceof HTMLElement && !attempted.has(node));
+      //#region debug-point douyin-home-stuck-click-candidates
+      reportPublishAutomationDebug(
+        "H2",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:clickCandidatesUntil:candidates",
+        {
+          scope,
+          currentUrl: window.location.href,
+          selectorCount: selectors.length,
+          candidateCount: candidates.length,
+          attemptedCount: attempted.size,
+          firstCandidateText: normalize(candidates[0]?.textContent || "").slice(0, 80),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
+        },
+      );
+      //#endregion
+
+      for (const node of candidates) {
+        attempted.add(node);
+        debugLog(scope, "click-candidate-attempt", {
+          tagName: node.tagName,
+          className: node.className || "",
+          text: normalize(node.textContent || ""),
+        });
+        //#region debug-point douyin-home-stuck-click-attempt
+        reportPublishAutomationDebug(
+          "H2",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:clickCandidatesUntil:attempt",
+          {
+            scope,
+            currentUrl: window.location.href,
+            attemptedCount: attempted.size,
+            nodeTag: String(node.tagName || "").toLowerCase(),
+            nodeRole: String(node.getAttribute?.("role") || ""),
+            nodeClassName: String(node.className || "").slice(0, 160),
+            nodeText: normalize(node.textContent || "").slice(0, 80),
+          },
+        );
+        //#endregion
+        await humanClickElement(node, options);
+        await sleep(afterEachWaitMs);
+        if (typeof successCheck === "function" && successCheck()) {
+          debugLog(scope, "click-candidate-success", {
+            tagName: node.tagName,
+            className: node.className || "",
+            text: normalize(node.textContent || ""),
+            url: window.location.href,
+          });
+          //#region debug-point douyin-home-stuck-click-success
+          reportPublishAutomationDebug(
+            "H2",
+            "scripts/browser-extension/platform-login-helper/publish-automation.js:clickCandidatesUntil:success",
+            {
+              scope,
+              currentUrl: window.location.href,
+              nodeText: normalize(node.textContent || "").slice(0, 80),
+            },
+          );
+          //#endregion
+          return node;
+        }
+        if (typeof successCheck === "function" && postClickObserveMs > 0) {
+          const observeStartedAt = Date.now();
+          while (Date.now() - observeStartedAt < postClickObserveMs) {
+            if (successCheck()) {
+              debugLog(scope, "click-candidate-success-observed", {
+                tagName: node.tagName,
+                className: node.className || "",
+                text: normalize(node.textContent || ""),
+                url: window.location.href,
+              });
+              //#region debug-point douyin-home-stuck-click-observe-success
+              reportPublishAutomationDebug(
+                "H2",
+                "scripts/browser-extension/platform-login-helper/publish-automation.js:clickCandidatesUntil:observe-success",
+                {
+                  scope,
+                  currentUrl: window.location.href,
+                  nodeText: normalize(node.textContent || "").slice(0, 80),
+                },
+              );
+              //#endregion
+              return node;
+            }
+            await sleep(postClickPollMs);
+          }
+        }
+      }
+
+      await sleep(400);
+    }
+
+    //#region debug-point douyin-home-stuck-click-timeout
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:clickCandidatesUntil:timeout",
+      {
+        scope,
+        currentUrl: window.location.href,
+        selectorCount: selectors.length,
+        attemptedCount: attempted.size,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
+      },
+    );
+    //#endregion
+    throw new Error(`未找到可用点击入口：${selectors[0] || "unknown"}`);
+  }
+
+  function dispatchInputEvents(node) {
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+    node.dispatchEvent(new Event("blur", { bubbles: true }));
+  }
+
+  function setNativeInputValue(node, value) {
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    const prototype =
+      node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    descriptor?.set?.call(node, value);
+  }
+
+  function clearFormControl(node) {
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    node.focus();
+    setNativeInputValue(node, "");
+    dispatchInputEvents(node);
+  }
+
+  async function typeFormControlHuman(node, text, minDelay = 95, maxDelay = 180) {
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    const normalized = String(text || "");
+    if (!normalized) {
+      return;
+    }
+    node.focus();
+    for (const char of normalized) {
+      setNativeInputValue(node, `${node.value || ""}${char}`);
+      dispatchInputEvents(node);
+      await sleep(randomBetween(minDelay, maxDelay));
+    }
+  }
+
+  async function fillFirst(selectors, value, timeoutMs = 30000, root = document, options = {}) {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const node = await waitForVisible(selectors, timeoutMs, root, true);
+    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+      if (options.preferHumanType) {
+        clearFormControl(node);
+        await sleep(randomBetween(180, 320));
+        await typeFormControlHuman(node, normalized, options.perCharMin ?? 95, options.perCharMax ?? 180);
+      } else {
+        node.focus();
+        setNativeInputValue(node, normalized);
+        dispatchInputEvents(node);
+      }
+      return node;
+    }
+
+    if (node instanceof HTMLElement) {
+      if (options.preferHumanType) {
+        clearEditable(node);
+        await sleep(randomBetween(180, 320));
+        await typeEditableTextHuman(node, normalized, options.perCharMin ?? 95, options.perCharMax ?? 165);
+      } else {
+        node.focus();
+        node.textContent = normalized;
+        dispatchInputEvents(node);
+      }
+      return node;
+    }
+
+    return null;
+  }
+
+  async function appendText(selectors, value, timeoutMs = 30000, root = document, options = {}) {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const node = await waitForVisible(selectors, timeoutMs, root, true);
+    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+      if (options.preferHumanType) {
+        node.focus();
+        await sleep(randomBetween(140, 260));
+        await typeFormControlHuman(node, normalized, options.perCharMin ?? 95, options.perCharMax ?? 180);
+      } else {
+        node.focus();
+        setNativeInputValue(node, `${node.value || ""}${normalized}`);
+        dispatchInputEvents(node);
+      }
+      return node;
+    }
+
+    if (node instanceof HTMLElement) {
+      if (options.preferHumanType) {
+        node.focus();
+        placeCaretAtEnd(node);
+        await sleep(randomBetween(140, 260));
+        await typeEditableTextHuman(node, normalized, options.perCharMin ?? 95, options.perCharMax ?? 165);
+      } else {
+        node.focus();
+        const nextValue = `${node.textContent || ""}${normalized}`;
+        node.textContent = nextValue;
+        dispatchInputEvents(node);
+      }
+      return node;
+    }
+
+    return null;
+  }
+
+  function placeCaretAtEnd(node) {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    const selection = window.getSelection();
+    if (!selection) {
+      return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function clearEditable(node) {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    node.focus();
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    document.execCommand("delete", false);
+    node.textContent = "";
+    dispatchInputEvents(node);
+    placeCaretAtEnd(node);
+  }
+
+  function insertEditableText(node, text) {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    node.focus();
+    placeCaretAtEnd(node);
+    const inserted = document.execCommand("insertText", false, text);
+    if (!inserted) {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) {
+        node.textContent = `${node.textContent || ""}${text}`;
+      } else {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(document.createTextNode(text));
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    dispatchInputEvents(node);
+    placeCaretAtEnd(node);
+  }
+
+  async function typeEditableTextHuman(node, text, minDelay = 70, maxDelay = 120) {
+    const normalized = String(text || "");
+    if (!normalized) {
+      return;
+    }
+    for (const char of normalized) {
+      insertEditableText(node, char);
+      await sleep(randomBetween(minDelay, maxDelay));
+    }
+  }
+
+  async function pressEditableEnter(node) {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    node.focus();
+    placeCaretAtEnd(node);
+    node.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+    const inserted =
+      document.execCommand("insertParagraph", false) ||
+      document.execCommand("insertLineBreak", false) ||
+      document.execCommand("insertHTML", false, "<div><br></div>");
+    if (!inserted) {
+      insertEditableText(node, "\n");
+    } else {
+      dispatchInputEvents(node);
+    }
+    node.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true }));
+    placeCaretAtEnd(node);
+    await sleep(randomBetween(240, 420));
+  }
+
+  function douyinSlowClickOptions() {
+    return {
+      beforeMoveMin: 260,
+      beforeMoveMax: 520,
+      movePauseMin: 160,
+      movePauseMax: 320,
+      holdPauseMin: 140,
+      holdPauseMax: 260,
+      afterClickMin: 420,
+      afterClickMax: 760,
+    };
+  }
+
+  function douyinSlowActionClickOptions() {
+    return {
+      beforeMoveMin: 240,
+      beforeMoveMax: 500,
+      movePauseMin: 150,
+      movePauseMax: 300,
+      holdPauseMin: 130,
+      holdPauseMax: 240,
+      afterClickMin: 360,
+      afterClickMax: 680,
+    };
+  }
+
+  function douyinSlowPublishClickOptions() {
+    return {
+      beforeMoveMin: 320,
+      beforeMoveMax: 620,
+      movePauseMin: 200,
+      movePauseMax: 380,
+      holdPauseMin: 170,
+      holdPauseMax: 320,
+      afterClickMin: 520,
+      afterClickMax: 960,
+    };
+  }
+
+  function escapeHasText(value) {
+    return String(value || "")
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"');
+  }
+
+  function normalizeTags(tags) {
+    return Array.from(
+      new Set(
+        (tags || [])
+          .map((tag) => String(tag || "").replace(/^#+/, "").trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  const douyinImageReadySelectors = [
+    'input[placeholder="添加作品标题"]',
+    'input.semi-input[placeholder*="添加作品标题"]',
+    'input[placeholder*="作品标题"]',
+    'input[placeholder*="添加标题"]',
+    'textarea[placeholder*="标题"]',
+    'div.zone-container.editor-kit-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
+    'div.zone-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
+    'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
+    'div[contenteditable="true"][data-placeholder*="作品描述"]',
+    'div[contenteditable="true"][data-placeholder*="描述"]',
+    '[class*="editor-kit"] [contenteditable="true"]',
+    '[role="textbox"][contenteditable="true"]',
+  ];
+
+  const douyinImageDescriptionSelectors = [
+    'div.zone-container.editor-kit-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
+    'div.zone-container[contenteditable="true"][data-placeholder="添加作品描述..."]',
+    'div[contenteditable="true"][data-placeholder="添加作品描述..."]',
+    'div[contenteditable="true"][data-placeholder*="作品描述"]',
+    'div[contenteditable="true"][data-placeholder*="描述"]',
+    '[class*="editor-kit"] [contenteditable="true"]',
+    '[role="textbox"][contenteditable="true"]',
+  ];
+
+  const douyinVideoReadySelectors = [
+    'input[placeholder="填写作品标题，为作品获得更多流量"]',
+    'input[placeholder*="填写作品标题"]',
+    'input[placeholder*="作品标题"]',
+    'input[placeholder*="添加标题"]',
+    'textarea[placeholder*="标题"]',
+    'div.zone-container.editor-kit-container[contenteditable="true"][data-placeholder="添加作品简介"]',
+    'div.zone-container[contenteditable="true"][data-placeholder="添加作品简介"]',
+    'div[contenteditable="true"][data-placeholder="添加作品简介"]',
+    'div[contenteditable="true"][data-placeholder*="作品简介"]',
+    'div[contenteditable="true"][data-placeholder*="简介"]',
+    '[class*="editor-kit"] [contenteditable="true"]',
+    '[role="textbox"][contenteditable="true"]',
+  ];
+
+  const douyinVideoDescriptionSelectors = [
+    'div.zone-container.editor-kit-container[contenteditable="true"][data-placeholder="添加作品简介"]',
+    'div.zone-container[contenteditable="true"][data-placeholder="添加作品简介"]',
+    'div[contenteditable="true"][data-placeholder="添加作品简介"]',
+    'div[contenteditable="true"][data-placeholder*="作品简介"]',
+    'div[contenteditable="true"][data-placeholder*="简介"]',
+    '[class*="editor-kit"] [contenteditable="true"]',
+    '[role="textbox"][contenteditable="true"]',
+  ];
+
+  const douyinImageUploadInputSelectors = [
+    'input[type="file"][accept*="image/png"]',
+    'input[type="file"][accept*="image/jpeg"]',
+    'input[type="file"][accept*="image/webp"]',
+    'input[type="file"][accept*="image/heic"]',
+    'input[type="file"][accept*="image/*"]',
+    'input[accept*="image/png"]',
+    'input[accept*="image/jpeg"]',
+    'input[accept*="image/webp"]',
+    'input[accept*="image/heic"]',
+    'input[accept*="image/*"]',
+    'input[type="file"][multiple]',
+    'input[type="file"]',
+  ];
+
+  const douyinVideoUploadInputSelectors = [
+    'input[type="file"][accept*="video/mp4"]',
+    'input[type="file"][accept*="video/quicktime"]',
+    'input[type="file"][accept*="video/*"]',
+    'input[type="file"][accept*="video"]',
+    'input[accept*="video/mp4"]',
+    'input[accept*="video/quicktime"]',
+    'input[accept*="video/*"]',
+    'input[accept*="video"]',
+    'input[type="file"]',
+  ];
+
+  const douyinImageHomeEntrySelectors = [
+    'div.bg-tCBPTN:has-text("发布图文")',
+    'div[class*="bg-"]:has-text("发布图文")',
+    'div:has-text("发布图文")',
+    'text=发布图文',
+  ];
+
+  const douyinImageUploadButtonSelectors = [
+    'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4:has-text("上传图文")',
+    'button.container-drag-btn-k6XmB4:has-text("上传图文")',
+    'button.semi-button:has-text("上传图文")',
+    '[role="button"]:has-text("上传图文")',
+    'button:has-text("上传图文")',
+    'div:has-text("上传图文")',
+    'text=上传图文',
+  ];
+
+  function getDouyinImageHomeEntryCard() {
+    const titleNodes = Array.from(document.querySelectorAll("div.title-HvY9Az"));
+    const matchedTitle = titleNodes.find(
+      (node) => node instanceof HTMLElement && normalize(node.textContent || "") === "发布图文",
+    );
+    if (!(matchedTitle instanceof HTMLElement)) {
+      return null;
+    }
+    const card = matchedTitle.closest("div.bg-tCBPTN");
+    return card instanceof HTMLElement ? card : null;
+  }
+
+  function getDouyinImageUploadButton() {
+    const exactTextNode = Array.from(
+      document.querySelectorAll("button.container-drag-btn-k6XmB4 .semi-button-content-right"),
+    ).find(
+      (node) => node instanceof HTMLElement && normalize(node.textContent || "") === "上传图文",
+    );
+    const exactClassButton =
+      exactTextNode instanceof HTMLElement
+        ? exactTextNode.closest(
+            'button.semi-button.semi-button-primary.container-drag-btn-k6XmB4[type="button"]',
+          )
+        : null;
+    if (exactClassButton instanceof HTMLElement) {
+      return exactClassButton;
+    }
+    const exactButton = queryFirst(douyinImageUploadButtonSelectors, document, true);
+    if (exactButton instanceof HTMLElement) return exactButton;
+    const legacyButton = Array.from(document.querySelectorAll("button.container-drag-btn-k6XmB4"))
+      .find((node) => node instanceof HTMLButtonElement && normalize(node.textContent || "").includes("上传图文"));
+    if (legacyButton) return legacyButton;
+    const uploadDiv = document.querySelector('div[class*="container-"][class*="IRuUu2"]')
+      || Array.from(document.querySelectorAll('div[class*="container-"]'))
+          .find((el) => normalize(el.textContent || "").includes("点击上传"));
+    return uploadDiv || null;
+  }
+
+  function getDouyinVisibleButtonTexts(limit = 8) {
+    return Array.from(document.querySelectorAll("button"))
+      .map((node) => normalize(node.textContent || ""))
+      .filter(Boolean)
+      .slice(0, limit);
+  }
+
+  function buildDouyinUploadRouteSnapshot(job = null) {
+    return {
+      currentUrl: String(window.location.href || ""),
+      state: detectDouyinPublishState(job || { draftVideoUrl: null }),
+      hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
+      hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+      hasUploadButton: Boolean(getDouyinImageUploadButton()),
+      visibleButtonTexts: getDouyinVisibleButtonTexts(12),
+      pageTextPreview: normalize(document.body?.innerText || document.body?.textContent || "").slice(0, 240),
+    };
+  }
+
+  function isDouyinImageEditorPage() {
+    const currentUrl = String(window.location.href || "");
+    if (currentUrl.includes("/creator-micro/content/post/image")) {
+      return true;
+    }
+    const titleInput = queryFirst(
+      [
+        'input[placeholder="添加作品标题"]',
+        'input.semi-input[placeholder*="添加作品标题"]',
+        'input[placeholder*="作品标题"]',
+        'input[placeholder*="添加标题"]',
+        'textarea[placeholder*="标题"]',
+      ],
+      document,
+      true,
+    );
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    return (
+      titleInput instanceof HTMLElement
+      || pageText.includes("填写作品标题")
+      || pageText.includes("添加作品标题")
+      || pageText.includes("作品标题")
+    );
+  }
+
+  function scheduleDouyinUploadStateTimeline(job, tag, delays = [0, 500, 1200, 2500, 5000, 8000, 12000]) {
+    const startedAt = Date.now();
+    delays.forEach((delayMs) => {
+      window.setTimeout(() => {
+        //#region debug-point H1:douyin-upload-route-timeline
+        reportPublishAutomationDebug(
+          "H1",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinUploadStateTimeline",
+          {
+            tag,
+            delayMs,
+            elapsedMs: Date.now() - startedAt,
+            ...buildDouyinUploadRouteSnapshot(job),
+          },
+        );
+        //#endregion
+      }, delayMs);
+    });
+  }
+
+  function snapshotDouyinUploadRouteProbe(tag, step, startedAt) {
+    //#region debug-point douyin-home-click-cause-upload-probe
+    reportPublishAutomationDebug(
+      "H1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:snapshotDouyinUploadRouteProbe",
+      {
+        tag,
+        step,
+        elapsedMs: Date.now() - startedAt,
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: null }),
+        hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
+        hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+        hasUploadButton: Boolean(getDouyinImageUploadButton()),
+        visibleButtonTexts: getDouyinVisibleButtonTexts(),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 240),
+      },
+    );
+    //#endregion
+  }
+
+  function scheduleDouyinUploadRouteProbe(tag) {
+    const startedAt = Date.now();
+    [0, 200, 500, 1000, 1800].forEach((delayMs) => {
+      window.setTimeout(() => {
+        snapshotDouyinUploadRouteProbe(tag, `${delayMs}ms`, startedAt);
+      }, delayMs);
+    });
+  }
+
+  async function waitForDouyinImageUploadButton(timeoutMs = 10000) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const button = getDouyinImageUploadButton();
+      if (button instanceof HTMLElement) {
+        return button;
+      }
+      await sleep(200);
+    }
+    return null;
+  }
+
+  function isOnDouyinPublishPage(readySelectors) {
+    const currentUrl = String(window.location.href || "");
+    if (
+      currentUrl.includes("/creator-micro/content/publish") ||
+      currentUrl.includes("/creator-micro/content/upload")
+    ) {
+      return true;
+    }
+    return Boolean(queryFirst(readySelectors, document, true));
+  }
+
+  async function waitForDouyinPublishRouteStable(readySelectors, timeoutMs = 5000, stableMs = 1200) {
+    const startedAt = Date.now();
+    let routeSeenAt = 0;
+    while (Date.now() - startedAt < timeoutMs) {
+      if (queryFirst(readySelectors, document, true)) {
+        return true;
+      }
+      const currentUrl = String(window.location.href || "");
+      const onPublishRoute =
+        currentUrl.includes("/creator-micro/content/publish") ||
+        currentUrl.includes("/creator-micro/content/upload");
+      if (onPublishRoute) {
+        if (!routeSeenAt) {
+          routeSeenAt = Date.now();
+        }
+        if (Date.now() - routeSeenAt >= stableMs) {
+          return true;
+        }
+      } else {
+        routeSeenAt = 0;
+      }
+      await sleep(200);
+    }
+    return false;
+  }
+
+  async function enterDouyinPublishFromHome(entrySelectors, readySelectors, scope) {
+    debugLog(scope, "enter-from-home-start", { url: window.location.href });
+    //#region debug-point douyin-home-stuck-enter-home-start
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinPublishFromHome:start",
+      {
+        scope,
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: null }),
+        hasReadyNode: Boolean(queryFirst(readySelectors, document, true)),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
+      },
+    );
+    //#endregion
+    if (isOnDouyinPublishPage(readySelectors)) {
+      debugLog(scope, "already-on-publish-page", { url: window.location.href });
+      //#region debug-point douyin-home-stuck-enter-home-already
+      reportPublishAutomationDebug(
+        "H2",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinPublishFromHome:already-on-publish-page",
+        {
+          scope,
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+        },
+      );
+      //#endregion
+      return;
+    }
+
+    await gotoUrl("https://creator.douyin.com/creator-micro/home");
+    await sleep(1600);
+
+    if (isOnDouyinPublishPage(readySelectors)) {
+      debugLog(scope, "publish-page-detected-after-home", { url: window.location.href });
+      //#region debug-point douyin-home-stuck-enter-home-detected
+      reportPublishAutomationDebug(
+        "H2",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinPublishFromHome:publish-page-detected-after-home",
+        {
+          scope,
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+        },
+      );
+      //#endregion
+      return;
+    }
+
+    await clickCandidatesUntil(entrySelectors, {
+      successCheck: () => isOnDouyinPublishPage(readySelectors),
+      timeoutMs: 12000,
+      root: document,
+      options: douyinSlowClickOptions(),
+      scope,
+      afterEachWaitMs: 1800,
+      postClickObserveMs: 5000,
+      postClickPollMs: 200,
+    });
+    await sleep(800);
+    debugLog(scope, "enter-from-home-finished", { url: window.location.href });
+    //#region debug-point douyin-home-stuck-enter-home-finished
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:enterDouyinPublishFromHome:finished",
+      {
+        scope,
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: null }),
+        hasReadyNode: Boolean(queryFirst(readySelectors, document, true)),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
+      },
+    );
+    //#endregion
+  }
+
+  async function openDouyinUpload(selectors, inputSelectors, scope) {
+    debugLog(scope, "open-upload-start", { url: window.location.href });
+    const readyInput = queryFirst(inputSelectors, document, false);
+    if (readyInput instanceof HTMLInputElement) {
+      debugLog(scope, "file-input-already-ready", {
+        className: readyInput.className || "",
+        accept: readyInput.accept || "",
+      });
+      return;
+    }
+
+    const uploadButton = queryFirst(selectors, document, true);
+    debugLog(scope, "upload-button-detected", {
+      found: Boolean(uploadButton),
+      className: uploadButton instanceof HTMLElement ? uploadButton.className : "",
+      text: uploadButton instanceof HTMLElement ? normalize(uploadButton.textContent || "") : "",
+      currentUrl: window.location.href,
+    });
+
+    await clickFirst(selectors, 10000, document, douyinSlowActionClickOptions()).catch(() => null);
+    const fileInput = await waitForVisible(inputSelectors, 10000, document, false).catch(() => null);
+    debugLog(scope, "open-upload-finished", {
+      fileInputReady: Boolean(fileInput),
+      currentUrl: window.location.href,
+    });
+    await sleep(700);
+  }
+
+  async function clickKuaishouTagCandidate(tag) {
+    const safeTag = escapeHasText(tag);
+    const selectors = [
+      `span._at-tag-name_eho7l_222:has-text("${safeTag}")`,
+      `span[class*="at-tag-name"]:has-text("${safeTag}")`,
+      `span:has-text("${safeTag}")`,
+      `div:has-text("${safeTag}")`,
+    ];
+    return clickFirst(selectors, 5000, document, {
+      beforeMoveMin: 160,
+      beforeMoveMax: 320,
+      movePauseMin: 100,
+      movePauseMax: 220,
+      holdPauseMin: 110,
+      holdPauseMax: 180,
+      afterClickMin: 260,
+      afterClickMax: 520,
+    })
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  async function fillKuaishouDescription(job) {
+    const editor = await waitForVisible(
+      [
+        "div#work-description-edit",
+        'div._description_eho7l_59#work-description-edit',
+        'div[contenteditable="true"]#work-description-edit',
+        'div[contenteditable="true"][placeholder*="添加合适的话题"]',
+        'div[contenteditable="true"]',
+      ],
+      20000,
+      document,
+      true,
+    );
+    if (!(editor instanceof HTMLElement)) {
+      throw new Error("未找到快手描述输入框");
+    }
+
+    await humanClickElement(editor, {
+      beforeMoveMin: 180,
+      beforeMoveMax: 360,
+      movePauseMin: 120,
+      movePauseMax: 240,
+      holdPauseMin: 120,
+      holdPauseMax: 220,
+      afterClickMin: 260,
+      afterClickMax: 520,
+    });
+    await sleep(randomBetween(180, 320));
+    clearEditable(editor);
+    await sleep(randomBetween(180, 320));
+
+    const title = String(job?.draftTitle || "").trim();
+    const body = String(job?.draftBody || "").trim();
+    const tags = normalizeTags(job?.draftTags);
+
+    if (title) {
+      await typeEditableTextHuman(editor, title, 80, 135);
+    }
+    await pressEditableEnter(editor);
+
+    if (body) {
+      await typeEditableTextHuman(editor, body, 80, 135);
+    }
+
+    for (const tag of tags) {
+      await pressEditableEnter(editor);
+      await typeEditableTextHuman(editor, `#${tag}`, 85, 140);
+      await sleep(randomBetween(500, 900));
+      await clickKuaishouTagCandidate(tag);
+      await sleep(randomBetween(380, 720));
+    }
+  }
+
+  async function uploadFiles(selectors, urls, kind, root = document) {
+    if (!Array.isArray(urls) || urls.length === 0) {
+      //#region debug-point H3:upload-files-empty
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:empty-urls",
+        {
+          kind,
+          selectorCount: Array.isArray(selectors) ? selectors.length : 1,
+          currentUrl: window.location.href,
+        },
+      );
+      //#endregion
+      return;
+    }
+    //#region debug-point H3:upload-files-start
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:start",
+      {
+        kind,
+        urlCount: urls.length,
+        firstUrl: String(urls[0] || ""),
+        selectors,
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: kind === "video" ? urls[0] || null : null }),
+      },
+    );
+    //#endregion
+    const input = await waitForVisible(selectors, 30000, root, false);
+    if (!(input instanceof HTMLInputElement) || input.type !== "file") {
+      //#region debug-point H3:upload-files-invalid-input
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:invalid-input",
+        {
+          kind,
+          currentUrl: window.location.href,
+          tagName: input?.tagName || "",
+          inputType: input?.type || "",
+        },
+      );
+      //#endregion
+      throw new Error("未找到可上传文件输入框");
+    }
+    //#region debug-point H3:upload-files-input-ready
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:input-ready",
+      {
+        kind,
+        currentUrl: window.location.href,
+        accept: input.accept || "",
+        multiple: Boolean(input.multiple),
+        className: input.className || "",
+      },
+    );
+    //#endregion
+
+    const files = [];
+    for (let index = 0; index < urls.length; index += 1) {
+      files.push(await fetchFile(urls[index], index, kind));
+    }
+    //#region debug-point H4:upload-files-fetched
+    reportPublishAutomationDebug(
+      "H4",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:fetched-files",
+      {
+        kind,
+        currentUrl: window.location.href,
+        fileCount: files.length,
+        files: files.map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        })),
+      },
+    );
+    //#endregion
+
+    const transfer = new DataTransfer();
+    files.forEach((file) => transfer.items.add(file));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    //#region debug-point H3:upload-files-dispatched
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:uploadFiles:dispatched",
+      {
+        kind,
+        currentUrl: window.location.href,
+        assignedFileCount: input.files ? input.files.length : 0,
+        assignedFiles: Array.from(input.files || []).map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        })),
+      },
+    );
+    //#endregion
+  }
+
+  async function waitForHints(successHints, failureHints, timeoutErrorMessage, timeoutMs = 120000) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+      if (failureHints.some((hint) => pageText.includes(hint))) {
+        throw new Error(failureHints.find((hint) => pageText.includes(hint)) || "发布失败");
+      }
+      if (successHints.some((hint) => pageText.includes(hint))) {
+        return;
+      }
+      await sleep(1200);
+    }
+    throw new Error(timeoutErrorMessage);
+  }
+
+  async function gotoUrl(url) {
+    if (window.location.href.startsWith(url)) {
+      debugLog("goto", "skip same url", { currentUrl: window.location.href, targetUrl: url });
+      return;
+    }
+    debugLog("goto", "navigate", { currentUrl: window.location.href, targetUrl: url });
+    touchPendingPublishStoredAt();
+    window.location.assign(url);
+    await sleep(2500);
+  }
+
+  function touchPendingPublishStoredAt() {
+    try {
+      const key = "AI_SUPERWEB_PENDING_BITBROWSER_PUBLISH";
+      const raw = window.sessionStorage?.getItem?.(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      parsed.storedAt = Date.now();
+      window.sessionStorage.setItem(key, JSON.stringify(parsed));
+    } catch (_) {}
+  }
+
+  window.addEventListener("beforeunload", () => {
+    touchPendingPublishStoredAt();
+  });
+
+  async function ensureKuaishouPublishReady(isVideo) {
+    await sleep(1500);
+    const entryTitle = isVideo ? "发布视频" : "发布图文";
+    const uploadLabel = isVideo ? "上传视频" : "上传图片";
+
+    await clickFirst(
+      [
+        `div.item:has-text("${entryTitle}")`,
+        `div[class*="item"]:has-text("${entryTitle}")`,
+        `div:has-text("${entryTitle}")`,
+        `text=${entryTitle}`,
+      ],
+      10000,
+      document,
+      {
+        beforeMoveMin: 180,
+        beforeMoveMax: 360,
+        movePauseMin: 120,
+        movePauseMax: 240,
+        holdPauseMin: 120,
+        holdPauseMax: 220,
+        afterClickMin: 320,
+        afterClickMax: 700,
+      },
+    );
+
+    await sleep(1000);
+
+    await clickFirst(
+      [
+        isVideo ? "button._upload-btn_1j3uy_87" : "button._upload-btn_ysbff_57",
+        `button:has-text("${uploadLabel}")`,
+        `[role="button"]:has-text("${uploadLabel}")`,
+        `div:has-text("${uploadLabel}")`,
+        `text=${uploadLabel}`,
+      ],
+      10000,
+      document,
+      {
+        beforeMoveMin: 160,
+        beforeMoveMax: 320,
+        movePauseMin: 100,
+        movePauseMax: 220,
+        holdPauseMin: 100,
+        holdPauseMax: 180,
+        afterClickMin: 260,
+        afterClickMax: 520,
+      },
+    ).catch(() => null);
+
+    await sleep(700);
+  }
+
+  function assertKuaishouLoginStillValid() {
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    if (pageText.includes("您的登录状态已过期") || pageText.includes("点击确定重新登录")) {
+      throw new Error("快手登录已失效，请重新登录后再发布");
+    }
+  }
+
+  function isKuaishouProfilePage() {
+    return window.location.href.startsWith("https://cp.kuaishou.com/profile");
+  }
+
+  function isKuaishouEditorPage(isVideo) {
+    const inputSelectors = isVideo
+      ? ['input[type="file"][accept*="video"]', 'input[type="file"]']
+      : [
+          'input[type="file"][accept*="image/png"]',
+          'input[type="file"][accept*="image/jpeg"]',
+          'input[type="file"][accept*="image/webp"]',
+          'input[type="file"][accept*="image/*"]',
+          'input[accept*="image/png"]',
+          'input[accept*="image/jpeg"]',
+          'input[accept*="image/webp"]',
+          'input[accept*="image/*"]',
+          'input[type="file"][accept*="image"]',
+          'input[type="file"]',
+        ];
+    return Boolean(
+      queryFirst(
+        [
+          "div#work-description-edit",
+          'div[contenteditable="true"]#work-description-edit',
+          ...inputSelectors,
+        ],
+        document,
+        false,
+      ),
+    );
+  }
+
+  function isXiaohongshuAlreadyOnEditor() {
+    const url = String(window.location.href || "");
+    if (url.includes("/publish/publish")) {
+      return true;
+    }
+    const hasFileInput = Boolean(
+      queryFirst(['input[type="file"][accept*="image"]', 'input[type="file"][accept*="video"]', 'input[type="file"]'], document, false),
+    );
+    const hasTitleInput = Boolean(
+      queryFirst(['input[placeholder*="标题"]', 'textarea[placeholder*="标题"]'], document, true),
+    );
+    return hasFileInput || hasTitleInput;
+  }
+
+  async function ensureXiaohongshuPublishReady(isVideo) {
+    await sleep(1200);
+    if (isXiaohongshuAlreadyOnEditor()) {
+      debugLog("xiaohongshu", "already-on-editor", { url: window.location.href });
+      return;
+    }
+    if (!isVideo) {
+      await openXiaohongshuImagePublishCardEntry().catch(() => null);
+      await sleep(1200);
+      if (isXiaohongshuAlreadyOnEditor()) {
+        reportPublishAutomationDebug(
+          "X1",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureXiaohongshuPublishReady:image-card-success",
+          {
+            currentUrl: window.location.href,
+            pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+          },
+        );
+        return;
+      }
+    }
+    await clickFirst(
+      [
+        'button:has-text("发布笔记")',
+        'div:has-text("发布笔记")',
+        'text=发布笔记',
+        'button:has-text("去发布")',
+        'div:has-text("去发布")',
+        'text=去发布',
+        'button:has-text("创建笔记")',
+        'div:has-text("创建笔记")',
+        'text=创建笔记',
+      ],
+      5000,
+      document,
+      {
+        beforeMoveMin: 260,
+        beforeMoveMax: 520,
+        movePauseMin: 160,
+        movePauseMax: 320,
+        holdPauseMin: 140,
+        holdPauseMax: 260,
+        afterClickMin: 420,
+        afterClickMax: 760,
+      },
+    ).catch(() => null);
+    await sleep(1800);
+
+    if (!isVideo) {
+      await clickFirst(
+        [
+          'button:has-text("上传图文")',
+          '[role="button"]:has-text("上传图文")',
+          'div:has-text("上传图文")',
+          'text=上传图文',
+          'button:has-text("图文")',
+          'text=图文',
+        ],
+        5000,
+        document,
+        {
+          beforeMoveMin: 240,
+          beforeMoveMax: 500,
+          movePauseMin: 150,
+          movePauseMax: 300,
+          holdPauseMin: 130,
+          holdPauseMax: 240,
+          afterClickMin: 360,
+          afterClickMax: 680,
+        },
+      ).catch(() => null);
+      await sleep(900);
+    }
+  }
+
+  async function ensureDouyinImagePublishReady() {
+    //#region debug-point douyin-home-network-ensure-ready-start
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureDouyinImagePublishReady:start",
+      {
+        currentUrl: window.location.href,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
+        hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
+        hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+      },
+    );
+    //#endregion
+    debugLog("douyin-image", "ensure-ready-start", { url: window.location.href });
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "ensure-ready-start");
+    await sleep(1200);
+    if (queryFirst(douyinImageReadySelectors, document, true)) {
+      debugLog("douyin-image", "ready-indicator-detected-before-switch", { url: window.location.href });
+      return;
+    }
+    const uploadButton = getDouyinImageUploadButton();
+    if (!(uploadButton instanceof HTMLElement)) {
+      throw new Error("未找到抖音图文上传按钮");
+    }
+    await humanClickElement(uploadButton, {
+      ...douyinSlowActionClickOptions(),
+      debugScope: "douyin-image",
+      debugLabel: "upload-button",
+    });
+    scheduleDouyinUploadRouteProbe("after-upload-button-click");
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "after-upload-button-click");
+    await waitForVisible(
+      [...douyinImageUploadInputSelectors, ...douyinImageReadySelectors],
+      10000,
+      document,
+      false,
+    ).catch(() => null);
+    await sleep(1200);
+    //#region debug-point douyin-home-network-ensure-ready-end
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureDouyinImagePublishReady:end",
+      {
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: null }),
+        hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
+        hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
+      },
+    );
+    //#endregion
+    debugLog("douyin-image", "ensure-ready-finished", { url: window.location.href });
+  }
+
+  function hasDouyinUnpublishedDraftPrompt() {
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    return pageText.includes("你还有上次未发布的图文") && pageText.includes("放弃");
+  }
+
+  async function dismissDouyinUnpublishedDraftPrompt() {
+    const promptPresent = hasDouyinUnpublishedDraftPrompt();
+    //#region debug-point douyin-draft-prompt-before-dismiss
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:dismissDouyinUnpublishedDraftPrompt:before",
+      {
+        currentUrl: window.location.href,
+        promptPresent,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+      },
+    );
+    //#endregion
+    if (!promptPresent) {
+      return false;
+    }
+
+    const clicked = await clickFirst(
+      [
+        'button:has-text("放弃")',
+        '[role="button"]:has-text("放弃")',
+        'span:has-text("放弃")',
+        'div:has-text("放弃")',
+        "text=放弃",
+      ],
+      5000,
+      document,
+      {
+        ...douyinSlowActionClickOptions(),
+        debugScope: "douyin-image",
+        debugLabel: "dismiss-unpublished-draft",
+      },
+    )
+      .then(() => true)
+      .catch(() => false);
+
+    if (clicked) {
+      await sleep(1200);
+    }
+
+    //#region debug-point douyin-draft-prompt-after-dismiss
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:dismissDouyinUnpublishedDraftPrompt:after",
+      {
+        currentUrl: window.location.href,
+        clicked,
+        promptStillPresent: hasDouyinUnpublishedDraftPrompt(),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+      },
+    );
+    //#endregion
+    return clicked;
+  }
+
+  async function enterDouyinImagePublishFromHome(options = {}) {
+    const currentUrl = String(window.location.href || "");
+    const alreadyOnUploadRoute =
+      currentUrl.includes("/creator-micro/content/upload") ||
+      currentUrl.includes("/creator-micro/content/publish") ||
+      currentUrl.includes("/creator-micro/content/post/");
+    if (alreadyOnUploadRoute) {
+      return;
+    }
+    const preferHomeEntry = Boolean(options?.preferHomeEntry);
+    if (!currentUrl.includes("/creator-micro/home") || preferHomeEntry) {
+      await gotoUrl("https://creator.douyin.com/creator-micro/home");
+      await sleep(1800);
+    }
+
+    const entryCard = getDouyinImageHomeEntryCard()
+      || (await waitForVisible(douyinImageHomeEntrySelectors, 10000, document, true).catch(() => null));
+    if (!(entryCard instanceof HTMLElement)) {
+      throw new Error("未找到抖音主页的发布图文入口");
+    }
+
+    await humanClickElement(entryCard, {
+      ...douyinSlowClickOptions(),
+      debugScope: "douyin-image",
+      debugLabel: "home-entry-card",
+    });
+    scheduleDouyinUploadRouteProbe("after-home-entry-card-click");
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "after-home-entry-card-click");
+
+    await waitForVisible(
+      [...douyinImageUploadButtonSelectors, ...douyinImageUploadInputSelectors, ...douyinImageReadySelectors],
+      10000,
+      document,
+      false,
+    ).catch(() => null);
+    await sleep(1000);
+  }
+
+  async function openDouyinImageUpload() {
+    debugLog("douyin-image", "open-upload-start", { url: window.location.href });
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "open-upload-start");
+    const readyInput = queryFirst(douyinImageUploadInputSelectors, document, false);
+    if (readyInput instanceof HTMLInputElement) {
+      debugLog("douyin-image", "file-input-already-ready", {
+        className: readyInput.className || "",
+        accept: readyInput.accept || "",
+      });
+      //#region debug-point H2:open-upload-input-already-ready
+      reportPublishAutomationDebug(
+        "H2",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:openDouyinImageUpload:input-already-ready",
+        {
+          ...buildDouyinUploadRouteSnapshot({ draftVideoUrl: null }),
+          accept: readyInput.accept || "",
+          className: readyInput.className || "",
+        },
+      );
+      //#endregion
+      return;
+    }
+    let uploadButton = await waitForDouyinImageUploadButton(12000);
+    if (!(uploadButton instanceof HTMLElement)) {
+      const entryCard = getDouyinImageHomeEntryCard();
+      if (entryCard instanceof HTMLElement) {
+        await humanClickElement(entryCard, {
+          ...douyinSlowActionClickOptions(),
+          debugScope: "douyin-image",
+          debugLabel: "retry-home-entry-card",
+        }).catch(() => null);
+        await sleep(1200);
+      }
+      uploadButton = await waitForDouyinImageUploadButton(8000);
+    }
+    debugLog("douyin-image", "upload-button-detected", {
+      found: Boolean(uploadButton),
+      className: uploadButton instanceof HTMLElement ? uploadButton.className : "",
+      text: uploadButton instanceof HTMLElement ? normalize(uploadButton.textContent || "") : "",
+      currentUrl: window.location.href,
+    });
+    //#region debug-point H2:open-upload-button-detected
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openDouyinImageUpload:button-detected",
+      {
+        ...buildDouyinUploadRouteSnapshot({ draftVideoUrl: null }),
+        found: Boolean(uploadButton),
+        className: uploadButton instanceof HTMLElement ? uploadButton.className : "",
+        text: uploadButton instanceof HTMLElement ? normalize(uploadButton.textContent || "") : "",
+      },
+    );
+    //#endregion
+    if (!(uploadButton instanceof HTMLElement)) {
+      throw new Error("未找到抖音图文上传按钮");
+    }
+    await humanClickElement(uploadButton, {
+      ...douyinSlowActionClickOptions(),
+      debugScope: "douyin-image",
+      debugLabel: "open-upload-button",
+    });
+    scheduleDouyinUploadRouteProbe("after-open-upload-button-click");
+    scheduleDouyinUploadStateTimeline({ draftVideoUrl: null }, "after-open-upload-button-click");
+    const fileInput = await waitForVisible(douyinImageUploadInputSelectors, 10000, document, false).catch(() => null);
+    debugLog("douyin-image", "open-upload-finished", {
+      fileInputReady: Boolean(fileInput),
+      currentUrl: window.location.href,
+    });
+    //#region debug-point H2:open-upload-finished
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openDouyinImageUpload:finished",
+      {
+        ...buildDouyinUploadRouteSnapshot({ draftVideoUrl: null }),
+        fileInputReady: Boolean(fileInput),
+        inputAccept: fileInput instanceof HTMLInputElement ? fileInput.accept || "" : "",
+      },
+    );
+    //#endregion
+    await sleep(700);
+  }
+
+  async function enterDouyinVideoPublishFromHome() {
+    const currentUrl = String(window.location.href || "");
+    const alreadyOnVideoRoute =
+      currentUrl.includes("/creator-micro/content/post/video") ||
+      currentUrl.includes("/creator-micro/content/upload");
+    if (alreadyOnVideoRoute) {
+      return;
+    }
+    await gotoUrl("https://creator.douyin.com/creator-micro/content/post/video?enter_from=publish_page");
+    await sleep(2000);
+  }
+
+  async function openDouyinVideoUpload() {
+    await openDouyinUpload(
+      [
+        'button.container-drag-btn-k6XmB4:has-text("上传视频")',
+        'button:has-text("上传视频")',
+        '[role="button"]:has-text("上传视频")',
+        'div:has-text("上传视频")',
+        'text=上传视频',
+      ],
+      douyinVideoUploadInputSelectors,
+      "douyin-video",
+    );
+  }
+
+  function buildDouyinTopicCandidateSelectors(tag) {
+    const safeTag = escapeHasText(tag);
+    return [
+      `.mention-suggest-mount-dom .tag-dVUDkJ:has-text("${safeTag}")`,
+      `.mention-suggest-mount-dom [class*="tag-hash-view-name"]:has-text("${safeTag}")`,
+      `.mention-suggest-mount-dom [class*="tag-hash"]:has-text("${safeTag}")`,
+      `.mention-suggest-mount-dom [role="option"]:has-text("${safeTag}")`,
+      `div[class*="tag"]:has-text("${safeTag}")`,
+      `span[class*="tag"]:has-text("${safeTag}")`,
+      `div:has-text("${safeTag}")`,
+      `span:has-text("${safeTag}")`,
+    ];
+  }
+
+  async function clickDouyinTopicCandidate(tag) {
+    return clickFirst(buildDouyinTopicCandidateSelectors(tag), 5000, document, douyinSlowActionClickOptions())
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  async function fillDouyinImageDescriptionAndTopics(job) {
+    const editorSelectors = douyinImageDescriptionSelectors;
+    const editor = await waitForVisible(editorSelectors, 30000, document, true);
+    if (!(editor instanceof HTMLElement)) {
+      throw new Error("未找到抖音文案输入框");
+    }
+
+    await humanClickElement(editor, douyinSlowActionClickOptions());
+    await sleep(randomBetween(220, 420));
+    clearEditable(editor);
+    await sleep(randomBetween(220, 420));
+
+    const body = String(job?.draftBody || "").trim();
+    const tags = normalizeTags(job?.draftTags);
+
+    if (body) {
+      await typeEditableTextHuman(editor, body, 75, 125);
+    }
+
+    for (const [index, tag] of tags.entries()) {
+      await humanClickElement(editor, douyinSlowActionClickOptions()).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+
+      await sleep(randomBetween(320, 560));
+      await appendText(
+        editorSelectors,
+        `${body || index > 0 ? " " : ""}#${tag}`,
+        8000,
+        document,
+        { preferHumanType: true, perCharMin: 110, perCharMax: 185 },
+      );
+      await sleep(randomBetween(620, 980));
+
+      const topicButton = await clickFirst(
+        [
+          'div.toolbar-button-spPS4r:has-text("#添加话题")',
+          '[class*="toolbar-button"]:has-text("#添加话题")',
+          'button:has-text("#添加话题")',
+          '[role="button"]:has-text("#添加话题")',
+          'div:has-text("#添加话题")',
+          'text=#添加话题',
+        ],
+        5000,
+        document,
+        douyinSlowActionClickOptions(),
+      ).catch(() => null);
+
+      const applied = await clickDouyinTopicCandidate(tag);
+      if (!applied && topicButton) {
+        debugLog("douyin-image", "topic-candidate-not-applied", { tag });
+      }
+
+      await sleep(randomBetween(480, 840));
+      await humanClickElement(editor, douyinSlowActionClickOptions()).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+    }
+  }
+
+  async function fillDouyinVideoDescriptionAndTopics(job) {
+    const editorSelectors = douyinVideoDescriptionSelectors;
+    const editor = await waitForVisible(editorSelectors, 30000, document, true);
+    if (!(editor instanceof HTMLElement)) {
+      throw new Error("未找到抖音简介输入框");
+    }
+
+    await humanClickElement(editor, douyinSlowActionClickOptions());
+    await sleep(randomBetween(220, 420));
+    clearEditable(editor);
+    await sleep(randomBetween(220, 420));
+
+    const body = String(job?.draftBody || "").trim();
+    const tags = normalizeTags(job?.draftTags);
+
+    if (body) {
+      await typeEditableTextHuman(editor, body, 75, 125);
+    }
+
+    for (const [index, tag] of tags.entries()) {
+      await humanClickElement(editor, douyinSlowActionClickOptions()).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+
+      await sleep(randomBetween(320, 560));
+      await appendText(
+        editorSelectors,
+        `${body || index > 0 ? " " : ""}#${tag}`,
+        8000,
+        document,
+        { preferHumanType: true, perCharMin: 110, perCharMax: 185 },
+      );
+      await sleep(randomBetween(620, 980));
+
+      const topicButton = await clickFirst(
+        [
+          'div.toolbar-button-spPS4r:has-text("#添加话题")',
+          '[class*="toolbar-button"]:has-text("#添加话题")',
+          'button:has-text("#添加话题")',
+          '[role="button"]:has-text("#添加话题")',
+          'div:has-text("#添加话题")',
+          'text=#添加话题',
+        ],
+        5000,
+        document,
+        douyinSlowActionClickOptions(),
+      ).catch(() => null);
+
+      const applied = await clickDouyinTopicCandidate(tag);
+      if (!applied && topicButton) {
+        debugLog("douyin-video", "topic-candidate-not-applied", { tag });
+      }
+
+      await sleep(randomBetween(480, 840));
+      await humanClickElement(editor, douyinSlowActionClickOptions()).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+    }
+  }
+
+  async function selectDouyinNoDeclaration() {
+    await clickFirst(
+      [
+        'div.selectBox-buZRzi',
+        '[class*="selectBox"]:has-text("请选择自主声明")',
+        '[class*="selectText"]:has-text("请选择自主声明")',
+        '[class*="selectBox"]:has-text("自主声明")',
+        '[class*="selectText"]:has-text("自主声明")',
+        'text=请选择自主声明',
+        'text=自主声明',
+      ],
+      8000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    await sleep(300);
+
+    await clickFirst(
+      [
+        'label.semi-radio:has-text("无需添加自主声明")',
+        'label:has-text("无需添加自主声明")',
+        '[class*="semi-radio"]:has-text("无需添加自主声明")',
+        'text=无需添加自主声明',
+        'label:has-text("无需声明")',
+        '[class*="semi-radio"]:has-text("无需声明")',
+        'text=无需声明',
+      ],
+      6000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    await sleep(520);
+
+    const confirmSelectors = [
+      'button:has-text("确定")',
+      '[role="button"]:has-text("确定")',
+      'text=确定',
+    ];
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 10000) {
+      const node = queryFirst(confirmSelectors, document, true);
+      if (
+        node instanceof HTMLElement &&
+        !node.hasAttribute("disabled") &&
+        node.getAttribute("aria-disabled") !== "true" &&
+        (!(node instanceof HTMLButtonElement) || !node.disabled)
+      ) {
+        await humanClickElement(node, douyinSlowActionClickOptions()).catch(() => null);
+        await sleep(680);
+        return;
+      }
+      await sleep(300);
+    }
+  }
+
+  async function ensureDouyinVideoPublishReady() {
+    await sleep(1200);
+    if (queryFirst(douyinVideoReadySelectors, document, true)) {
+      debugLog("douyin-video", "ready-indicator-detected-before-switch", { url: window.location.href });
+      return;
+    }
+    await clickFirst(
+      [
+        'button:has-text("发布视频")',
+        '[role="tab"]:has-text("发布视频")',
+        '[role="button"]:has-text("发布视频")',
+        'div:has-text("发布视频")',
+        'text=发布视频',
+        'button:has-text("上传视频")',
+        'text=上传视频',
+      ],
+      5000,
+      document,
+      douyinSlowActionClickOptions(),
+    ).catch(() => null);
+    await sleep(1200);
+  }
+
+  async function openWechatMpRecentEntry(recentEntryText, publishButtonText, readySelectors, publishTimeoutMs) {
+    const publishButtonSelectors = [
+      `button[type="button"].weui-desktop-btn.weui-desktop-btn_primary:has-text("${publishButtonText}")`,
+      `button.weui-desktop-btn.weui-desktop-btn_primary:has-text("${publishButtonText}")`,
+      `button:has-text("${publishButtonText}")`,
+      `div:has-text("${publishButtonText}")`,
+      `text=${publishButtonText}`,
+    ];
+    const readyPage = queryFirst(readySelectors, document, true);
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:start",
+      {
+        currentUrl: window.location.href,
+        recentEntryText,
+        publishButtonText,
+        hasReadyPage: Boolean(readyPage),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    if (readyPage) {
+      await sleep(900);
+      return;
+    }
+
+    const recentEntrySelectors = [
+      `a:has-text("${recentEntryText}")`,
+      `button:has-text("${recentEntryText}")`,
+      `[role="button"]:has-text("${recentEntryText}")`,
+      `div:has-text("${recentEntryText}")`,
+      `span:has-text("${recentEntryText}")`,
+      `text=${recentEntryText}`,
+    ];
+    const visibleRecentEntry = queryFirst(recentEntrySelectors, document, true);
+    if (visibleRecentEntry) {
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:recent-entry-visible",
+        {
+          currentUrl: window.location.href,
+          recentEntryText,
+          node: getElementDebugSnapshot(visibleRecentEntry),
+        },
+      );
+      await humanClickElement(visibleRecentEntry, {
+        beforeMoveMin: 280,
+        beforeMoveMax: 560,
+        movePauseMin: 180,
+        movePauseMax: 360,
+        holdPauseMin: 150,
+        holdPauseMax: 280,
+        afterClickMin: 460,
+        afterClickMax: 820,
+      });
+      await sleep(1600);
+    } else {
+      const visiblePublishButton = queryFirst(publishButtonSelectors, document, true);
+      if (visiblePublishButton) {
+        reportPublishAutomationDebug(
+          "W1",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:publish-button-visible-before-recent",
+          {
+            currentUrl: window.location.href,
+            publishButtonText,
+            node: getElementDebugSnapshot(visiblePublishButton),
+          },
+        );
+        await humanClickElement(visiblePublishButton, {
+          beforeMoveMin: 280,
+          beforeMoveMax: 560,
+          movePauseMin: 180,
+          movePauseMax: 360,
+          holdPauseMin: 150,
+          holdPauseMax: 280,
+          afterClickMin: 460,
+          afterClickMax: 820,
+        });
+        await sleep(1800);
+        return;
+      }
+
+      await clickFirst(
+        recentEntrySelectors,
+        9000,
+        document,
+        {
+          beforeMoveMin: 280,
+          beforeMoveMax: 560,
+          movePauseMin: 180,
+          movePauseMax: 360,
+          holdPauseMin: 150,
+          holdPauseMax: 280,
+          afterClickMin: 460,
+          afterClickMax: 820,
+        },
+      );
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:recent-entry-clicked",
+        {
+          currentUrl: window.location.href,
+          recentEntryText,
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+        },
+      );
+      await sleep(1600);
+    }
+
+    const readyAfterRecentClick = queryFirst(readySelectors, document, true);
+    if (readyAfterRecentClick) {
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:ready-after-recent-click",
+        {
+          currentUrl: window.location.href,
+          recentEntryText,
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+        },
+      );
+      await sleep(900);
+      return;
+    }
+
+    await clickFirst(
+      publishButtonSelectors,
+      publishTimeoutMs,
+      document,
+      {
+        beforeMoveMin: 280,
+        beforeMoveMax: 560,
+        movePauseMin: 180,
+        movePauseMax: 360,
+        holdPauseMin: 150,
+        holdPauseMax: 280,
+        afterClickMin: 460,
+        afterClickMax: 820,
+      },
+    );
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openWechatMpRecentEntry:publish-button-clicked",
+      {
+        currentUrl: window.location.href,
+        publishButtonText,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    await sleep(1800);
+  }
+
+  function isWechatMpEditorPage(isVideo) {
+    const currentUrl = String(window.location.href || "");
+    if (
+      currentUrl.includes("/platform/post/create") ||
+      currentUrl.includes("/platform/post/finderNewLifeCreate")
+    ) {
+      return true;
+    }
+
+    const titleSelectors = isVideo
+      ? []
+      : [
+          'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题，22个字符内"]',
+          'textarea[placeholder="填写标题，22个字符内"]',
+          'input[placeholder*="填写标题"]',
+          'input[placeholder*="标题"]',
+          'textarea[placeholder*="标题"]',
+        ];
+    const descSelectors = [
+      'div.post-desc-box div.input-editor[contenteditable]',
+      'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+      '[contenteditable][data-placeholder="添加描述"]',
+      'div.input-editor[contenteditable]',
+      'div[contenteditable="true"]',
+    ];
+    return Boolean(queryFirst([...titleSelectors, ...descSelectors], document, true));
+  }
+
+  async function ensureWechatMpPublishReady(isVideo) {
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureWechatMpPublishReady:start",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        isEditorPage: isWechatMpEditorPage(isVideo),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    if (isWechatMpEditorPage(isVideo)) {
+      return;
+    }
+    await sleep(1600);
+    if (!isVideo) {
+      await openWechatMpRecentEntry(
+        "最近图文",
+        "发表图文",
+        [
+          'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题, 22个字符内"]',
+          'input[placeholder="填写标题，22个字符内"]',
+          'textarea[placeholder="填写标题，22个字符内"]',
+          'input[placeholder*="填写标题"]',
+          'input[placeholder*="标题"]',
+          'textarea[placeholder*="标题"]',
+          'div.post-desc-box div.input-editor[contenteditable]',
+          'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        ],
+        9000,
+      );
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureWechatMpPublishReady:after-image-entry",
+        {
+          currentUrl: window.location.href,
+          isVideo,
+          isEditorPage: isWechatMpEditorPage(isVideo),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+        },
+      );
+      return;
+    }
+
+    await openWechatMpRecentEntry(
+      "最近视频",
+      "发表视频",
+      [
+        'div.post-desc-box div.input-editor[contenteditable]',
+        'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+        '[contenteditable][data-placeholder="添加描述"]',
+      ],
+      7000,
+    );
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:ensureWechatMpPublishReady:after-video-entry",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        isEditorPage: isWechatMpEditorPage(isVideo),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+  }
+
+  function buildTagText(tags) {
+    return (tags || [])
+      .map((tag) => String(tag || "").replace(/^#+/, "").trim())
+      .filter(Boolean)
+      .map((tag) => `#${tag}`)
+      .join(" ");
+  }
+
+  function buildPublishPageBodyWithTags(job) {
+    const parts = [job?.draftBody, buildTagText(job?.draftTags)]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    return parts.join("\n").trim();
+  }
+
+  async function waitForXiaohongshuUploadComplete(timeoutMs = 60000) {
+    const startedAt = Date.now();
+    await sleep(2000);
+    while (Date.now() - startedAt < timeoutMs) {
+      const pageText = normalize(document.body?.innerText || "");
+      const hasProgress = pageText.includes("上传中") || pageText.includes("处理中") || pageText.includes("正在上传");
+      const progressBars = document.querySelectorAll('[class*="progress"], [class*="loading"], [class*="upload"][class*="ing"]');
+      const hasActiveProgress = Array.from(progressBars).some((node) => matchesVisibility(node));
+      if (!hasProgress && !hasActiveProgress) {
+        break;
+      }
+      await sleep(1500);
+    }
+    await sleep(1500);
+  }
+
+  function findXiaohongshuImagePublishCard() {
+    const candidates = queryCandidates(
+      [
+        'div.publish-card',
+        '[class*="publish-card"]',
+        'div[class*="card"]',
+        'div[class*="publish"]',
+      ],
+      document,
+      true,
+    )
+      .map(resolveClickableCandidate)
+      .filter((node) => node instanceof HTMLElement);
+    return (
+      candidates.find((node) => {
+        const text = normalize(node?.textContent || "");
+        return text.includes("发布图文笔记") || (text.includes("图文笔记") && text.includes("png"));
+      }) || null
+    );
+  }
+
+  async function openXiaohongshuImagePublishCardEntry() {
+    const card = findXiaohongshuImagePublishCard();
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openXiaohongshuImagePublishCardEntry:resolved",
+      {
+        found: card instanceof HTMLElement,
+        cardText: normalize(card?.textContent || "").slice(0, 180),
+        cardClassName: String(card?.className || ""),
+      },
+    );
+    if (!(card instanceof HTMLElement)) {
+      return null;
+    }
+    await humanClickElement(card, {
+      beforeMoveMin: 260,
+      beforeMoveMax: 520,
+      movePauseMin: 160,
+      movePauseMax: 320,
+      holdPauseMin: 140,
+      holdPauseMax: 260,
+      afterClickMin: 420,
+      afterClickMax: 760,
+      debugScope: "xiaohongshu",
+      debugLabel: "publish-image-card",
+    });
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:openXiaohongshuImagePublishCardEntry:clicked",
+      {
+        currentUrl: window.location.href,
+        cardText: normalize(card.textContent || "").slice(0, 180),
+        cardClassName: String(card.className || ""),
+      },
+    );
+    return card;
+  }
+
+  function findXiaohongshuPublishButton(publishSelectors = []) {
+    const exactPublishButton = queryFirst(
+      ['div > div > button.ce-btn.bg-red', 'button.ce-btn.bg-red:has-text("发布")', 'button.ce-btn.bg-red'],
+      document,
+      true,
+    );
+    if (exactPublishButton instanceof HTMLElement && normalize(exactPublishButton.textContent || "") === "发布") {
+      return exactPublishButton;
+    }
+    const directButton = queryFirst(publishSelectors, document, true);
+    if (directButton instanceof HTMLElement) {
+      return directButton;
+    }
+    const candidates = queryCandidates(
+      [
+        "button",
+        '[role="button"]',
+        "a",
+        'div[role="button"]',
+        '[class*="button"]',
+        '[class*="btn"]',
+      ],
+      document,
+      true,
+    )
+      .map(resolveClickableCandidate)
+      .filter((node) => node instanceof HTMLElement);
+    const exactClassButton = candidates.find(
+      (node) =>
+        node instanceof HTMLButtonElement
+        && node.classList.contains("ce-btn")
+        && node.classList.contains("bg-red")
+        && normalize(node.textContent || "") === "发布",
+    );
+    if (exactClassButton instanceof HTMLElement) {
+      return exactClassButton;
+    }
+    const preferredTexts = new Set(["发布", "发布笔记"]);
+    return candidates.find((node) => preferredTexts.has(normalize(node.textContent || ""))) || null;
+  }
+
+  function buildXiaohongshuTagCandidateSelectors(tag) {
+    const safeTag = escapeHasText(tag);
+    return [
+      `[role="option"]:has-text("${safeTag}")`,
+      `li[role="option"]:has-text("${safeTag}")`,
+      `[class*="suggest"] [role="option"]:has-text("${safeTag}")`,
+      `[class*="suggest"] li:has-text("${safeTag}")`,
+      `[class*="suggest"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="topic"] [role="option"]:has-text("${safeTag}")`,
+      `[class*="topic"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="tag"] [role="option"]:has-text("${safeTag}")`,
+      `[class*="tag"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="mention"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="recommend"] [class*="item"]:has-text("${safeTag}")`,
+      `[class*="option"]:has-text("${safeTag}")`,
+    ];
+  }
+
+  function buildXiaohongshuFirstTagCandidateSelectors() {
+    return [
+      '[role="listbox"] [role="option"]',
+      '[role="dialog"] [role="option"]',
+      '[class*="suggest"] [role="option"]',
+      '[class*="suggest"] li',
+      '[class*="suggest"] [class*="item"]',
+      '[class*="topic"] [role="option"]',
+      '[class*="topic"] [class*="item"]',
+      '[class*="tag"] [role="option"]',
+      '[class*="tag"] [class*="item"]',
+      '[class*="recommend"] [class*="item"]',
+      '[class*="mention"] [class*="item"]',
+      '[class*="option"]',
+    ];
+  }
+
+  function findFirstVisibleXiaohongshuTagCandidate() {
+    const candidates = queryCandidates(buildXiaohongshuFirstTagCandidateSelectors(), document, true)
+      .map(resolveClickableCandidate)
+      .filter((node) => node instanceof HTMLElement);
+    if (!candidates.length) {
+      return null;
+    }
+    return candidates
+      .slice()
+      .sort((left, right) => {
+        const leftRect = left.getBoundingClientRect();
+        const rightRect = right.getBoundingClientRect();
+        if (Math.abs(leftRect.top - rightRect.top) > 6) {
+          return leftRect.top - rightRect.top;
+        }
+        if (Math.abs(leftRect.left - rightRect.left) > 6) {
+          return leftRect.left - rightRect.left;
+        }
+        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+      })[0] || null;
+  }
+
+  function getXiaohongshuTagEditorSnapshot(editor) {
+    const pageText = String(document.body?.innerText || document.body?.textContent || "");
+    return {
+      currentUrl: window.location.href,
+      editorText: normalize(editor?.innerText || editor?.textContent || "").slice(0, 260),
+      pageTextPreview: pageText.slice(0, 260),
+      hasSuggestLayer:
+        pageText.includes("话题") ||
+        pageText.includes("标签") ||
+        Boolean(
+          queryFirst(
+            [
+              '[role="option"]',
+              '[class*="suggest"]',
+              '[class*="topic"]',
+              '[class*="tag"]',
+              '[class*="recommend"]',
+            ],
+            document,
+            true,
+          ),
+        ),
+    };
+  }
+
+  async function clickFirstVisibleXiaohongshuTagCandidate(tag, editor) {
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstVisibleXiaohongshuTagCandidate:start",
+      {
+        tag,
+        selectors: buildXiaohongshuTagCandidateSelectors(tag),
+        pageTextPreview: String(document.body?.innerText || document.body?.textContent || "").slice(0, 220),
+      },
+    );
+    const tagCandidate = await clickCandidatesUntil(buildXiaohongshuTagCandidateSelectors(tag), {
+      timeoutMs: 8000,
+      scope: "xiaohongshu-tag",
+      options: {
+        beforeMoveMin: 220,
+        beforeMoveMax: 420,
+        movePauseMin: 140,
+        movePauseMax: 260,
+        holdPauseMin: 120,
+        holdPauseMax: 220,
+        afterClickMin: 260,
+        afterClickMax: 520,
+      },
+      successCheck: () => {
+        const editorText = normalize(editor?.innerText || editor?.textContent || "");
+        const pageText = normalize(document.body?.innerText || "");
+        const hasSuggestLayer = Boolean(
+          queryFirst(
+            [
+              '[role="option"]',
+              '[class*="suggest"] [class*="item"]',
+              '[class*="topic"] [class*="item"]',
+              '[class*="tag"] [class*="item"]',
+              '[class*="recommend"] [class*="item"]',
+            ],
+            document,
+            true,
+          ),
+        );
+        return !editorText.includes(`#${tag}`) || (!hasSuggestLayer && !pageText.includes(`#${tag}`));
+      },
+      postClickObserveMs: 1500,
+      postClickPollMs: 200,
+    }).catch(() => null);
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstVisibleXiaohongshuTagCandidate:done",
+      {
+        tag,
+        found: tagCandidate instanceof HTMLElement,
+        candidateText: normalize(tagCandidate?.textContent || ""),
+        candidateClassName: String(tagCandidate?.className || ""),
+        pageTextPreview: String(document.body?.innerText || document.body?.textContent || "").slice(0, 220),
+      },
+    );
+    if (!(tagCandidate instanceof HTMLElement)) {
+      throw new Error(`未找到小红书标签候选项：#${tag}`);
+    }
+    return tagCandidate;
+  }
+
+  async function clickFirstXiaohongshuTagCandidate(editor, tag) {
+    const rawTag = `#${tag}`;
+    const startedAt = Date.now();
+    let attempt = 0;
+    let lastCandidate = null;
+    while (Date.now() - startedAt < 10000) {
+      attempt += 1;
+      const editorTextBefore = normalize(editor?.innerText || editor?.textContent || "");
+      if (!editorTextBefore.includes(rawTag)) {
+        reportPublishAutomationDebug(
+          "X1",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstXiaohongshuTagCandidate:already-converted",
+          {
+            tag,
+            attempt,
+            editorText: editorTextBefore.slice(0, 260),
+          },
+        );
+        return lastCandidate;
+      }
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+      const candidateWaitStartedAt = Date.now();
+      let firstCandidate = null;
+      while (Date.now() - candidateWaitStartedAt < 2500) {
+        firstCandidate = findFirstVisibleXiaohongshuTagCandidate();
+        if (firstCandidate instanceof HTMLElement) {
+          break;
+        }
+        await sleep(180);
+      }
+      if (firstCandidate instanceof HTMLElement) {
+        await humanClickElement(firstCandidate, {
+          beforeMoveMin: 220,
+          beforeMoveMax: 420,
+          movePauseMin: 140,
+          movePauseMax: 260,
+          holdPauseMin: 120,
+          holdPauseMax: 220,
+          afterClickMin: 260,
+          afterClickMax: 520,
+        }).catch(() => null);
+        const observeStartedAt = Date.now();
+        while (Date.now() - observeStartedAt < 2200) {
+          const currentEditorText = normalize(editor?.innerText || editor?.textContent || "");
+          if (!currentEditorText.includes(rawTag)) {
+            break;
+          }
+          await sleep(200);
+        }
+      }
+      lastCandidate = firstCandidate instanceof HTMLElement ? firstCandidate : lastCandidate;
+      const editorTextAfter = normalize(editor?.innerText || editor?.textContent || "");
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstXiaohongshuTagCandidate:attempt",
+        {
+          tag,
+          attempt,
+          found: firstCandidate instanceof HTMLElement,
+          candidateText: normalize(firstCandidate?.textContent || ""),
+          candidateClassName: String(firstCandidate?.className || ""),
+          candidateRectTop:
+            firstCandidate instanceof HTMLElement
+              ? roundDebugNumber(firstCandidate.getBoundingClientRect().top)
+              : null,
+          candidateRectLeft:
+            firstCandidate instanceof HTMLElement
+              ? roundDebugNumber(firstCandidate.getBoundingClientRect().left)
+              : null,
+          editorTextBefore: editorTextBefore.slice(0, 260),
+          editorTextAfter: editorTextAfter.slice(0, 260),
+          converted: !editorTextAfter.includes(rawTag),
+        },
+      );
+      if (!editorTextAfter.includes(rawTag)) {
+        return firstCandidate;
+      }
+      await sleep(randomBetween(360, 620));
+    }
+    const finalEditorText = normalize(editor?.innerText || editor?.textContent || "");
+    reportPublishAutomationDebug(
+      "X1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:clickFirstXiaohongshuTagCandidate:skip-not-converted",
+      {
+        tag,
+        attempt,
+        candidateText: normalize(lastCandidate?.textContent || ""),
+        candidateClassName: String(lastCandidate?.className || ""),
+        editorText: finalEditorText.slice(0, 260),
+      },
+    );
+    return lastCandidate;
+  }
+
+  async function fillXiaohongshuBodyAndTags(job) {
+    const editorSelectors = ['div.tiptap.ProseMirror', 'div[role="textbox"]', 'div[contenteditable="true"]'];
+    const editor = await waitForVisible(editorSelectors, 30000, document, true);
+    if (!(editor instanceof HTMLElement)) {
+      throw new Error("未找到小红书正文输入框");
+    }
+    await humanClickElement(editor, {
+      beforeMoveMin: 180,
+      beforeMoveMax: 360,
+      movePauseMin: 120,
+      movePauseMax: 240,
+      holdPauseMin: 120,
+      holdPauseMax: 220,
+      afterClickMin: 260,
+      afterClickMax: 520,
+    });
+    await sleep(randomBetween(180, 320));
+    clearEditable(editor);
+    await sleep(randomBetween(180, 320));
+
+    const body = String(job?.draftBody || "").trim();
+    const tags = normalizeTags(job?.draftTags);
+
+    if (body) {
+      await typeEditableTextHuman(editor, body, 80, 135);
+      await sleep(randomBetween(260, 420));
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fillXiaohongshuBodyAndTags:body-filled",
+        {
+          bodyLength: body.length,
+          tags,
+          ...getXiaohongshuTagEditorSnapshot(editor),
+        },
+      );
+    }
+
+    for (const [index, tag] of tags.entries()) {
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fillXiaohongshuBodyAndTags:tag-start",
+        {
+          index,
+          tag,
+          tags,
+          ...getXiaohongshuTagEditorSnapshot(editor),
+        },
+      );
+      await humanClickElement(editor, {
+        beforeMoveMin: 180,
+        beforeMoveMax: 360,
+        movePauseMin: 120,
+        movePauseMax: 240,
+        holdPauseMin: 120,
+        holdPauseMax: 220,
+        afterClickMin: 260,
+        afterClickMax: 520,
+      }).catch(() => null);
+      placeCaretAtEnd(editor);
+      await sleep(randomBetween(180, 320));
+      if (index === 0 && body) {
+        await pressEditableEnter(editor);
+      } else if (index > 0) {
+        await appendText(
+          editorSelectors,
+          " ",
+          4000,
+          document,
+          { preferHumanType: true, perCharMin: 80, perCharMax: 120 },
+        );
+      }
+      await appendText(
+        editorSelectors,
+        `#${tag}`,
+        8000,
+        document,
+        { preferHumanType: true, perCharMin: 105, perCharMax: 175 },
+      );
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fillXiaohongshuBodyAndTags:tag-typed",
+        {
+          index,
+          tag,
+          ...getXiaohongshuTagEditorSnapshot(editor),
+        },
+      );
+      await sleep(randomBetween(700, 1100));
+      await clickFirstXiaohongshuTagCandidate(editor, tag);
+      reportPublishAutomationDebug(
+        "X1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:fillXiaohongshuBodyAndTags:tag-clicked",
+        {
+          index,
+          tag,
+          ...getXiaohongshuTagEditorSnapshot(editor),
+        },
+      );
+      await sleep(randomBetween(420, 760));
+    }
+    return editor;
+  }
+
+  async function cdpClick(element) {
+    const beforeScroll = getXiaohongshuPublishViewportSnapshot(element);
+    element.scrollIntoView({ block: "center", inline: "center" });
+    await sleep(300);
+    const rect = element.getBoundingClientRect();
+    const afterScroll = getXiaohongshuPublishViewportSnapshot(element);
+    const x = rect.left + rect.width / 2 + window.screenX;
+    const y = rect.top + rect.height / 2 + window.screenY;
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: "AI_SUPERWEB_CDP_CLICK", payload: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } },
+        (resp) => {
+          void chrome.runtime.lastError;
+          resolve({
+            response: resp,
+            beforeScroll,
+            afterScroll,
+            clickPoint: {
+              viewportX: roundDebugNumber(rect.left + rect.width / 2),
+              viewportY: roundDebugNumber(rect.top + rect.height / 2),
+              screenX: roundDebugNumber(x),
+              screenY: roundDebugNumber(y),
+            },
+          });
+        },
+      );
+    });
+  }
+
+  async function xiaohongshuClickPublishButton(publishSelectors) {
+    scheduleXiaohongshuPublishPhaseSnapshots("click-publish-start", publishSelectors);
+    const button =
+      findXiaohongshuPublishButton(publishSelectors)
+      || (await waitForVisible(publishSelectors, 30000, document, true).catch(() => null));
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:resolved",
+      publishSelectors,
+      {
+        resolvedButtonText: normalize(button?.textContent || ""),
+        resolvedButtonClassName: String(button?.className || ""),
+      },
+    );
+    if (!(button instanceof HTMLElement)) {
+      reportXiaohongshuPublishPhaseDebug(
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:button-missing",
+        publishSelectors,
+        {},
+      );
+      throw new Error("未找到小红书发布按钮");
+    }
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 15000) {
+      if (button instanceof HTMLButtonElement && button.disabled) {
+        await sleep(800);
+        continue;
+      }
+      if (button.getAttribute("aria-disabled") === "true") {
+        await sleep(800);
+        continue;
+      }
+      if (button.classList.contains("is-disabled") || button.classList.contains("disabled")) {
+        await sleep(800);
+        continue;
+      }
+      break;
+    }
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:ready-to-click",
+      publishSelectors,
+      {
+        resolvedButtonText: normalize(button?.textContent || ""),
+        resolvedButtonClassName: String(button?.className || ""),
+      },
+    );
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:before-click",
+      publishSelectors,
+      {
+        resolvedButtonText: normalize(button?.textContent || ""),
+        resolvedButtonClassName: String(button?.className || ""),
+      },
+    );
+
+    const cdpResp = await cdpClick(button);
+    debugLog("xiaohongshu", "cdp-click-result", cdpResp);
+    await sleep(1500);
+
+    const pageText = normalize(document.body?.innerText || "");
+    const published = ["发布成功", "笔记发布成功", "审核中", "发布中"].some((h) => pageText.includes(h));
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:after-cdp-click",
+      publishSelectors,
+      {
+        resolvedButtonText: normalize(button?.textContent || ""),
+        resolvedButtonClassName: String(button?.className || ""),
+        cdpClick: cdpResp,
+        published,
+      },
+    );
+    if (!published) {
+      debugLog("xiaohongshu", "cdp-click-no-effect-fallback", { url: window.location.href });
+      reportXiaohongshuPublishPhaseDebug(
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:before-human-click-fallback",
+        publishSelectors,
+        {
+          resolvedButtonText: normalize(button?.textContent || ""),
+          resolvedButtonClassName: String(button?.className || ""),
+          cdpClick: cdpResp,
+        },
+      );
+      await humanClickElement(button, {
+        beforeMoveMin: 320,
+        beforeMoveMax: 620,
+        movePauseMin: 200,
+        movePauseMax: 380,
+        holdPauseMin: 170,
+        holdPauseMax: 320,
+        afterClickMin: 520,
+        afterClickMax: 960,
+      });
+      await sleep(1200);
+      const pageTextAfterHumanClick = normalize(document.body?.innerText || "");
+      reportXiaohongshuPublishPhaseDebug(
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:xiaohongshuClickPublishButton:after-human-click-fallback",
+        publishSelectors,
+        {
+          resolvedButtonText: normalize(button?.textContent || ""),
+          resolvedButtonClassName: String(button?.className || ""),
+          cdpClick: cdpResp,
+          published: ["发布成功", "笔记发布成功", "审核中", "发布中"].some((h) => pageTextAfterHumanClick.includes(h)),
+        },
+      );
+    }
+    return button;
+  }
+
+  async function publishXiaohongshu(job) {
+    const isVideo = Boolean(job.draftVideoUrl);
+    const publishSelectors = [
+      'div > div > button.ce-btn.bg-red',
+      "button.ce-btn.bg-red",
+      'button.ce-btn.bg-red:has-text("发布")',
+      'button.bg-red:has-text("发布")',
+      'button.bg-red:has-text("发布笔记")',
+      'button.ce-btn:has-text("发布")',
+      'button.ce-btn:has-text("发布笔记")',
+      'button:has-text("发布")',
+      'button:has-text("发布笔记")',
+      'div[role="button"]:has-text("发布")',
+      'div[role="button"]:has-text("发布笔记")',
+      'a:has-text("发布")',
+      "text=发布",
+      "text=发布笔记",
+    ];
+    await gotoUrl("https://creator.xiaohongshu.com/");
+    await ensureXiaohongshuPublishReady(isVideo);
+    await uploadFiles(
+      [
+        'input[type="file"][accept*="image"]',
+        'input[type="file"][accept*="video"]',
+        'input[type="file"]',
+      ],
+      isVideo ? [job.draftVideoUrl] : job.draftImages,
+      isVideo ? "video" : "image",
+    );
+    await waitForXiaohongshuUploadComplete();
+    await fillFirst(
+      ['input[placeholder*="标题"]', 'textarea[placeholder*="标题"]', 'input[type="text"]'],
+      job.draftTitle,
+      30000,
+      document,
+      { preferHumanType: true, perCharMin: 110, perCharMax: 190 },
+    );
+    await fillXiaohongshuBodyAndTags(job);
+    scheduleXiaohongshuPublishPhaseSnapshots("before-submit-click", publishSelectors);
+    //#region debug-point xiaohongshu-publish-submit-before-click
+    reportXiaohongshuPublishPhaseDebug(
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishXiaohongshu:before-submit-click",
+      publishSelectors,
+      {
+        phase: "before-submit-click",
+      },
+    );
+    //#endregion
+    try {
+      const clickedNode = await xiaohongshuClickPublishButton(publishSelectors);
+      //#region debug-point xiaohongshu-publish-submit-after-click
+      reportXiaohongshuPublishPhaseDebug(
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:publishXiaohongshu:after-submit-click",
+        publishSelectors,
+        {
+          clickedNode: getElementDebugSnapshot(clickedNode),
+          phase: "after-submit-click",
+        },
+      );
+      //#endregion
+    } catch (error) {
+      //#region debug-point xiaohongshu-publish-submit-click-error
+      reportXiaohongshuPublishPhaseDebug(
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:publishXiaohongshu:submit-click-error",
+        publishSelectors,
+        {
+          message: error instanceof Error ? error.message : String(error),
+          phase: "submit-click-error",
+        },
+      );
+      //#endregion
+      throw error;
+    }
+    try {
+      await waitForHints(
+        ["发布成功", "笔记发布成功", "审核中", "发布中"],
+        ["发布失败", "请完善", "请先上传", "请填写标题"],
+        "未识别到小红书发布成功状态，请确认页面是否仍停留在发布页",
+      );
+      //#region debug-point xiaohongshu-publish-submit-hints-success
+      reportPublishAutomationDebug(
+        "H4",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:publishXiaohongshu:wait-hints-success",
+        getXiaohongshuPublishSubmitSnapshot(publishSelectors),
+      );
+      //#endregion
+    } catch (error) {
+      //#region debug-point xiaohongshu-publish-submit-hints-failed
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:publishXiaohongshu:wait-hints-failed",
+        {
+          ...getXiaohongshuPublishSubmitSnapshot(publishSelectors),
+          message: error instanceof Error ? error.message : String(error),
+          whyNotPublished: inferXiaohongshuPublishBlockReason(getXiaohongshuPublishSubmitSnapshot(publishSelectors)),
+        },
+      );
+      //#endregion
+      throw error;
+    }
+  }
+
+  async function finalizeDouyinImagePublish(job) {
+    maybeInstallDouyinEditorBounceProbe("finalize-start");
+    //#region debug-point douyin-image-finalize-start
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:start",
+      {
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: null }),
+        hasTitleInput: Boolean(
+          queryFirst(
+            [
+              'input[placeholder="添加作品标题"]',
+              'input.semi-input[placeholder*="添加作品标题"]',
+              'input[placeholder*="作品标题"]',
+              'input[placeholder*="添加标题"]',
+              'textarea[placeholder*="标题"]',
+            ],
+            document,
+            true,
+          ),
+        ),
+        hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+      },
+    );
+    //#endregion
+    const editorReadyNode = await waitForVisible(
+      [
+        'input[placeholder="添加作品标题"]',
+        'input.semi-input[placeholder*="添加作品标题"]',
+        'input[placeholder*="作品标题"]',
+        'input[placeholder*="添加标题"]',
+        'textarea[placeholder*="标题"]',
+        ...douyinImageDescriptionSelectors,
+        ...douyinImageReadySelectors,
+      ],
+      15000,
+      document,
+      true,
+    ).catch(() => null);
+    if (!(editorReadyNode instanceof HTMLElement)) {
+      throw new Error("抖音图文编辑页长时间停留在加载中");
+    }
+    await sleep(1200);
+    //#region debug-point douyin-image-finalize-after-sleep
+    reportPublishAutomationDebug(
+      "H3",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-sleep",
+      {
+        currentUrl: window.location.href,
+        state: detectDouyinPublishState({ draftVideoUrl: null }),
+        hasTitleInput: Boolean(
+          queryFirst(
+            [
+              'input[placeholder="添加作品标题"]',
+              'input.semi-input[placeholder*="添加作品标题"]',
+              'input[placeholder*="作品标题"]',
+              'input[placeholder*="添加标题"]',
+              'textarea[placeholder*="标题"]',
+            ],
+            document,
+            true,
+          ),
+        ),
+        hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+      },
+    );
+    //#endregion
+    try {
+      await fillFirst(
+        [
+          'input[placeholder="添加作品标题"]',
+          'input.semi-input[placeholder*="添加作品标题"]',
+          'input[placeholder*="作品标题"]',
+          'input[placeholder*="添加标题"]',
+          'textarea[placeholder*="标题"]',
+        ],
+        job.draftTitle,
+        30000,
+        document,
+        { preferHumanType: true, perCharMin: 115, perCharMax: 190 },
+      ).catch(() => null);
+      //#region debug-point douyin-image-finalize-after-title
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-title",
+        {
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+          titleValue:
+            (() => {
+              const titleInput = queryFirst(
+                [
+                  'input[placeholder="添加作品标题"]',
+                  'input.semi-input[placeholder*="添加作品标题"]',
+                  'input[placeholder*="作品标题"]',
+                  'input[placeholder*="添加标题"]',
+                  'textarea[placeholder*="标题"]',
+                ],
+                document,
+                true,
+              );
+              return titleInput instanceof HTMLInputElement || titleInput instanceof HTMLTextAreaElement
+                ? String(titleInput.value || "").slice(0, 120)
+                : "";
+            })(),
+          hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+        },
+      );
+      //#endregion
+      await fillDouyinImageDescriptionAndTopics(job);
+      //#region debug-point douyin-image-finalize-after-body
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-body",
+        {
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+        },
+      );
+      //#endregion
+      await selectDouyinNoDeclaration();
+      //#region debug-point douyin-image-finalize-after-declaration
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-declaration",
+        {
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+        },
+      );
+      //#endregion
+    } catch (error) {
+      //#region debug-point douyin-image-finalize-error
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:error",
+        {
+          currentUrl: window.location.href,
+          state: detectDouyinPublishState({ draftVideoUrl: null }),
+          message: error instanceof Error ? error.message : String(error || ""),
+          stack: error instanceof Error ? String(error.stack || "") : "",
+          hasTitleInput: Boolean(
+            queryFirst(
+              [
+                'input[placeholder="添加作品标题"]',
+                'input.semi-input[placeholder*="添加作品标题"]',
+                'input[placeholder*="作品标题"]',
+                'input[placeholder*="添加标题"]',
+                'textarea[placeholder*="标题"]',
+              ],
+              document,
+              true,
+            ),
+          ),
+          hasDescriptionEditor: Boolean(queryFirst(douyinImageDescriptionSelectors, document, true)),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 220),
+        },
+      );
+      //#endregion
+      throw error;
+    }
+    //#region debug-point douyin-publish-submit-before-click
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:before-submit-click",
+      getDouyinPublishSubmitSnapshot(
+        [
+          'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
+          'button:has-text("发布")',
+          '[role="button"]:has-text("发布")',
+          'div:has-text("发布")',
+          'text=发布',
+        ],
+        null,
+      ),
+    );
+    //#endregion
+    await clickFirst(
+      [
+        'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
+        'button:has-text("发布")',
+        '[role="button"]:has-text("发布")',
+        'div:has-text("发布")',
+        'text=发布',
+      ],
+      30000,
+      document,
+      douyinSlowPublishClickOptions(),
+    );
+    //#region debug-point douyin-publish-submit-after-click
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinImagePublish:after-submit-click",
+      getDouyinPublishSubmitSnapshot(
+        [
+          'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
+          'button:has-text("发布")',
+          '[role="button"]:has-text("发布")',
+          'div:has-text("发布")',
+          'text=发布',
+        ],
+        null,
+      ),
+    );
+    //#endregion
+    await waitForHints(
+      ["发布成功", "作品发布成功", "审核中", "内容管理", "作品管理", "发布完成", "发布中"],
+      ["发布失败", "上传失败", "请完善", "请填写"],
+      "未识别到抖音图文发布成功状态，请确认页面是否仍停留在发布页",
+    );
+  }
+
+  async function finalizeDouyinVideoPublish(job) {
+    await sleep(3000);
+    await fillFirst(
+      [
+        'input[placeholder="填写作品标题，为作品获得更多流量"]',
+        'input[placeholder*="填写作品标题"]',
+        'input[placeholder*="作品标题"]',
+        'input[placeholder*="添加标题"]',
+        'textarea[placeholder*="标题"]',
+      ],
+      job.draftTitle,
+      30000,
+      document,
+      { preferHumanType: true, perCharMin: 115, perCharMax: 190 },
+    ).catch(() => null);
+    await fillDouyinVideoDescriptionAndTopics(job);
+    await selectDouyinNoDeclaration();
+    //#region debug-point douyin-video-submit-before-click
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinVideoPublish:before-submit-click",
+      getDouyinPublishSubmitSnapshot(
+        [
+          'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
+          'button:has-text("发布")',
+          '[role="button"]:has-text("发布")',
+          'div:has-text("发布")',
+          'text=发布',
+        ],
+        job?.draftVideoUrl || null,
+      ),
+    );
+    //#endregion
+    await clickFirst(
+      [
+        'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
+        'button:has-text("发布")',
+        '[role="button"]:has-text("发布")',
+        'div:has-text("发布")',
+        'text=发布',
+      ],
+      30000,
+      document,
+      douyinSlowPublishClickOptions(),
+    );
+    //#region debug-point douyin-video-submit-after-click
+    reportPublishAutomationDebug(
+      "H2",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:finalizeDouyinVideoPublish:after-submit-click",
+      getDouyinPublishSubmitSnapshot(
+        [
+          'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw',
+          'button:has-text("发布")',
+          '[role="button"]:has-text("发布")',
+          'div:has-text("发布")',
+          'text=发布',
+        ],
+        job?.draftVideoUrl || null,
+      ),
+    );
+    //#endregion
+    await waitForHints(
+      ["发布成功", "作品发布成功", "审核中", "内容管理", "作品管理", "发布完成", "发布中"],
+      ["发布失败", "上传失败", "请完善", "请填写"],
+      "未识别到抖音视频发布成功状态，请确认页面是否仍停留在发布页",
+    );
+  }
+
+  function detectDouyinPublishState(job) {
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    const hasVideo = Boolean(job?.draftVideoUrl);
+    const currentUrl = String(window.location.href || "");
+
+    if (hasVideo) {
+      if (currentUrl.includes("/creator-micro/content/post/video")) {
+        return "video_publish_page";
+      }
+      if (currentUrl.includes("/creator-micro/content/upload")) {
+        return "video_upload_ready";
+      }
+      if (queryFirst(douyinVideoReadySelectors, document, true)) {
+        return "video_form_ready";
+      }
+      if (queryFirst(douyinVideoUploadInputSelectors, document, false)) {
+        return "video_upload_ready";
+      }
+      if (pageText.includes("发布视频") || pageText.includes("上传视频")) {
+        return "video_publish_page";
+      }
+    } else {
+      if (currentUrl.includes("/creator-micro/content/post/image")) {
+        return queryFirst(douyinImageReadySelectors, document, true)
+          ? "image_form_ready"
+          : "image_publish_page";
+      }
+      if (currentUrl.includes("/creator-micro/content/upload")) {
+        return queryFirst(douyinImageUploadInputSelectors, document, false)
+          ? "image_upload_ready"
+          : "image_publish_page";
+      }
+      if (queryFirst(douyinImageReadySelectors, document, true)) {
+        return "image_form_ready";
+      }
+      if (queryFirst(douyinImageUploadInputSelectors, document, false)) {
+        return "image_upload_ready";
+      }
+      if (pageText.includes("发布图文") || pageText.includes("上传图文") || pageText.includes("上传图片")) {
+        return "image_publish_page";
+      }
+    }
+
+    if (currentUrl.includes("/creator-micro/home")) {
+      return "home";
+    }
+
+    if (
+      pageText.includes("发布成功") ||
+      pageText.includes("作品发布成功") ||
+      pageText.includes("发布完成") ||
+      pageText.includes("审核中")
+    ) {
+      return "publish_result";
+    }
+
+    return "unknown";
+  }
+
+  function buildDouyinPublishSnapshot(job) {
+    const pageText = normalize(document.body?.innerText || document.body?.textContent || "");
+    return {
+      url: window.location.href,
+      hasVideo: Boolean(job?.draftVideoUrl),
+      state: detectDouyinPublishState(job),
+      imageCount: Array.isArray(job?.draftImages) ? job.draftImages.length : 0,
+      hasTitle: Boolean(String(job?.draftTitle || "").trim()),
+      tagCount: Array.isArray(job?.draftTags) ? job.draftTags.length : 0,
+      textPreview: pageText.slice(0, 200),
+    };
+  }
+
+  const douyinPublishAdapter = {
+    name: "douyin-browser-extension-publish-adapter",
+    platform: "douyin",
+    detectState(job) {
+      return detectDouyinPublishState(job);
+    },
+    getSnapshot(job) {
+      return buildDouyinPublishSnapshot(job);
+    },
+    async executeImage(context) {
+      const { job, session } = context;
+      const runtimeMeta =
+        session?.__aiSuperwebRuntimeMeta && typeof session.__aiSuperwebRuntimeMeta === "object"
+          ? session.__aiSuperwebRuntimeMeta
+          : {};
+      const preferHomeEntry = runtimeMeta.lastLaunchSource === "page-resume-home-recovery";
+      //#region debug-point douyin-home-network-execute-image-start
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:start",
+        {
+          currentUrl: window.location.href,
+          state: this.getSnapshot(job).state,
+          imageCount: Array.isArray(job?.draftImages) ? job.draftImages.length : 0,
+          firstImageUrl: Array.isArray(job?.draftImages) ? String(job.draftImages[0] || "") : "",
+          hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
+          hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
+          lastLaunchSource: String(runtimeMeta.lastLaunchSource || ""),
+          homeResumeCount: Number(runtimeMeta.homeResumeCount || 0),
+          preferHomeEntry,
+        },
+      );
+      //#endregion
+      debugLog("douyin-adapter", "execute-image-start", this.getSnapshot(job));
+      if (isDouyinImageEditorPage()) {
+        maybeInstallDouyinEditorBounceProbe("resume-editor");
+        //#region debug-point douyin-image-resume-editor
+        reportPublishAutomationDebug(
+          "H3",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:resume-editor",
+          {
+            currentUrl: window.location.href,
+            state: this.getSnapshot(job).state,
+            hasTitleInput: Boolean(
+              queryFirst(
+                [
+                  'input[placeholder="添加作品标题"]',
+                  'input.semi-input[placeholder*="添加作品标题"]',
+                  'input[placeholder*="作品标题"]',
+                  'input[placeholder*="添加标题"]',
+                  'textarea[placeholder*="标题"]',
+                ],
+                document,
+                true,
+              ),
+            ),
+            pageTextPreview: normalize(document.body?.innerText || "").slice(0, 200),
+          },
+        );
+        //#endregion
+        await finalizeDouyinImagePublish(job);
+        return;
+      }
+      scheduleDouyinUploadStateTimeline(job, "execute-image-start");
+      await enterDouyinImagePublishFromHome({ preferHomeEntry });
+      await dismissDouyinUnpublishedDraftPrompt().catch(() => false);
+      //#region debug-point douyin-home-network-execute-image-after-enter
+      reportPublishAutomationDebug(
+        "H2",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:after-enter",
+        {
+          currentUrl: window.location.href,
+          state: this.getSnapshot(job).state,
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 160),
+        },
+      );
+      //#endregion
+      scheduleDouyinUploadStateTimeline(job, "execute-image-after-enter");
+      await ensureDouyinImagePublishReady().catch(() => null);
+      await dismissDouyinUnpublishedDraftPrompt().catch(() => false);
+      //#region debug-point douyin-home-network-execute-image-after-ensure
+      reportPublishAutomationDebug(
+        "H2",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:after-ensure",
+        {
+          currentUrl: window.location.href,
+          state: this.getSnapshot(job).state,
+          hasReadyNode: Boolean(queryFirst(douyinImageReadySelectors, document, true)),
+          hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+        },
+      );
+      //#endregion
+      scheduleDouyinUploadStateTimeline(job, "execute-image-after-ensure");
+      await openDouyinImageUpload();
+      //#region debug-point douyin-home-network-execute-image-after-open-upload
+      reportPublishAutomationDebug(
+        "H2",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:after-open-upload",
+        {
+          currentUrl: window.location.href,
+          state: this.getSnapshot(job).state,
+          hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+        },
+      );
+      //#endregion
+      scheduleDouyinUploadStateTimeline(job, "execute-image-after-open-upload");
+      await dismissDouyinUnpublishedDraftPrompt().catch(() => false);
+      //#region debug-point H3:execute-image-before-upload-files
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:before-upload-files",
+        {
+          currentUrl: window.location.href,
+          state: this.getSnapshot(job).state,
+          imageCount: Array.isArray(job?.draftImages) ? job.draftImages.length : 0,
+          firstImageUrl: Array.isArray(job?.draftImages) ? String(job.draftImages[0] || "") : "",
+          hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+          continueDraftPromptPresent: normalize(document.body?.innerText || "").includes("你还有上次未发布的图文"),
+        },
+      );
+      //#endregion
+      try {
+        await uploadFiles(
+          ['input[type="file"][accept*="image"]', 'input[type="file"]'],
+          job.draftImages,
+          "image",
+        );
+      } catch (error) {
+        //#region debug-point H3:execute-image-upload-files-error
+        reportPublishAutomationDebug(
+          "H3",
+          "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:upload-files-error",
+          {
+            currentUrl: window.location.href,
+            state: this.getSnapshot(job).state,
+            message: error instanceof Error ? error.message : String(error || ""),
+            stack: error instanceof Error ? String(error.stack || "") : "",
+            continueDraftPromptPresent: normalize(document.body?.innerText || "").includes("你还有上次未发布的图文"),
+          },
+        );
+        //#endregion
+        throw error;
+      }
+      //#region debug-point H3:execute-image-after-upload-files
+      reportPublishAutomationDebug(
+        "H3",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:douyinPublishAdapter:executeImage:after-upload-files",
+        {
+          currentUrl: window.location.href,
+          state: this.getSnapshot(job).state,
+          hasUploadNode: Boolean(queryFirst(douyinImageUploadInputSelectors, document, false)),
+          continueDraftPromptPresent: normalize(document.body?.innerText || "").includes("你还有上次未发布的图文"),
+        },
+      );
+      //#endregion
+      debugLog("douyin-adapter", "image-upload-dispatched", this.getSnapshot(job));
+      await finalizeDouyinImagePublish(job);
+    },
+    async executeVideo(context) {
+      const { job } = context;
+      debugLog("douyin-adapter", "execute-video-start", this.getSnapshot(job));
+      await enterDouyinVideoPublishFromHome();
+      await ensureDouyinVideoPublishReady().catch(() => null);
+      await openDouyinVideoUpload();
+      await uploadFiles(
+        ['input[type="file"][accept*="video"]', 'input[type="file"]'],
+        [job.draftVideoUrl],
+        "video",
+      );
+      debugLog("douyin-adapter", "video-upload-dispatched", this.getSnapshot(job));
+      await finalizeDouyinVideoPublish(job);
+    },
+    async execute(context) {
+      const { job } = context;
+      debugLog("douyin-adapter", "execute-start", this.getSnapshot(job));
+      if (job.draftVideoUrl) {
+        await this.executeVideo(context);
+        return;
+      }
+      await this.executeImage(context);
+    },
+  };
+
+  async function publishDouyinImage(job) {
+    await douyinPublishAdapter.executeImage({ job });
+  }
+
+  async function publishDouyinVideo(job) {
+    await douyinPublishAdapter.executeVideo({ job });
+  }
+
+  async function publishDouyin(job) {
+    await douyinPublishAdapter.execute({ job });
+  }
+
+  async function publishWechatMp(job) {
+    const isVideo = Boolean(job.draftVideoUrl);
+    const bodyWithTags = buildPublishPageBodyWithTags(job);
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:start",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        imageCount: Array.isArray(job?.draftImages) ? job.draftImages.length : 0,
+        hasEditorPage: isWechatMpEditorPage(isVideo),
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    if (!isWechatMpEditorPage(isVideo)) {
+      await gotoUrl("https://channels.weixin.qq.com/platform");
+      await sleep(3000);
+      await ensureWechatMpPublishReady(isVideo);
+    } else {
+      reportPublishAutomationDebug(
+        "W1",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:resume-editor",
+        {
+          currentUrl: window.location.href,
+          isVideo,
+          pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+        },
+      );
+    }
+
+    const wechatMpFileInputSelectors = [
+      'input[type="file"][accept*="image"]',
+      'input[type="file"][accept*="video"]',
+      'input[type="file"]',
+    ];
+    const wechatMpTitleSelectors = [
+      'input.weui-desktop-form__input[placeholder="填写标题, 22个字符内"]',
+      'input[placeholder="填写标题, 22个字符内"]',
+      'input[placeholder="填写标题，22个字符内"]',
+      'textarea[placeholder="填写标题，22个字符内"]',
+      'input[placeholder*="填写标题"]',
+      'input[placeholder*="标题"]',
+      'textarea[placeholder*="标题"]',
+      'input.weui-desktop-form__input',
+      'input[type="text"]',
+    ];
+    const wechatMpDescSelectors = [
+      'div.post-desc-box div.input-editor[contenteditable]',
+      'div.input-editor[contenteditable][data-placeholder="添加描述"]',
+      '[contenteditable][data-placeholder="添加描述"]',
+      'div.input-editor[contenteditable]',
+      'div[contenteditable="true"]',
+      'textarea[placeholder*="描述"]',
+      'textarea[placeholder*="内容"]',
+    ];
+
+    const editorReadyNode = await waitForVisible(
+      [...wechatMpTitleSelectors, ...wechatMpDescSelectors],
+      30000,
+      document,
+      true,
+    ).catch(() => null);
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:after-editor-wait",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        hasEditorReadyNode: editorReadyNode instanceof HTMLElement,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    if (!(editorReadyNode instanceof HTMLElement)) {
+      throw new Error("未进入视频号可编辑发布页");
+    }
+    await waitForVisible(
+      [...wechatMpFileInputSelectors, ...wechatMpTitleSelectors, ...wechatMpDescSelectors],
+      30000,
+      document,
+      true,
+    );
+    await sleep(1200);
+
+    await uploadFiles(
+      wechatMpFileInputSelectors,
+      isVideo ? [job.draftVideoUrl] : job.draftImages,
+      isVideo ? "video" : "image",
+    );
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:after-upload-files",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    await sleep(2200);
+
+    if (!isVideo && job.draftTitle) {
+      await fillFirst(
+        wechatMpTitleSelectors,
+        job.draftTitle,
+        15000,
+        document,
+        { preferHumanType: true, perCharMin: 115, perCharMax: 185 },
+      ).catch(() => null);
+      await sleep(600);
+    }
+
+    if (bodyWithTags) {
+      await fillFirst(
+        wechatMpDescSelectors,
+        bodyWithTags,
+        15000,
+        document,
+        { preferHumanType: true, perCharMin: 105, perCharMax: 170 },
+      ).catch(() => null);
+      await sleep(700);
+    }
+
+    await sleep(1500);
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:before-submit-click",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    await clickFirst(
+      ['button:has-text("发表")', '[role="button"]:has-text("发表")', 'button:has-text("发布")', 'text=发表'],
+      30000,
+      document,
+      {
+        beforeMoveMin: 280,
+        beforeMoveMax: 560,
+        movePauseMin: 170,
+        movePauseMax: 320,
+        holdPauseMin: 150,
+        holdPauseMax: 260,
+        afterClickMin: 420,
+        afterClickMax: 760,
+      },
+    );
+    reportPublishAutomationDebug(
+      "W1",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:publishWechatMp:after-submit-click",
+      {
+        currentUrl: window.location.href,
+        isVideo,
+        pageTextPreview: normalize(document.body?.innerText || "").slice(0, 180),
+      },
+    );
+    await waitForHints(
+      ["发表成功", "发布成功", "审核中", "内容管理"],
+      ["发布失败", "上传失败", "请完善", "请填写"],
+      "未识别到视频号发布成功状态，请确认页面是否仍停留在发布页",
+    );
+  }
+
+  async function publishKuaishou(job) {
+    const isVideo = Boolean(job.draftVideoUrl);
+    if (!window.location.hostname.includes("cp.kuaishou.com")) {
+      await gotoUrl("https://cp.kuaishou.com/profile");
+    }
+    if (isKuaishouProfilePage()) {
+      await ensureKuaishouPublishReady(isVideo);
+    } else if (!isKuaishouEditorPage(isVideo)) {
+      await gotoUrl("https://cp.kuaishou.com/profile");
+      await ensureKuaishouPublishReady(isVideo);
+    }
+    assertKuaishouLoginStillValid();
+    await uploadFiles(
+      isVideo
+        ? ['input[type="file"][accept*="video"]', 'input[type="file"]']
+        : [
+            'input[type="file"][accept*="image/png"]',
+            'input[type="file"][accept*="image/jpeg"]',
+            'input[type="file"][accept*="image/webp"]',
+            'input[type="file"][accept*="image/*"]',
+            'input[accept*="image/png"]',
+            'input[accept*="image/jpeg"]',
+            'input[accept*="image/webp"]',
+            'input[accept*="image/*"]',
+            'input[type="file"][accept*="image"]',
+            'input[type="file"]',
+          ],
+      isVideo ? [job.draftVideoUrl] : job.draftImages,
+      isVideo ? "video" : "image",
+    );
+    assertKuaishouLoginStillValid();
+    await sleep(3200);
+    await fillKuaishouDescription(job);
+    await clickFirst(
+      [
+        'div._button_3a3lq_1._button-primary_3a3lq_60',
+        'button:has-text("发布")',
+        'div[role="button"]:has-text("发布")',
+        'div:has-text("发布")',
+        'text=发布',
+      ],
+      10000,
+      document,
+      {
+        beforeMoveMin: 180,
+        beforeMoveMax: 340,
+        movePauseMin: 120,
+        movePauseMax: 240,
+        holdPauseMin: 130,
+        holdPauseMax: 220,
+        afterClickMin: 320,
+        afterClickMax: 620,
+      },
+    );
+    await waitForHints(
+      ["发布成功", "作品发布成功", "发布完成", "审核中", "已发布"],
+      ["发布失败", "上传失败", "请完善", "请填写内容"],
+      "未识别到快手发布成功状态，请确认页面是否仍停留在发布页",
+    );
+  }
+
+  const platformPublishAdapters = new Map();
+
+  function registerPlatformPublishAdapter(adapter) {
+    if (!adapter || !adapter.platform || typeof adapter.execute !== "function") {
+      throw new Error("发布适配器定义无效");
+    }
+    platformPublishAdapters.set(adapter.platform, adapter);
+  }
+
+  function getPlatformPublishAdapter(platform) {
+    return platformPublishAdapters.get(platform) || null;
+  }
+
+  async function executeLegacyPublishFlow(job) {
+    switch (job.platform) {
+      case "xiaohongshu":
+        await publishXiaohongshu(job);
+        break;
+      case "douyin":
+        await publishDouyin(job);
+        break;
+      case "wechat_mp":
+        await publishWechatMp(job);
+        break;
+      case "kuaishou":
+        await publishKuaishou(job);
+        break;
+      default:
+        throw new Error("当前平台暂不支持扩展本地发布");
+    }
+  }
+
+  registerPlatformPublishAdapter(douyinPublishAdapter);
+
+  async function executePublishSession(session, sendStatus) {
+    const job = session?.job;
+    if (!job?.platform) {
+      throw new Error("扩展未收到有效发布任务");
+    }
+    reportPublishAutomationDebug(
+      "H4",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:executePublishSession:start",
+      {
+        platform: job.platform,
+        currentUrl: window.location.href,
+        hasVideo: Boolean(job.draftVideoUrl),
+        imageCount: Array.isArray(job.draftImages) ? job.draftImages.length : 0,
+      },
+    );
+
+    debugLog("session", "execute-start", {
+      platform: job.platform,
+      currentUrl: window.location.href,
+      hasVideo: Boolean(job.draftVideoUrl),
+      sessionToken: String(session?.sessionToken || "").slice(0, 12),
+    });
+
+    reportPublishAutomationDebug(
+      "H4",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:executePublishSession:before-running-status",
+      {
+        platform: job.platform,
+        currentUrl: window.location.href,
+      },
+    );
+    await sendStatus({
+      status: "running",
+      sourceUrl: window.location.href,
+    });
+    reportPublishAutomationDebug(
+      "H4",
+      "scripts/browser-extension/platform-login-helper/publish-automation.js:executePublishSession:after-running-status",
+      {
+        platform: job.platform,
+        currentUrl: window.location.href,
+      },
+    );
+
+    const adapter = getPlatformPublishAdapter(job.platform);
+    if (adapter) {
+      reportPublishAutomationDebug(
+        "H4",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:executePublishSession:before-adapter-execute",
+        {
+          platform: job.platform,
+          adapter: adapter.name || "anonymous-adapter",
+          currentUrl: window.location.href,
+        },
+      );
+      debugLog("session", "adapter-execute", {
+        platform: job.platform,
+        adapter: adapter.name || "anonymous-adapter",
+      });
+      await adapter.execute({
+        session,
+        job,
+        sendStatus,
+      });
+      reportPublishAutomationDebug(
+        "H4",
+        "scripts/browser-extension/platform-login-helper/publish-automation.js:executePublishSession:after-adapter-execute",
+        {
+          platform: job.platform,
+          adapter: adapter.name || "anonymous-adapter",
+          currentUrl: window.location.href,
+        },
+      );
+    } else {
+      await executeLegacyPublishFlow(job);
+    }
+
+    await sendStatus({
+      status: "success",
+      draftUrl: window.location.href,
+      sourceUrl: window.location.href,
+    });
+  }
+
+  globalThis.AISuperWebPublishAutomation = {
+    executePublishSession,
+    registerPlatformPublishAdapter,
+  };
+})();

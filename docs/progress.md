@@ -19,3 +19,43 @@
 - 已补齐知识库相关 Prisma 表结构与依赖准备，前端检索测试台保留
 - 已补充根路径 `/` 与 `/health` 最小健康检查接口
 - 已同步更新 `docs` 下产品视频、真人口播、模型配置、知识库、接口能力、架构与功能清单文档
+
+## 2026-06-01
+- 已确认发布前登录页预检已落地，未登录页会被直接拦截，不再继续空跑
+- 已确认当前发布链路的关键缺口是：预检失败后没有自动回灌 Cookie 到专属 profile / runtime
+- 已确认登录同步成功时，账号表会保存最新 `authPayload` 与 `cookiePayload`
+- 已在 `background.js` 中为 BitBrowser runtime 发布派发前补上 `clear + applyPlatformCookiePayload/applyPlatformAuthPayload`
+- 已在扩展发布成功回传里补充 `cookiePayload`
+- 已在后端发布同步接口保存最新 `authPayload` 与 `cookiePayload`
+- 已在登录成功、发布成功、发布启动前把最新 Cookie 同步回专属 BitBrowser profile
+- 已完成相关文件诊断检查，当前无新增报错
+- 已新增 `PublishingProfileKeepaliveService`，服务启动后按天自动执行一轮 profile 保活
+- 已新增后端批量保活接口：`POST /api/publishing/platform-accounts/keepalive`
+- 已新增平台账号列表“活跃账号”按钮，点击后静默活跃当前用户全部已登录扩展账号并刷新列表
+- 已新增 BitBrowser 底层保活流程：打开专属 profile、进入平台主页、停留、采集最新 Cookie、关闭 profile
+- 已修复抖音账号命中登录页仍显示在线的问题：`validatePlatformAccount()` 现在会根据 BitBrowser 快照 `sourceUrl` 直接失效化账号并标记 `reauth_required`
+- 已新增对应单测，并修正两条因小红书改走扩展发布后失效的旧测试前提
+- 已执行 `npm test -- publishing.service.spec.ts`，结果 `20 passed`
+- 已修复平台账号列表按钮文案与行为：只要账号当前为离线，前端统一显示 `重新登录`，不再只依赖 `reauthRequired`
+- 已修复 BitBrowser 账号状态采集误取同 host 旧页面的问题：现在会在平台候选页中优先识别真实登录页，再决定是否写成 `reauth_required`
+- 已修复“活跃完成”提示中的 `undefined` 展示，前端对保活统计字段补了兜底
+- 已修复扩展重登链路对普通异常的直接透传，视频号重登再失败时会返回明确错误，不再只显示 `Internal server error`
+- 已补小红书 / 视频号扩展登录回填兜底：前端传入弱身份值时，后端会再从 BitBrowser 当前页补采身份信息
+- 已执行 `npm test -- publishing.service.spec.ts`，结果仍为 `20 passed`
+- 已通过运行时日志确认：视频号 `Internal server error` 的真实底层错误为 BitBrowser 打开 profile 时触发“今日打开窗口次数已达上限”
+- 已补扩展重登错误文案归一化：命中该类错误时，后端返回明确中文提示，不再直接抛裸 500
+- 已修复保活成功判定过严的问题：现在 `authPayload` 或 `cookiePayload` 任一存在即可视为采集成功，不再把“只有 Cookie 的刚登录账号”误判成 `0 成功`
+- 已再次执行 `npm test -- publishing.service.spec.ts`，结果 `20 passed`
+- 已增强 profile 保活行为：进入平台主页后会执行分段滚动与轻量安全点击，再等待后采集结果，不再只是“打开主页静置 5 秒”
+- 已再次执行 `npm test -- publishing.service.spec.ts`，结果 `20 passed`
+- 已落地“稳定 Cookie 采集”主链路：稳定页选择、页面稳定等待、双次采样、`detailBrowser(profileId).cookie` 回退，避免 `DevTools get cookies timeout` 直接导致保活失败
+- 已再次执行 `npm test -- publishing.service.spec.ts`，结果 `20 passed`
+
+## 2026-06-02
+- 已在 `server/src/modules/publishing/platform-login-browser.service.ts` 落地发布页稳态增强
+- 已补浏览器启动期反检测：启动参数、`addInitScript`、dialog 守卫
+- 已补 `page + frame` 统一元素搜索，上传控件与可点击元素可跨上下文探测
+- 已补发布页全局干扰清理：对 `dialog / modal / popup` 类遮挡层执行最小关闭
+- 已补发布前后的真人暖场动作：鼠标移动、滚轮、小停顿
+- 已执行 `GetDiagnostics`，当前无新增诊断错误
+- 已执行 `npm run build`，结果通过

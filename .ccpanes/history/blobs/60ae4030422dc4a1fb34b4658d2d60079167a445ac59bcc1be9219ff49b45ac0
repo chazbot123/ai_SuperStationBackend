@@ -1,0 +1,17 @@
+# Debug Session: xiaohongshu-login-recognition
+
+- Status: OPEN
+- Symptom: 小红书登录后仍未显示“识别成功”，上一轮放宽弱身份闭环后仍无改善
+
+## Hypotheses
+
+1. 扩展端没有真正发出 `extension-login/sync` 请求，问题发生在回传前。
+2. 后端已保存账号，但扩展端因为本地状态或旧脚本未更新，没有把会话置为完成。
+3. 会话已完成，但前端平台账号列表没有及时刷新，表现成“仍未识别成功”。
+4. 小红书当前落在登录页或 401 重定向页，后端仍按未完成登录处理。
+
+## Plan
+
+1. 查现有调试日志，确认有没有 `syncLoginResult` / `syncPlatformExtensionLogin` / `saved account` 证据。
+2. 如果日志不足，再补最小埋点，只记录小红书登录闭环关键状态。
+3. 基于日志决定修扩展回传、后端入库，还是前端刷新链路。

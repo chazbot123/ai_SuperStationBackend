@@ -1,0 +1,25 @@
+# Debug Session: xiaohongshu-login-recognition
+- **Status**: [OPEN]
+- **Issue**: 小红书登录后未识别成功，账号同步结果不稳定
+- **Debug Server**: http://127.0.0.1:7777/event
+- **Log File**: `.dbg/trae-debug-log-xiaohongshu-login-recognition.ndjson`
+
+## Reproduction Steps
+1. 重载 BitBrowser 扩展
+2. 点击小红书登录
+3. 完成登录流程
+4. 观察前端仍提示未识别成功
+
+## Hypotheses & Verification
+| ID | Hypothesis | Likelihood | Effort | Evidence |
+|----|------------|------------|--------|----------|
+| H1 | 小红书页面侧没有提取到有效身份字段 | High | Low | Pending |
+| H2 | 扩展同步时没有把页面提取结果带到后端 | High | Low | Pending |
+| H3 | 后端 fallback 或清洗逻辑把有效字段降级掉了 | High | Low | Pending |
+| H4 | 后端已返回可用账号，但扩展完成态判断没放行 | Medium | Low | Pending |
+
+## Log Evidence
+- 待补充
+
+## Verification Conclusion
+- 待补充

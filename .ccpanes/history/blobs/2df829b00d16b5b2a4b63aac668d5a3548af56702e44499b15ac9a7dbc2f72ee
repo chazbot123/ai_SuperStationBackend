@@ -1,0 +1,14 @@
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m424[m[36m:[m      this.[1;31mtriggerPublishJobs[m(createdJobs.map((job) => job.id));
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m526[m[36m:[m    const validation = this.[1;31mvalidateAuthPayload[m(PlatformAccountAuthType.cookie, authPayload);
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m598[m[36m:[m      await this.[1;31mmarkPlatformAccountAuthExpiredIfNeeded[m(
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m656[m[36m:[m    this.[1;31mtriggerPublishJobs[m([updated.id]);
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m773[m[36m:[m    return this.[1;31mlaunchHostedLoginForAccount[m(created);
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m986[m[36m:[m    const validation = this.[1;31mvalidateAuthPayload[m(dto.authType as PlatformAccountAuthType, authPayload);
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m1219[m[36m:[m    const validation = this.[1;31mvalidateAuthPayload[m(current.authType, decryptedPayload);
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m1243[m[36m:[m    return this.[1;31mlaunchHostedLoginForAccount[m(current, true);
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m1335[m[36m:[m  private async [1;31mlaunchHostedLoginForAccount[m(
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m1705[m[36m:[m      await this.[1;31mmarkPlatformAccountAuthExpiredIfNeeded[m(current.platformAccount.id, message);
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m1898[m[36m:[m  private [1;31mtriggerPublishJobs[m(jobIds: string[]) {
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m1924[m[36m:[m  private async [1;31mmarkPlatformAccountAuthExpiredIfNeeded[m(accountId: string, message: string) {
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m2954[m[36m:[m    const authValidation = this.[1;31mvalidateAuthPayload[m(
+[35mmaster:server/src/modules/publishing/publishing.service.ts[m[36m:[m[32m3026[m[36m:[m  private [1;31mvalidateAuthPayload[m(

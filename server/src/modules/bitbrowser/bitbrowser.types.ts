@@ -8,7 +8,7 @@ export type ProfileBindingMode = typeof PROFILE_BINDING_MODE_DEDICATED_BY_ACCOUN
 export type BusinessOwnerStatus = 'active' | 'disabled';
 export type BrowserProfileStatus = 'active' | 'disabled' | 'busy';
 export type PlatformType = 'douyin' | 'xiaohongshu' | 'wechat_video' | 'kuaishou' | string;
-export type ProfileLockReason = 'login' | 'publish' | 'open_home';
+export type ProfileLockReason = 'login' | 'publish' | 'open_home' | 'keepalive';
 export type RuntimeSessionStatus =
   | 'opening'
   | 'awaiting_extension'
@@ -28,6 +28,7 @@ export type RuntimeCommandType =
   | 'LOGIN_PREPARE'
   | 'LOGIN_EXECUTE'
   | 'LOGIN_SYNC_RESULT'
+  | 'KEEPALIVE_COLLECT'
   | 'PUBLISH_PREPARE'
   | 'PUBLISH_EXECUTE'
   | 'PUBLISH_PROGRESS'
@@ -77,6 +78,7 @@ export interface BitBrowserBrowserCreatePayload {
   isDynamicIpChangeIp?: boolean;
   syncExtensions?: boolean;
   syncUserExtensions?: boolean;
+  webRTC?: string | number;
   browserFingerPrint?: BitBrowserFingerprintConfig;
 }
 
