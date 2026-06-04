@@ -6,6 +6,7 @@ import { traeBadgePlugin } from 'vite-plugin-trae-solo-badge';
 // https://vite.dev/config/
 export default defineConfig(() => {
   const frontendPort = 5173;
+  const backendPort = 3002;
   const isVercelDev = process.env.VERCEL === "1" || process.env.VERCEL_DEV === "1";
 
   return {
@@ -17,7 +18,7 @@ export default defineConfig(() => {
           strictPort: true,
           proxy: {
             "/api": {
-              target: "http://localhost:3001",
+              target: `http://localhost:${backendPort}`,
               changeOrigin: true,
             },
           },

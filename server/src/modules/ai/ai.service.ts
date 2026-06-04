@@ -4700,8 +4700,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const candidates = [
       (payload as { message?: unknown }).message,
       (payload as { error?: { message?: unknown } }).error?.message,
+      (payload as { detail?: unknown }).detail,
+      (payload as { details?: unknown }).details,
+      (payload as { error?: { detail?: unknown } }).error?.detail,
+      (payload as { error?: { details?: unknown } }).error?.details,
       (payload as { error_msg?: unknown }).error_msg,
       (payload as { msg?: unknown }).msg,
+      (payload as { error?: { type?: unknown } }).error?.type,
+      (payload as { type?: unknown }).type,
       (payload as { code?: unknown }).code,
     ];
 
@@ -4949,14 +4955,23 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const baseUrl = config.baseUrl.replace(/\/+$/, '');
 
     if (config.protocol === 'gemini_generate_content') {
+      if (/:generateContent$/i.test(baseUrl)) {
+        return baseUrl;
+      }
       return `${baseUrl}/models/${encodeURIComponent(config.modelName)}:generateContent`;
     }
 
     if (config.protocol === 'openai_chat') {
+      if (/\/chat\/completions$/i.test(baseUrl)) {
+        return baseUrl;
+      }
       return `${baseUrl}/chat/completions`;
     }
 
     if (config.protocol === 'openai_image') {
+      if (/\/images\/generations$/i.test(baseUrl)) {
+        return baseUrl;
+      }
       return `${baseUrl}/images/generations`;
     }
 
@@ -5338,22 +5353,44 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     config: ResolvedModelConfig,
     input: { system?: string; user: string; errorLabel: string },
   ) {
-    const response = await fetch(this.buildRequestUrl(config), {
+    const requestUrl = this.buildRequestUrl(config);
+    const headers = this.createJsonHeaders(config);
+    const messages = [
+      ...(input.system ? [{ role: 'system', content: input.system }] : []),
+      { role: 'user', content: input.user },
+    ];
+
+    let response = await fetch(requestUrl, {
       method: 'POST',
-      headers: this.createJsonHeaders(config),
+      headers,
       body: JSON.stringify({
         model: config.modelName,
-        messages: [
-          ...(input.system ? [{ role: 'system', content: input.system }] : []),
-          { role: 'user', content: input.user },
-        ],
+        messages,
         temperature: 0.8,
       }),
     });
 
-    const data = this.parseJsonSafely<{ choices?: Array<{ message?: { content?: string } }> }>(
+    let data = this.parseJsonSafely<{ choices?: Array<{ message?: { content?: string } }> }>(
       await response.text(),
     );
+
+    // Some OpenAI-compatible gateways reject temperature or map it differently.
+    if (!response.ok && response.status === 400) {
+      const retryResponse = await fetch(requestUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: config.modelName,
+          messages,
+        }),
+      });
+      const retryData = this.parseJsonSafely<{ choices?: Array<{ message?: { content?: string } }> }>(
+        await retryResponse.text(),
+      );
+      response = retryResponse;
+      data = retryData;
+    }
+
     if (!response.ok) {
       throw new BadGatewayException(
         this.buildUpstreamErrorMessage(input.errorLabel, data, response.status),
