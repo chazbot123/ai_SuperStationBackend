@@ -33,6 +33,13 @@ type GenerateVideoRequest = {
   ttsText?: string;
   subtitleEnabled?: boolean;
   referenceImages?: string[];
+  referenceVideos?: string[];
+  referenceMode?: "auto" | "start_frame" | "start_end" | "image_reference";
+  audioMode?: "auto" | "keep_original";
+  audioUrl?: string;
+  negativePrompt?: string;
+  size?: string;
+  generateAudio?: boolean;
   voiceId?: string;
   bgmUrl?: string;
   bgmVolume?: number;
@@ -377,6 +384,13 @@ export async function generateAiVideo(input: GenerateVideoRequest) {
       ttsText: input.ttsText,
       subtitleEnabled: input.subtitleEnabled,
       referenceImages: input.referenceImages,
+      referenceVideos: input.referenceVideos,
+      referenceMode: input.referenceMode,
+      audioMode: input.audioMode,
+      audioUrl: input.audioUrl,
+      negativePrompt: input.negativePrompt,
+      size: input.size,
+      generateAudio: input.generateAudio,
       voiceId: input.voiceId,
       bgmUrl: input.bgmUrl,
       bgmVolume: input.bgmVolume,

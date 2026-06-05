@@ -75,6 +75,44 @@ export class GenerateVideoDto {
   referenceImages?: string[];
 
   @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsString({ each: true })
+  @MaxLength(20000000, { each: true })
+  referenceVideos?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  @IsIn(['auto', 'start_frame', 'start_end', 'image_reference'])
+  referenceMode?: 'auto' | 'start_frame' | 'start_end' | 'image_reference';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  @IsIn(['auto', 'keep_original'])
+  audioMode?: 'auto' | 'keep_original';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20000000)
+  audioUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  negativePrompt?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  size?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  generateAudio?: boolean;
+
+  @IsOptional()
   @IsString()
   @MaxLength(128)
   voiceId?: string;

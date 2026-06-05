@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import {
   getProviderPreset,
   inferProviderKey,
+  normalizeVideoTaskQueryUrlTemplate,
   type ModelType,
   type ProviderKey,
 } from "@/config/modelProviderPresets";
@@ -96,22 +97,36 @@ function mergeConfigs(saved?: ModelConfig[]) {
     const found = saved.find((item) => item.type === base.type);
     const providerKey = inferProviderKey(base.type, found);
     const preset = getProviderPreset(base.type, providerKey);
-    return found
-      ? {
-          ...base,
-          ...found,
-          providerKey,
-          providerName: found.providerName || preset?.providerName || base.providerName,
-          baseUrl:
-            found.baseUrl ||
-            (found as ModelConfig & { requestUrl?: string }).requestUrl ||
-            base.baseUrl,
-          taskQueryUrlTemplate:
-            found.taskQueryUrlTemplate || preset?.taskQueryUrlTemplate || base.taskQueryUrlTemplate,
-          type: base.type,
-          scopes: found.scopes?.length ? found.scopes : base.scopes,
-        }
-      : base;
+    if (!found) {
+      return base;
+    }
+
+    const providerName = found.providerName || preset?.providerName || base.providerName;
+    const baseUrl =
+      found.baseUrl ||
+      (found as ModelConfig & { requestUrl?: string }).requestUrl ||
+      base.baseUrl;
+    const taskQueryUrlTemplate =
+      base.type === "video"
+        ? normalizeVideoTaskQueryUrlTemplate({
+            providerKey,
+            providerName,
+            baseUrl,
+            taskQueryUrlTemplate: found.taskQueryUrlTemplate || preset?.taskQueryUrlTemplate || base.taskQueryUrlTemplate,
+            modelName: found.modelName || base.modelName,
+          })
+        : found.taskQueryUrlTemplate || preset?.taskQueryUrlTemplate || base.taskQueryUrlTemplate;
+
+    return {
+      ...base,
+      ...found,
+      providerKey,
+      providerName,
+      baseUrl,
+      taskQueryUrlTemplate,
+      type: base.type,
+      scopes: found.scopes?.length ? found.scopes : base.scopes,
+    };
   });
 }
 

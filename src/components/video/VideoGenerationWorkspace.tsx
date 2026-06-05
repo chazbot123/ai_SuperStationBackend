@@ -124,7 +124,11 @@ function platformCopyKey(value: VideoWorkspaceDraft["platformStyle"]) {
   return "douyin";
 }
 
-function appendPlatformHint(base: string, value: VideoWorkspaceDraft["platformStyle"]) {
+function appendPlatformHint(
+  base: string,
+  value: VideoWorkspaceDraft["platformStyle"],
+  options?: { includeSubtitleGuide?: boolean },
+) {
   const label = platformLabel(value);
   const hint =
     value === "xiaohongshu"
@@ -132,8 +136,10 @@ function appendPlatformHint(base: string, value: VideoWorkspaceDraft["platformSt
       : value === "wechat_mp"
         ? "风格：视频号偏可信与信息密度，表达稳重清晰；如需数据/背书仅能使用原文提供信息。"
         : "风格：抖音短视频节奏快，强开场钩子、短句、高频关键词、结尾强行动引导。";
-  const visualGuide =
-    "画面指引：以首帧产品为主体做轻微推进/环绕/切换细节；字幕同步口播关键句；突出 1-3 个卖点关键词；结尾展示品牌与行动引导（如有）。";
+  const includeSubtitleGuide = options?.includeSubtitleGuide ?? true;
+  const visualGuide = includeSubtitleGuide
+    ? "画面指引：以首帧产品为主体做轻微推进/环绕/切换细节；字幕同步口播关键句；突出 1-3 个卖点关键词；结尾展示品牌与行动引导（如有）。"
+    : "画面指引：以首帧产品为主体做轻微推进/环绕/切换细节；不要在画面中叠加任何字幕、标题或文案贴片；突出 1-3 个卖点关键词；结尾展示品牌与行动引导（如有）。";
   return `${base}\n\n平台风格：${label}。${hint}\n${visualGuide}`;
 }
 
@@ -477,6 +483,14 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
     return ["1080p", "720p"] as Array<"1080p" | "720p">;
   }, [videoModelConfig?.modelName]);
 
+  const productRatioOptions = useMemo(() => {
+    const model = videoModelConfig?.modelName?.toLowerCase() ?? "";
+    if (isProductMode && model.startsWith("gemini-veo-") && model.includes("-ref-")) {
+      return ["16:9"] as Array<"16:9">;
+    }
+    return ["9:16", "16:9", "1:1"] as Array<"9:16" | "16:9" | "1:1">;
+  }, [isProductMode, videoModelConfig?.modelName]);
+
   const productDurationGuide = useMemo(() => {
     if (!isProductMode) return null;
     return getProductDurationGuide(durationSec);
@@ -574,6 +588,13 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
       setDraftField(props.draftSource, "resolution", (productResolutionOptions[0] ?? "1080p") as any);
     }
   }, [isProductMode, productResolutionOptions, props.draftSource, resolution, setDraftField]);
+
+  useEffect(() => {
+    if (!isProductMode) return;
+    if (!productRatioOptions.includes(ratio as any)) {
+      setDraftField(props.draftSource, "ratio", (productRatioOptions[0] ?? "16:9") as any);
+    }
+  }, [isProductMode, productRatioOptions, props.draftSource, ratio, setDraftField]);
 
   async function polishPromptText(text: string) {
     const raw = text.trim();
@@ -1165,20 +1186,28 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
         return;
       }
 
+      const promptBase = isProductMode ? stripProductAutoHints(prompt) : prompt;
       const promptForVideo = isProductMode
-        ? prompt.includes("平台风格：") || prompt.includes("时长要求：")
-          ? prompt
-          : appendPlatformHint(appendProductDurationHint(prompt, effectiveDurationSec), platformStyle)
-        : appendPlatformHint(prompt, platformStyle);
+        ? appendPlatformHint(appendProductDurationHint(promptBase, effectiveDurationSec), platformStyle, {
+            includeSubtitleGuide: productSubtitleEnabled,
+          })
+        : appendPlatformHint(promptBase, platformStyle);
+      const referenceImages = assets
+        .filter((item) => item.kind === "image" && item.previewUrl)
+        .map((item) => item.previewUrl as string)
+        .filter(Boolean)
+        .slice(0, 3);
+      const referenceVideos = assets
+        .filter((item) => item.kind === "video" && item.previewUrl)
+        .map((item) => item.previewUrl as string)
+        .filter(Boolean)
+        .slice(0, 3);
       const result = await generateAiVideo({
         prompt: promptForVideo,
         ttsText: isProductMode ? (productSubtitleText || undefined) : productSpeechText || undefined,
         subtitleEnabled: isProductMode ? productSubtitleEnabled : undefined,
-        referenceImages: assets
-          .filter((item) => item.kind === "image" && item.previewUrl)
-          .map((item) => item.previewUrl as string)
-          .filter(Boolean)
-          .slice(0, 3),
+        referenceImages,
+        referenceVideos,
         bgmUrl:
           isProductMode && enableProductBgm ? (bgmEnabled ? (bgmUrl.trim() ? bgmUrl.trim() : undefined) : undefined) : undefined,
         bgmVolume: isProductMode && enableProductBgm ? (bgmEnabled ? bgmVolume : undefined) : undefined,
@@ -1746,11 +1775,22 @@ export default function VideoGenerationWorkspace(props: WorkspaceProps) {
                     </div>
                     <div>
                       <div className="mb-1 text-xs font-medium text-zinc-300">比例</div>
-                      <Select value={ratio} onChange={(e) => setDraftField(props.draftSource, "ratio", e.target.value)}>
-                        <option value="9:16">9:16</option>
-                        <option value="16:9">16:9</option>
-                        <option value="1:1">1:1</option>
+                      <Select
+                        value={ratio}
+                        onChange={(e) => setDraftField(props.draftSource, "ratio", e.target.value)}
+                        disabled={productRatioOptions.length === 1}
+                      >
+                        {productRatioOptions.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
                       </Select>
+                      {productRatioOptions.length === 1 ? (
+                        <div className="mt-1 text-[11px] leading-5 text-zinc-500">
+                          当前 Veo 参考图视频仅支持横版 16:9，已自动锁定。
+                        </div>
+                      ) : null}
                     </div>
                     <div>
                       <div className="mb-1 text-xs font-medium text-zinc-300">运动幅度</div>

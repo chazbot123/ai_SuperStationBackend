@@ -1269,6 +1269,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       .map((item) => item.trim())
       .filter((item) => this.parseDataUrl(item));
 
+    if (resolvedConfig.protocol === 'veo_video' && referenceImages.length > 0) {
+      throw new BadRequestException('当前模型配置暂不支持参考图视频生成，请先使用纯文本视频生成');
+    }
+
     const url =
       resolvedConfig.protocol === 'vidu_video'
         ? `${this.normalizeViduEntV2BaseUrl(resolvedConfig.baseUrl)}/${
@@ -1349,15 +1353,38 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const requestBody =
       resolvedConfig.protocol === 'vidu_video'
         ? buildViduPayload()
-        : {
-            model: resolvedConfig.modelName,
-            input: {
+        : resolvedConfig.protocol === 'unified_video_gateway'
+          ? this.buildUnifiedVideoGatewayRequestBody(resolvedConfig, dto, prompt, referenceImages)
+        : resolvedConfig.protocol === 'veo_video'
+          ? this.buildVeoVideoRequestBody({
               prompt,
-            },
-            parameters: {
-              resolution: dto.resolution,
-            },
-          };
+              durationSeconds: Math.min(8, Math.max(4, dto.durationSeconds ?? 8)),
+              aspectRatio: dto.aspectRatio ?? '16:9',
+              resolution: dto.resolution === '1080p' ? '1080p' : '720p',
+            })
+          : resolvedConfig.protocol === 'seedance_video'
+            ? {
+                model: resolvedConfig.modelName,
+                content: [
+                  {
+                    type: 'text',
+                    text: prompt,
+                  },
+                ],
+                resolution: dto.resolution === '720p' || dto.resolution === '1080p' ? dto.resolution : '1080p',
+                ratio: dto.aspectRatio ?? '16:9',
+                duration: Math.min(15, Math.max(5, Math.round(dto.durationSeconds ?? 5))),
+                watermark: false,
+              }
+            : {
+                model: resolvedConfig.modelName,
+                input: {
+                  prompt,
+                },
+                parameters: {
+                  resolution: dto.resolution,
+                },
+              };
 
     let response = await fetch(url, {
       method: 'POST',
@@ -1474,7 +1501,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const template =
       resolvedConfig.protocol === 'vidu_video'
         ? `${this.normalizeViduEntV2BaseUrl(resolvedConfig.baseUrl)}/tasks/{taskId}/creations`
-        : resolvedConfig.taskQueryUrlTemplate?.trim() || '';
+        : resolvedConfig.protocol === 'veo_video'
+          ? resolvedConfig.taskQueryUrlTemplate?.trim() || `${resolvedConfig.baseUrl.replace(/\/+$/, '')}/{taskId}`
+          : resolvedConfig.protocol === 'unified_video_gateway'
+            ? this.buildUnifiedVideoGatewayTaskQueryTemplate(resolvedConfig)
+          : resolvedConfig.protocol === 'seedance_video'
+            ? resolvedConfig.taskQueryUrlTemplate?.trim() ||
+              `${resolvedConfig.baseUrl.replace(/\/+$/, '')}/contents/generations/tasks/{taskId}`
+            : resolvedConfig.taskQueryUrlTemplate?.trim() || '';
 
     if (!template) {
       throw new BadRequestException('视频模型未配置任务查询地址模板');
@@ -1482,9 +1516,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     const response = await fetch(this.buildTaskQueryUrl(template, normalizedTaskId), {
       method: 'GET',
-      headers: {
-        Authorization: this.createJsonHeaders(resolvedConfig).Authorization,
-      },
+      headers: this.createTaskQueryHeaders(resolvedConfig),
     });
     const data = this.parseJsonSafely(await response.text());
 
@@ -1496,10 +1528,15 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
     const status = this.extractVideoTaskStatus(data);
     const urls = this.extractHttpUrls(data);
-    const videoUrl = urls.find((url) => /\.mp4(\?|$)/i.test(url) || url.includes('video')) ?? urls[0];
+    const upstreamVideoUrl =
+      urls.find((url) => /\.mp4(\?|$)/i.test(url) || url.includes('video')) ??
+      (status === 'success' && resolvedConfig.protocol === 'unified_video_gateway'
+        ? this.buildUnifiedVideoGatewayDownloadUrl(resolvedConfig, normalizedTaskId)
+        : null) ??
+      urls[0];
 
     const ttsEntry = await this.videoTtsCache.get(normalizedTaskId);
-    if (ttsEntry && status === 'success' && videoUrl) {
+    if (ttsEntry && status === 'success' && upstreamVideoUrl) {
       if (ttsEntry.status === 'success' && ttsEntry.finalVideoUrl) {
         return {
           taskId: normalizedTaskId,
@@ -1517,7 +1554,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       if (!ttsEntry.sourceVideoUrl) {
         await this.videoTtsCache.set(
           normalizedTaskId,
-          { ...ttsEntry, sourceVideoUrl: videoUrl, status: 'processing' },
+          { ...ttsEntry, sourceVideoUrl: upstreamVideoUrl, status: 'processing' },
           24 * 60 * 60,
         );
         this.startMuxAudioForVideoTask(normalizedTaskId).catch(() => null);
@@ -1531,6 +1568,11 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         videoUrl: null,
       };
     }
+
+    const videoUrl =
+      status === 'success' && upstreamVideoUrl
+        ? await this.persistGeneratedVideoUrlIfNeeded(user.userId, normalizedTaskId, resolvedConfig, upstreamVideoUrl)
+        : null;
 
     if (status === 'failed') {
       const errorMessage = this.extractErrorMessage(data) ?? this.extractDeepErrorMessage(data);
@@ -1549,7 +1591,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         provider: resolvedConfig.providerName,
         model: resolvedConfig.modelName,
         status,
-        videoUrl: status === 'success' ? this.rewriteManagedAssetUrl(videoUrl ?? null) : null,
+        videoUrl: status === 'success' ? this.rewriteManagedAssetUrl(videoUrl) : null,
       };
     } catch (error) {
       this.rethrowModelError(error, '视频任务查询失败');
@@ -3351,8 +3393,43 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async downloadBinary(url: string) {
-    const response = await fetch(url);
+  private createTaskQueryHeaders(config: ResolvedModelConfig) {
+    const headers = this.createJsonHeaders(config);
+    if (headers.Authorization) {
+      return { Authorization: headers.Authorization };
+    }
+    if (headers['x-goog-api-key']) {
+      return { 'x-goog-api-key': headers['x-goog-api-key'] };
+    }
+    return headers;
+  }
+
+  private async persistGeneratedVideoUrlIfNeeded(
+    userId: string,
+    taskId: string,
+    config: ResolvedModelConfig,
+    upstreamUrl: string,
+  ) {
+    if (
+      config.protocol !== 'veo_video' ||
+      !/generativelanguage.googleapis.com/i.test(upstreamUrl) ||
+      !/\/files\/.+:download/i.test(upstreamUrl)
+    ) {
+      return upstreamUrl;
+    }
+
+    const buffer = await this.downloadBinary(upstreamUrl, this.createTaskQueryHeaders(config));
+    const uploaded = await this.videoStorage.uploadVideoObject({
+      userId,
+      taskId,
+      fileName: 'veo-generated.mp4',
+      buffer,
+    });
+    return uploaded.url;
+  }
+
+  private async downloadBinary(url: string, headers?: Record<string, string>) {
+    const response = await fetch(url, headers ? { headers } : undefined);
     if (!response.ok) {
       throw new BadGatewayException(`下载视频片段失败（${response.status}）`);
     }
@@ -4395,14 +4472,16 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       legacyRequestUrl ||
       preset?.baseUrl ||
       '';
+    const protocol = resolveProviderProtocol(type, providerKey, baseUrl, override?.providerName, override?.modelName);
+    const rawTaskQueryUrlTemplate =
+      override?.taskQueryUrlTemplate?.trim() || preset?.taskQueryUrlTemplate;
     return {
       enabled: override?.enabled ?? true,
       providerKey,
-      protocol: resolveProviderProtocol(type, providerKey, baseUrl),
+      protocol,
       providerName: override?.providerName?.trim() || preset?.providerName || 'Custom',
       baseUrl,
-      taskQueryUrlTemplate:
-        override?.taskQueryUrlTemplate?.trim() || preset?.taskQueryUrlTemplate,
+      taskQueryUrlTemplate: this.normalizeTaskQueryUrlTemplate(protocol, baseUrl, rawTaskQueryUrlTemplate),
       apiKey:
         override?.apiKey?.trim() ||
         this.configService.get<string>('DASHSCOPE_API_KEY') ||
@@ -4424,7 +4503,34 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const url =
       override?.baseUrl ||
       (override as Partial<{ requestUrl?: string }> | undefined)?.requestUrl;
-    return inferProviderKeyByUrl(url, override?.providerName);
+    return inferProviderKeyByUrl(url, override?.providerName, override?.modelName);
+  }
+
+  private normalizeTaskQueryUrlTemplate(
+    protocol: ProviderProtocol,
+    baseUrl: string,
+    taskQueryUrlTemplate?: string,
+  ) {
+    const normalized = taskQueryUrlTemplate?.trim();
+    if (!normalized) {
+      return undefined;
+    }
+    if (protocol !== 'unified_video_gateway') {
+      return normalized;
+    }
+
+    try {
+      const createUrl = new URL(this.buildUnifiedVideoGatewayCreateUrl(baseUrl));
+      const templateUrl = new URL(this.buildTaskQueryUrl(normalized, 'task-demo'));
+      const expectedPath = `${createUrl.pathname.replace(/\/+$/, '')}/task-demo`;
+      if (createUrl.host !== templateUrl.host || templateUrl.pathname !== expectedPath) {
+        return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+
+    return normalized;
   }
 
   private pickDimensions(
@@ -4671,6 +4777,83 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return traceId ? `${prefix}（${status ?? 'upstream'}） (trace_id: ${traceId})` : prefix;
   }
 
+  private extractFriendlyUpstreamErrorMessage(payload: unknown, depth = 0): string | null {
+    if (!payload || typeof payload !== 'object' || depth > 3) {
+      return null;
+    }
+
+    const friendlyDirect = this.humanizeKnownUpstreamError(payload);
+    if (friendlyDirect) {
+      return friendlyDirect;
+    }
+
+    const nestedCandidates = [
+      (payload as { message?: unknown }).message,
+      (payload as { error?: { message?: unknown } }).error?.message,
+      (payload as { detail?: unknown }).detail,
+      (payload as { details?: unknown }).details,
+    ];
+
+    for (const candidate of nestedCandidates) {
+      if (typeof candidate !== 'string' || !candidate.trim()) {
+        continue;
+      }
+      const nestedPayload = this.parseJsonFromText<unknown>(candidate);
+      if (!nestedPayload || typeof nestedPayload !== 'object') {
+        continue;
+      }
+      const nestedMessage = this.extractFriendlyUpstreamErrorMessage(nestedPayload, depth + 1);
+      if (nestedMessage) {
+        return nestedMessage;
+      }
+    }
+
+    return null;
+  }
+
+  private humanizeKnownUpstreamError(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+
+    const codeCandidates = [
+      (payload as { code?: unknown }).code,
+      (payload as { error?: { code?: unknown } }).error?.code,
+      (payload as { type?: unknown }).type,
+      (payload as { error?: { type?: unknown } }).error?.type,
+    ]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.trim());
+
+    const messageCandidates = [
+      (payload as { message?: unknown }).message,
+      (payload as { error?: { message?: unknown } }).error?.message,
+      (payload as { detail?: unknown }).detail,
+      (payload as { details?: unknown }).details,
+    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    for (const message of messageCandidates) {
+      const normalizedMessage = message.trim();
+      const channelMatch = normalizedMessage.match(
+        /No available channel for model\s+(.+?)\s+under group\s+(.+?)\s+\((?:distributor|group)\)/i,
+      );
+      if (channelMatch) {
+        const model = channelMatch[1].trim();
+        const group = channelMatch[2].trim();
+        return `上游分组 ${group} 未开通模型 ${model} 的可用通道，请联系上游开通后重试`;
+      }
+
+      if (
+        codeCandidates.some((code) => code.toLowerCase() === 'model_not_found') &&
+        /model not found/i.test(normalizedMessage)
+      ) {
+        return '上游未找到当前模型，请检查模型名称是否正确，或联系上游确认该模型已开通';
+      }
+    }
+
+    return null;
+  }
+
   private extractTraceId(payload: unknown): string | null {
     if (!payload || typeof payload !== 'object') {
       return null;
@@ -4695,6 +4878,11 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   private extractErrorMessage(payload: unknown): string | null {
     if (!payload || typeof payload !== 'object') {
       return null;
+    }
+
+    const friendlyMessage = this.extractFriendlyUpstreamErrorMessage(payload);
+    if (friendlyMessage) {
+      return friendlyMessage;
     }
 
     const candidates = [
@@ -4914,8 +5102,9 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   }
 
   private buildTaskQueryUrl(template: string, taskId: string) {
+    const encodedTaskId = encodeURIComponent(taskId).replace(/%2F/gi, '/');
     return template.includes('{taskId}')
-      ? template.replaceAll('{taskId}', encodeURIComponent(taskId))
+      ? template.replaceAll('{taskId}', encodedTaskId)
       : template;
   }
 
@@ -4949,6 +5138,211 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       return `${match[1]}${match[2]}`;
     }
     return `${normalized}/ent/v2`;
+  }
+
+  private buildUnifiedVideoGatewayCreateUrl(baseUrl: string) {
+    const normalized = baseUrl.replace(/\/+$/, '');
+    if (/\/v1\/videos$/i.test(normalized) || /\/videos$/i.test(normalized)) {
+      return normalized;
+    }
+    if (/\/v1$/i.test(normalized)) {
+      return `${normalized}/videos`;
+    }
+    return `${normalized}/v1/videos`;
+  }
+
+  private buildUnifiedVideoGatewayTaskQueryTemplate(config: ResolvedModelConfig) {
+    return config.taskQueryUrlTemplate?.trim() || `${this.buildUnifiedVideoGatewayCreateUrl(config.baseUrl)}/{taskId}`;
+  }
+
+  private buildUnifiedVideoGatewayDownloadUrl(config: ResolvedModelConfig, taskId: string) {
+    const encodedTaskId = encodeURIComponent(taskId).replace(/%2F/gi, '/');
+    return `${this.buildUnifiedVideoGatewayCreateUrl(config.baseUrl)}/${encodedTaskId}/content`;
+  }
+
+  private isUnifiedGatewaySoraVip3Model(modelName: string) {
+    return modelName.trim().toLowerCase().startsWith('sora-vip3-');
+  }
+
+  private isUnifiedGatewaySoraV3Model(modelName: string) {
+    const normalized = modelName.trim().toLowerCase();
+    return normalized === 'sora-2' || normalized.startsWith('sora-v3-');
+  }
+
+  private isUnifiedGatewayVeoModel(modelName: string) {
+    return modelName.trim().toLowerCase().startsWith('gemini-veo-');
+  }
+
+  private resolveUnifiedGatewaySeconds(modelName: string, requestedSeconds?: number) {
+    const normalized = modelName.trim().toLowerCase();
+    const requested =
+      typeof requestedSeconds === 'number' && Number.isFinite(requestedSeconds) && requestedSeconds > 0
+        ? Math.round(requestedSeconds)
+        : null;
+
+    if (normalized === 'sora-2') {
+      const allowed = [4, 8, 12];
+      if (!requested) return '8';
+      return String(
+        allowed.reduce((best, current) =>
+          Math.abs(current - requested) < Math.abs(best - requested) ? current : best,
+        ),
+      );
+    }
+
+    if (this.isUnifiedGatewaySoraVip3Model(modelName)) {
+      const allowed = [5, 10, 15];
+      if (!requested) return '5';
+      return String(
+        allowed.reduce((best, current) =>
+          Math.abs(current - requested) < Math.abs(best - requested) ? current : best,
+        ),
+      );
+    }
+
+    return String(Math.min(15, Math.max(5, requested ?? 5)));
+  }
+
+  private resolveUnifiedGatewayVeoSize(input: {
+    size?: string;
+    aspectRatio?: '16:9' | '9:16' | '1:1';
+    resolution?: '360p' | '540p' | '720p' | '1080p';
+  }) {
+    const explicitSize = input.size?.trim();
+    if (explicitSize) {
+      return explicitSize;
+    }
+
+    if (input.aspectRatio === '16:9') {
+      return input.resolution === '1080p' ? '1920x1080' : '1280x720';
+    }
+    if (input.aspectRatio === '9:16') {
+      return input.resolution === '1080p' ? '1080x1920' : '720x1280';
+    }
+    return null;
+  }
+
+  private isLandscapeSixteenByNineSize(size: string) {
+    const matched = size.trim().match(/^(\d{2,5})x(\d{2,5})$/i);
+    if (!matched) {
+      return false;
+    }
+
+    const width = Number(matched[1]);
+    const height = Number(matched[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      return false;
+    }
+
+    return width >= height && width * 9 === height * 16;
+  }
+
+  private buildUnifiedVideoGatewayRequestBody(
+    config: ResolvedModelConfig,
+    dto: GenerateVideoDto,
+    prompt: string,
+    referenceImages: string[],
+  ) {
+    const referenceVideos = (dto.referenceVideos ?? [])
+      .filter((item) => typeof item === 'string' && item.trim())
+      .map((item) => item.trim());
+    const audioUrl = dto.audioUrl?.trim() || '';
+
+    if (this.isUnifiedGatewayVeoModel(config.modelName)) {
+      const hasReferenceImages = referenceImages.length > 0;
+      const explicitSize = dto.size?.trim() || '';
+
+      if (dto.aspectRatio === '1:1' && !dto.size?.trim()) {
+        throw new BadRequestException('当前 Veo 网关仅支持 16:9 或 9:16；如需其他尺寸请显式填写 size');
+      }
+
+      if (hasReferenceImages && explicitSize && !this.isLandscapeSixteenByNineSize(explicitSize)) {
+        throw new BadRequestException(
+          '当前 Veo 参考图视频仅支持 16:9，请将比例改为 16:9，或填写 1280x720 / 1920x1080 这类横版 size',
+        );
+      }
+
+      const size = this.resolveUnifiedGatewayVeoSize({
+        size: hasReferenceImages ? undefined : dto.size,
+        aspectRatio: hasReferenceImages ? '16:9' : dto.aspectRatio,
+        resolution: dto.resolution,
+      });
+
+      const body: Record<string, unknown> = {
+        model: config.modelName,
+        prompt,
+        generate_audio: dto.generateAudio ?? false,
+      };
+
+      if (hasReferenceImages) {
+        body.size = explicitSize || size || '1280x720';
+      } else if (size) {
+        body.size = size;
+      } else if (dto.aspectRatio === '16:9' || dto.aspectRatio === '9:16') {
+        body.aspect_ratio = dto.aspectRatio;
+      }
+      if (dto.negativePrompt?.trim()) {
+        body.negative_prompt = dto.negativePrompt.trim();
+      }
+      if (referenceImages.length === 1) {
+        body.image_url = referenceImages[0];
+      } else if (referenceImages.length > 1) {
+        body.images = referenceImages.slice(0, config.modelName.toLowerCase().includes('-ref-') ? 3 : 2);
+      }
+      return body;
+    }
+
+    if (this.isUnifiedGatewaySoraVip3Model(config.modelName)) {
+      const body: Record<string, unknown> = {
+        model: config.modelName,
+        prompt,
+        aspect_ratio: dto.aspectRatio ?? '16:9',
+        resolution:
+          dto.resolution === '1080p' && config.modelName.toLowerCase().includes('1080p') ? '1080p' : '720p',
+        seconds: this.resolveUnifiedGatewaySeconds(config.modelName, dto.durationSeconds),
+      };
+
+      if (referenceImages[0]) {
+        body.image_url = referenceImages[0];
+      }
+      if (referenceImages.length > 1) {
+        body.reference_image_urls = referenceImages.slice(1, 9);
+      }
+      if (referenceVideos[0]) {
+        body.reference_video = referenceVideos[0];
+      }
+      if (audioUrl) {
+        body.audio_url = audioUrl;
+      }
+      return body;
+    }
+
+    if (this.isUnifiedGatewaySoraV3Model(config.modelName)) {
+      const normalizedModel = config.modelName.trim().toLowerCase();
+      const body: Record<string, unknown> = {
+        model: config.modelName,
+        prompt,
+        aspect_ratio: dto.aspectRatio ?? '16:9',
+        resolution: normalizedModel === 'sora-2' ? '720p' : dto.resolution === '1080p' ? '720p' : dto.resolution ?? '720p',
+        seconds: this.resolveUnifiedGatewaySeconds(config.modelName, dto.durationSeconds),
+      };
+
+      if (referenceImages.length > 0) {
+        body.reference_images = referenceImages.slice(0, normalizedModel === 'sora-2' ? 1 : 4);
+        body.reference_mode = dto.referenceMode ?? 'image_reference';
+      }
+      if (referenceVideos.length === 1) {
+        body.reference_video = referenceVideos[0];
+      } else if (referenceVideos.length > 1) {
+        body.reference_videos = referenceVideos.slice(0, 3);
+      }
+      if (dto.audioMode) {
+        body.audio_mode = dto.audioMode;
+      }
+      return body;
+    }
+
+    throw new BadRequestException(`统一视频网关暂不支持当前模型：${config.modelName}`);
   }
 
   private buildRequestUrl(config: ResolvedModelConfig) {
@@ -4991,6 +5385,24 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       return `${baseUrl}/video-generation/video-synthesis`;
     }
 
+    if (config.protocol === 'veo_video') {
+      if (/:generateVideo$/i.test(baseUrl)) {
+        return baseUrl;
+      }
+      return `${baseUrl}/models/${encodeURIComponent(config.modelName)}:generateVideo`;
+    }
+
+    if (config.protocol === 'seedance_video') {
+      if (/\/contents\/generations\/tasks$/i.test(baseUrl)) {
+        return baseUrl;
+      }
+      return `${baseUrl}/contents/generations/tasks`;
+    }
+
+    if (config.protocol === 'unified_video_gateway') {
+      return this.buildUnifiedVideoGatewayCreateUrl(baseUrl);
+    }
+
     if (config.protocol === 'vidu_video') {
       return `${this.normalizeViduEntV2BaseUrl(baseUrl)}/text2video`;
     }
@@ -5008,6 +5420,11 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     };
 
     if (config.protocol === 'gemini_generate_content') {
+      headers['x-goog-api-key'] = config.apiKey;
+      return headers;
+    }
+
+    if (config.protocol === 'veo_video') {
       headers['x-goog-api-key'] = config.apiKey;
       return headers;
     }
@@ -5077,14 +5494,39 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     return '9:16';
   }
 
+  private buildVeoVideoRequestBody(input: {
+    prompt: string;
+    durationSeconds: number;
+    aspectRatio: '16:9' | '9:16' | '1:1';
+    resolution: '720p' | '1080p';
+  }) {
+    return {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: input.prompt }],
+        },
+      ],
+      generationConfig: {
+        durationSeconds: input.durationSeconds,
+        aspectRatio: input.aspectRatio,
+        resolution: input.resolution,
+        generateAudio: false,
+      },
+    };
+  }
+
   private extractTaskId(payload: unknown): string | null {
     if (!payload || typeof payload !== 'object') {
       return null;
     }
 
     const candidates = [
+      (payload as { id?: unknown }).id,
       (payload as { task_id?: unknown }).task_id,
       (payload as { taskId?: unknown }).taskId,
+      (payload as { name?: unknown }).name,
+      (payload as { operation?: { name?: unknown } }).operation?.name,
       (payload as { output?: { task_id?: unknown; taskId?: unknown } }).output?.task_id,
       (payload as { output?: { task_id?: unknown; taskId?: unknown } }).output?.taskId,
       (payload as { data?: { task_id?: unknown; taskId?: unknown } }).data?.task_id,
@@ -5113,6 +5555,18 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       (payload as { data?: { status?: unknown; state?: unknown } }).data?.status,
       (payload as { data?: { status?: unknown; state?: unknown } }).data?.state,
     ];
+
+    if ((payload as { done?: unknown }).done === false) {
+      return 'processing';
+    }
+    if ((payload as { done?: unknown }).done === true) {
+      if ((payload as { error?: unknown }).error) {
+        return 'failed';
+      }
+      if ((payload as { response?: unknown }).response) {
+        return 'success';
+      }
+    }
 
     const raw = candidates.find((value) => typeof value === 'string' && value.trim());
     if (!raw || typeof raw !== 'string') {
@@ -5309,12 +5763,47 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const response = await fetch(this.buildRequestUrl(config), {
       method: 'POST',
       headers: this.createJsonHeaders(config),
-      body: JSON.stringify({
-        model: config.modelName,
-        input: {
-          prompt: '测试连接，请创建一个简短视频任务。',
-        },
-      }),
+      body: JSON.stringify(
+        config.protocol === 'unified_video_gateway'
+          ? this.buildUnifiedVideoGatewayRequestBody(
+              config,
+              {
+                aspectRatio: '16:9',
+                resolution: config.modelName.toLowerCase().includes('1080p') ? '1080p' : '720p',
+                durationSeconds: config.modelName.toLowerCase().startsWith('sora-2') ? 8 : 5,
+                generateAudio: false,
+              },
+              '测试连接，请创建一个简短视频任务。',
+              [],
+            )
+          : config.protocol === 'veo_video'
+          ? this.buildVeoVideoRequestBody({
+              prompt: '测试连接，请创建一个简短视频任务。',
+              durationSeconds: 4,
+              aspectRatio: '16:9',
+              resolution: '720p',
+            })
+          : config.protocol === 'seedance_video'
+            ? {
+                model: config.modelName,
+                content: [
+                  {
+                    type: 'text',
+                    text: '测试连接，请创建一个简短视频任务。',
+                  },
+                ],
+                resolution: '1080p',
+                ratio: '16:9',
+                duration: 5,
+                watermark: false,
+              }
+            : {
+                model: config.modelName,
+                input: {
+                  prompt: '测试连接，请创建一个简短视频任务。',
+                },
+              },
+      ),
     });
 
     const data = this.parseJsonSafely(await response.text());
@@ -5325,13 +5814,14 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
 
     const taskId = this.extractTaskId(data);
-    if (taskId && config.taskQueryUrlTemplate?.trim()) {
-      const authHeader = this.createJsonHeaders(config).Authorization;
-      const queryResponse = await fetch(this.buildTaskQueryUrl(config.taskQueryUrlTemplate, taskId), {
+    const queryTemplate =
+      config.protocol === 'unified_video_gateway'
+        ? this.buildUnifiedVideoGatewayTaskQueryTemplate(config)
+        : config.taskQueryUrlTemplate?.trim() || '';
+    if (taskId && queryTemplate) {
+      const queryResponse = await fetch(this.buildTaskQueryUrl(queryTemplate, taskId), {
         method: 'GET',
-        headers: {
-          Authorization: authHeader,
-        },
+        headers: this.createTaskQueryHeaders(config),
       });
       const queryData = this.parseJsonSafely(await queryResponse.text());
       if (!queryResponse.ok) {

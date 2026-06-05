@@ -2,6 +2,7 @@ import { BadGatewayException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AiModelConfigCacheService } from './ai-model-config-cache.service';
 import { AiService } from './ai.service';
+import { resolveProviderProtocol } from './model-provider-presets';
 
 describe('AiService', () => {
   let service: AiService;
@@ -183,6 +184,262 @@ describe('AiService', () => {
         },
       ),
     ).rejects.toThrow(new BadGatewayException('文字模型测试失败（400）：model not found'));
+  });
+
+  it('builds veo video payload with Gemini contents structure', () => {
+    const payload = (service as never)['buildVeoVideoRequestBody']({
+      prompt: '测试连接，请创建一个简短视频任务。',
+      durationSeconds: 4,
+      aspectRatio: '16:9',
+      resolution: '720p',
+    });
+
+    expect(payload).toEqual({
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: '测试连接，请创建一个简短视频任务。' }],
+        },
+      ],
+      generationConfig: {
+        durationSeconds: 4,
+        aspectRatio: '16:9',
+        resolution: '720p',
+        generateAudio: false,
+      },
+    });
+  });
+
+  it('tests veo video connection with contents payload', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ name: 'operations/test-task' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const result = await (service as never)['testVideoModelConnection']({
+      providerName: 'Veo Omni',
+      modelName: 'gemini-veo-3.1-generate-preview-re4-r5',
+      baseUrl: 'https://api.example.com/v1beta',
+      apiKey: 'test-key',
+      protocol: 'veo_video',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      message: '视频模型连接成功，已创建测试任务',
+      provider: 'Veo Omni',
+      model: 'gemini-veo-3.1-generate-preview-re4-r5',
+    });
+
+    const requestBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(requestBody.contents).toEqual([
+      {
+        role: 'user',
+        parts: [{ text: '测试连接，请创建一个简短视频任务。' }],
+      },
+    ]);
+    expect(requestBody.generationConfig).toEqual({
+      durationSeconds: 4,
+      aspectRatio: '16:9',
+      resolution: '720p',
+      generateAudio: false,
+    });
+  });
+
+  it('infers custom video provider protocol as unified gateway for sora-compatible models', () => {
+    const protocol = resolveProviderProtocol(
+      'video',
+      'custom',
+      'https://api.52hertz-palpitata.cn/v1',
+      'seedance 2.0',
+      'sora-2',
+    );
+
+    expect(protocol).toBe('unified_video_gateway');
+  });
+
+  it('infers veo omni provider protocol as unified gateway when base url points to gateway', () => {
+    const protocol = resolveProviderProtocol(
+      'video',
+      'veo_omni',
+      'https://api.52hertz-palpitata.cn/v1',
+      'Veo Omni',
+      'gemini-veo-3.1-generate-preview-ref-8s',
+    );
+
+    expect(protocol).toBe('unified_video_gateway');
+  });
+
+  it('tests unified gateway video connection with /v1/videos payload', async () => {
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'task_demo_1', status: 'queued' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'task_demo_1', status: 'in_progress' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    const result = await (service as never)['testVideoModelConnection']({
+      providerName: 'seedance 2.0',
+      modelName: 'sora-2',
+      baseUrl: 'https://api.52hertz-palpitata.cn/v1',
+      apiKey: 'test-key',
+      protocol: 'unified_video_gateway',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      message: '视频模型连接成功，已创建测试任务',
+      provider: 'seedance 2.0',
+      model: 'sora-2',
+    });
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('https://api.52hertz-palpitata.cn/v1/videos');
+
+    const requestBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(requestBody).toEqual({
+      model: 'sora-2',
+      prompt: '测试连接，请创建一个简短视频任务。',
+      aspect_ratio: '16:9',
+      resolution: '720p',
+      seconds: '8',
+    });
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toBe('https://api.52hertz-palpitata.cn/v1/videos/task_demo_1');
+  });
+
+  it('allows unified gateway veo ref models to generate with reference images', async () => {
+    jest.spyOn(service as never, 'getEffectiveModelConfig').mockResolvedValue({
+      enabled: true,
+      providerKey: 'custom',
+      providerName: 'Unified Gateway',
+      modelName: 'gemini-veo-3.1-generate-preview-ref-8s',
+      baseUrl: 'https://api.52hertz-palpitata.cn/v1',
+      apiKey: 'test-key',
+      protocol: 'unified_video_gateway',
+    });
+
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'task_veo_ref_1', status: 'queued' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const result = await service.generateVideo(user, {
+      prompt: '让参考图人物在森林晨光中行走',
+      referenceImages: [
+        'https://example.com/character-front.png',
+        'https://example.com/character-side.png',
+      ],
+      aspectRatio: '16:9',
+      resolution: '720p',
+      modelConfig,
+    });
+
+    expect(result).toEqual({
+      provider: 'Unified Gateway',
+      model: 'gemini-veo-3.1-generate-preview-ref-8s',
+      status: 'processing',
+      taskId: 'task_veo_ref_1',
+    });
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('https://api.52hertz-palpitata.cn/v1/videos');
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).toEqual({
+      model: 'gemini-veo-3.1-generate-preview-ref-8s',
+      prompt: '让参考图人物在森林晨光中行走',
+      generate_audio: false,
+      size: '1280x720',
+      images: [
+        'https://example.com/character-front.png',
+        'https://example.com/character-side.png',
+      ],
+    });
+  });
+
+  it('forces unified gateway veo reference video requests to 16:9 even when dto uses 9:16', async () => {
+    jest.spyOn(service as never, 'getEffectiveModelConfig').mockResolvedValue({
+      enabled: true,
+      providerKey: 'custom',
+      providerName: 'Unified Gateway',
+      modelName: 'gemini-veo-3.1-generate-preview-ref-8s',
+      baseUrl: 'https://api.52hertz-palpitata.cn/v1',
+      apiKey: 'test-key',
+      protocol: 'unified_video_gateway',
+    });
+
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'task_veo_ref_2', status: 'queued' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await service.generateVideo(user, {
+      prompt: '让参考图人物在森林晨光中行走',
+      referenceImages: ['https://example.com/character-front.png'],
+      aspectRatio: '9:16',
+      resolution: '1080p',
+      modelConfig,
+    });
+
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).toEqual({
+      model: 'gemini-veo-3.1-generate-preview-ref-8s',
+      prompt: '让参考图人物在森林晨光中行走',
+      generate_audio: false,
+      size: '1920x1080',
+      image_url: 'https://example.com/character-front.png',
+    });
+  });
+
+  it('drops mismatched google query template when veo omni actually uses unified gateway', () => {
+    const resolved = (service as never)['resolveModelConfig']('video', {
+      providerKey: 'veo_omni',
+      providerName: 'Veo Omni',
+      baseUrl: 'https://api.52hertz-palpitata.cn/v1',
+      taskQueryUrlTemplate: 'https://generativelanguage.googleapis.com/v1beta/{taskId}',
+      apiKey: 'test-key',
+      modelName: 'gemini-veo-3.1-generate-preview-ref-8s',
+    });
+
+    expect(resolved.protocol).toBe('unified_video_gateway');
+    expect(resolved.taskQueryUrlTemplate).toBeUndefined();
+  });
+
+  it('drops same-host legacy seedance query template when sora-2 actually uses unified gateway', () => {
+    const resolved = (service as never)['resolveModelConfig']('video', {
+      providerKey: 'seedance',
+      providerName: 'Seedance 2.0',
+      baseUrl: 'https://api.52hertz-palpitata.cn/v1',
+      taskQueryUrlTemplate: 'https://api.52hertz-palpitata.cn/api/v3/contents/generations/tasks/{taskId}',
+      apiKey: 'test-key',
+      modelName: 'sora-2',
+    });
+
+    expect(resolved.protocol).toBe('unified_video_gateway');
+    expect(resolved.taskQueryUrlTemplate).toBeUndefined();
+  });
+
+  it('humanizes nested model_not_found errors from unified gateway distributors', () => {
+    const message = (service as never)['buildUpstreamErrorMessage'](
+      '视频模型测试失败',
+      {
+        code: 'fail_to_fetch_task',
+        message:
+          '{"error":{"code":"model_not_found","message":"No available channel for model sora-2 under group SD2 (distributor) (request id: 202606050559167882073338268d9d6PTKTWhMC)","type":"new_api_error"}}',
+      },
+      503,
+    );
+
+    expect(message).toBe(
+      '视频模型测试失败（503）：上游分组 SD2 未开通模型 sora-2 的可用通道，请联系上游开通后重试',
+    );
   });
 
   it('normalizes generated hashtag strings into stored tags', () => {

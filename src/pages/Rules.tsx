@@ -4,7 +4,13 @@ import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
-import { getProviderPreset, getProviderPresets, type ModelType } from "@/config/modelProviderPresets";
+import {
+  getProviderPreset,
+  getProviderPresets,
+  looksLikeUnifiedVideoGatewayVideoConfig,
+  normalizeVideoTaskQueryUrlTemplate,
+  type ModelType,
+} from "@/config/modelProviderPresets";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import {
   activateModelConfig,
@@ -84,6 +90,37 @@ export default function Rules() {
       replaceConfig(activeType, saved);
     }
   }, [active.providerKey, activeType, replaceConfig, savedConfigs]);
+
+  useEffect(() => {
+    if (active.type !== "video") {
+      return;
+    }
+
+    const normalizedTaskQueryUrlTemplate = normalizeVideoTaskQueryUrlTemplate({
+      providerKey: active.providerKey,
+      providerName: active.providerName,
+      baseUrl: active.baseUrl,
+      taskQueryUrlTemplate: active.taskQueryUrlTemplate,
+      modelName: active.modelName,
+    });
+    const currentTaskQueryUrlTemplate = active.taskQueryUrlTemplate?.trim() || undefined;
+    if (normalizedTaskQueryUrlTemplate === currentTaskQueryUrlTemplate) {
+      return;
+    }
+
+    updateConfig(activeType, { taskQueryUrlTemplate: normalizedTaskQueryUrlTemplate });
+    setSavedHint(null);
+    setTestHint(null);
+  }, [
+    active.baseUrl,
+    active.modelName,
+    active.providerKey,
+    active.providerName,
+    active.taskQueryUrlTemplate,
+    active.type,
+    activeType,
+    updateConfig,
+  ]);
 
   if (!canEdit) {
     return (
@@ -269,6 +306,20 @@ export default function Rules() {
                     placeholder="可选，异步任务时使用，例如 https://example.com/tasks/{taskId}"
                   />
                 </label>
+              ) : null}
+
+              {active.type === "video" &&
+              looksLikeUnifiedVideoGatewayVideoConfig({
+                providerKey: active.providerKey,
+                providerName: active.providerName,
+                baseUrl: active.baseUrl,
+                modelName: active.modelName,
+              }) ? (
+                <div className="rounded-2xl border border-amber-400/20 bg-amber-500/5 px-4 py-3 text-xs leading-6 text-amber-100 md:col-span-2">
+                  当前视频配置会按统一视频网关处理，可直接填写网关根地址、`/v1` 或完整 `/v1/videos`。若任务查询仍是标准
+                  `/v1/videos/{'{'}taskId{'}'}`，查询模板可留空；像旧的
+                  `/api/v3/contents/generations/tasks/{'{'}taskId{'}'}` 会被自动清理。
+                </div>
               ) : null}
 
               <label className="space-y-1 md:col-span-2">
